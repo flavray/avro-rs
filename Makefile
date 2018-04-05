@@ -35,6 +35,11 @@ lint:
 clean-lint:
 	find . -type f -name *.rs.bk -delete
 
+.PHONY: clippy
+clippy:
+	cargo +nightly clippy
+
+
 # ALL
 .PHONY: clean
 clean: clean-env clean-hooks clean-lint

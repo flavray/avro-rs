@@ -50,7 +50,7 @@ impl Codec {
             &Codec::Null => (),
             &Codec::Deflate => {
                 let mut encoder = Encoder::new(Vec::new());
-                encoder.write(stream)?;
+                encoder.write_all(stream)?;
                 *stream = encoder.finish().into_result()?;
             },
             #[cfg(feature = "snappy")]
