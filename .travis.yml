@@ -6,4 +6,4 @@ cache: cargo
 script:
   - make release
   - make test
-  - make benchmark
+  - [ "$TRAVIS_RUST_VERSION" = "nightly" ] && make benchmark
