@@ -1,6 +1,7 @@
 language: rust
 rust:
   - stable
+  - nightly
 cache: cargo
 script:
   - make release
