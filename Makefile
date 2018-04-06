@@ -37,7 +37,7 @@ clean-lint:
 
 .PHONY: clippy
 clippy:
-	cargo +nightly clippy
+	cargo +nightly clippy --all-features
 
 
 # ALL

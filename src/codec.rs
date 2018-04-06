@@ -56,7 +56,7 @@ impl Codec {
             #[cfg(feature = "snappy")]
             &Codec::Snappy => {
                 let mut writer = Writer::new(Vec::new());
-                writer.write(stream)?;
+                writer.write_all(stream)?;
                 *stream = writer.into_inner()?; // .into_inner() will also call .flush()
             },
         };
