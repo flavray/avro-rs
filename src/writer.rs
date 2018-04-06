@@ -60,7 +60,7 @@ impl<'a, W: Write> Writer<'a, W> {
 
     pub fn append<T: ToAvro>(&mut self, value: T) -> Result<usize, Error> {
         if !self.has_header {
-            let header = header(self.schema, self.codec);
+            let header = header(self.schema, self.codec, self.marker.as_ref());
             self.append_bytes(header.as_ref())?;
             self.has_header = true;
         }
@@ -166,7 +166,7 @@ impl<'a> SingleWriter<'a> {
     pub fn with_codec(schema: &'a Schema, codec: Codec) -> SingleWriter<'a> {
         Self {
             schema,
-            header: header(schema, codec),
+            header: header(schema, codec, SINGLE_WRITER_MARKER),
             buffer: Vec::with_capacity(SYNC_INTERVAL),
             codec,
         }
@@ -199,7 +199,7 @@ impl<'a> SingleWriter<'a> {
     }
 }
 
-fn header(schema: &Schema, codec: Codec) -> Vec<u8> {
+fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Vec<u8> {
     let schema_bytes = serde_json::to_string(schema).unwrap().into_bytes();
 
     let mut metadata = HashMap::with_capacity(2);
@@ -209,7 +209,7 @@ fn header(schema: &Schema, codec: Codec) -> Vec<u8> {
     let mut header = Vec::new();
     header.extend_from_slice(AVRO_OBJECT_HEADER);
     encode(metadata.avro(), &mut header);
-    header.extend_from_slice(SINGLE_WRITER_MARKER);
+    header.extend_from_slice(marker);
 
     header
 }
