@@ -2,4 +2,6 @@
 set -ev
 make release
 make test
-[ "$TRAVIS_RUST_VERSION" = "nightly" ] && make benchmark
+if [ "$TRAVIS_RUST_VERSION" = "nightly" ]; then
+    make benchmark
+fi
