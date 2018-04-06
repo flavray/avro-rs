@@ -51,7 +51,7 @@ test:
 
 .PHONY: benchmark
 benchmark:
-	cargo +nightly bench --features "benchmark"
+	cargo +nightly bench
 
 
 # DOCS
