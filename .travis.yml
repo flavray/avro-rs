@@ -3,7 +3,4 @@ rust:
   - stable
   - nightly
 cache: cargo
-script:
-  - make release
-  - make test
-  - [ "$TRAVIS_RUST_VERSION" = "nightly" ] && make benchmark
+script: ./scripts/travis-test.sh
