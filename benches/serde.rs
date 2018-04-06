@@ -243,5 +243,5 @@ fn bench_big_schema_read_100_record(b: &mut test::Bencher) {
 
 #[bench]
 fn bench_big_schema_read_10000_record(b: &mut test::Bencher) {
-    bench_read(b, &make_big_record, 9999);
+    bench_read(b, &make_big_record, 10000);
 }
