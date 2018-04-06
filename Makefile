@@ -6,7 +6,7 @@ HOOKS := .git/hooks/pre-commit
 $(VENV): .requirements-precommit.txt
 	rm -rf $(VENV)
 	virtualenv -p python3.6 $(VENV)
-	$(VENV)/bin/pip install -i https://pypi.yelpcorp.com/simple/ -r .requirements-precommit.txt
+	$(VENV)/bin/pip install -r .requirements-precommit.txt
 
 .PHONY: env
 env: $(VENV)
