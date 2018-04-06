@@ -1,0 +1,7 @@
+language: rust
+rust:
+  - stable
+script:
+  - make release
+  - make test
+  - make bench
