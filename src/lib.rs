@@ -48,6 +48,8 @@
 //!
 //!     writer.append_ser(test).unwrap();
 //!
+//!     writer.flush().unwrap();
+//!
 //!     let input = writer.into_inner();
 //!     let reader = Reader::with_schema(&schema, &input[..]);
 //!
@@ -83,9 +85,62 @@ pub use de::from_value;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use reader::Reader;
+    use schema::Schema;
+    use types::{Record, Value};
+    use writer::Writer;
 
+    //TODO: move where it fits better
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_enum_default() {
+        let writer_raw_schema = r#"
+            {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                    {"name": "a", "type": "long", "default": 42},
+                    {"name": "b", "type": "string"}
+                ]
+            }
+        "#;
+        let reader_raw_schema = r#"
+            {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                    {"name": "a", "type": "long", "default": 42},
+                    {"name": "b", "type": "string"},
+                    {
+                        "name": "c",
+                        "type": {
+                            "type": "enum",
+                            "name": "suit",
+                            "symbols": ["diamonds", "spades", "clubs", "hearts"]
+                        },
+                        "default": "spades"
+                    }
+                ]
+            }
+        "#;
+        let writer_schema = Schema::parse_str(writer_raw_schema).unwrap();
+        let reader_schema = Schema::parse_str(reader_raw_schema).unwrap();
+        let mut writer = Writer::with_codec(&writer_schema, Vec::new(), Codec::Null);
+        let mut record = Record::new(writer.schema()).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+        writer.append(record).unwrap();
+        writer.flush().unwrap();
+        let input = writer.into_inner();
+        let mut reader = Reader::with_schema(&reader_schema, &input[..]);
+        assert_eq!(
+            reader.next(),
+            Some(Value::Record(vec![
+                ("a".to_string(), Value::Long(27)),
+                ("b".to_string(), Value::String("foo".to_string())),
+                ("c".to_string(), Value::Enum(1)),
+            ]))
+        );
+        assert_eq!(reader.next(), None);
     }
 }

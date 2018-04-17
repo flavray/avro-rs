@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::Rc;
-use std::str::{FromStr, from_utf8};
+use std::str::{from_utf8, FromStr};
 
 use failure::{err_msg, Error};
 use serde_json::from_slice;
 
-use Codec;
 use decode::decode;
 use schema::Schema;
 use types::Value;
+use Codec;
 
 pub struct Reader<'a, R> {
     reader: R,
@@ -154,7 +154,7 @@ impl<'a, R: Read> Iterator for Reader<'a, R> {
         if self.items.len() == 0 {
             if let Ok(_) = self.read_block() {
                 return self.next()
-            }
+            };
         }
 
         self.items.pop_front()

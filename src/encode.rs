@@ -41,10 +41,8 @@ pub fn encode(value: Value, buffer: &mut Vec<u8>) {
             }
             buffer.push(0u8);
         },
-        Value::Record(fields) => {
-            for (_, value) in fields.into_iter() {
-                encode(value, buffer);
-            }
+        Value::Record(fields) => for (_, value) in fields.into_iter() {
+            encode(value, buffer);
         },
     }
 }
