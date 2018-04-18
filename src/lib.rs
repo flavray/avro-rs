@@ -54,7 +54,7 @@
 //!     let reader = Reader::with_schema(&schema, &input[..]);
 //!
 //!     for record in reader {
-//!         println!("{:?}", from_value::<Test>(&record));
+//!         println!("{:?}", from_value::<Test>(&record.unwrap()));
 //!     }
 //! }
 //! ```
@@ -134,14 +134,14 @@ mod tests {
         let input = writer.into_inner();
         let mut reader = Reader::with_schema(&reader_schema, &input[..]);
         assert_eq!(
-            reader.next(),
-            Some(Value::Record(vec![
+            reader.next().unwrap().unwrap(),
+            Value::Record(vec![
                 ("a".to_string(), Value::Long(27)),
                 ("b".to_string(), Value::String("foo".to_string())),
                 ("c".to_string(), Value::Enum(1)),
-            ]))
+            ])
         );
-        assert_eq!(reader.next(), None);
+        assert!(reader.next().is_none());
     }
 
     //TODO: move where it fits better
@@ -177,14 +177,14 @@ mod tests {
         let input = writer.into_inner();
         let mut reader = Reader::with_schema(&schema, &input[..]);
         assert_eq!(
-            reader.next(),
-            Some(Value::Record(vec![
+            reader.next().unwrap().unwrap(),
+            Value::Record(vec![
                 ("a".to_string(), Value::Long(27)),
                 ("b".to_string(), Value::String("foo".to_string())),
                 ("c".to_string(), Value::Enum(2)),
-            ]))
+            ])
         );
-        assert_eq!(reader.next(), None);
+        assert!(reader.next().is_none());
     }
 
     //TODO: move where it fits better
@@ -239,6 +239,7 @@ mod tests {
         writer.flush().unwrap();
         let input = writer.into_inner();
         let mut reader = Reader::with_schema(&reader_schema, &input[..]);
-        assert_eq!(reader.next(), None);
+        assert!(reader.next().unwrap().is_err());
+        assert!(reader.next().is_none());
     }
 }
