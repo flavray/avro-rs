@@ -70,7 +70,7 @@ impl<'a, W: Write> Writer<'a, W> {
             return Err(err_msg("value does not match schema"))
         }
 
-        encode(avro, &mut self.buffer);
+        encode(avro.resolve(self.schema)?, &mut self.buffer);
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
