@@ -138,7 +138,7 @@ mod tests {
             Value::Record(vec![
                 ("a".to_string(), Value::Long(27)),
                 ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(1)),
+                ("c".to_string(), Value::Enum(1, "spades".to_string())),
             ])
         );
         assert!(reader.next().is_none());
@@ -181,7 +181,7 @@ mod tests {
             Value::Record(vec![
                 ("a".to_string(), Value::Long(27)),
                 ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(2)),
+                ("c".to_string(), Value::Enum(2, "clubs".to_string())),
             ])
         );
         assert!(reader.next().is_none());
@@ -241,5 +241,47 @@ mod tests {
         let mut reader = Reader::with_schema(&reader_schema, &input[..]);
         assert!(reader.next().unwrap().is_err());
         assert!(reader.next().is_none());
+    }
+
+    //TODO: move where it fits better
+    #[test]
+    fn test_enum_no_reader_schema() {
+        let writer_raw_schema = r#"
+            {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                    {"name": "a", "type": "long", "default": 42},
+                    {"name": "b", "type": "string"},
+                    {
+                        "name": "c",
+                        "type": {
+                            "type": "enum",
+                            "name": "suit",
+                            "symbols": ["diamonds", "spades", "clubs", "hearts"]
+                        },
+                        "default": "spades"
+                    }
+                ]
+            }
+        "#;
+        let writer_schema = Schema::parse_str(writer_raw_schema).unwrap();
+        let mut writer = Writer::with_codec(&writer_schema, Vec::new(), Codec::Null);
+        let mut record = Record::new(writer.schema()).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+        record.put("c", "clubs");
+        writer.append(record).unwrap();
+        writer.flush().unwrap();
+        let input = writer.into_inner();
+        let mut reader = Reader::new(&input[..]);
+        assert_eq!(
+            reader.next().unwrap().unwrap(),
+            Value::Record(vec![
+                ("a".to_string(), Value::Long(27)),
+                ("b".to_string(), Value::String("foo".to_string())),
+                ("c".to_string(), Value::Enum(2, "clubs".to_string())),
+            ])
+        );
     }
 }

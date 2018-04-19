@@ -17,7 +17,7 @@ pub enum Value {
     Bytes(Vec<u8>),
     String(String),
     Fixed(usize, Vec<u8>),
-    Enum(i32),
+    Enum(i32, String),
     Union(Option<Box<Value>>),
     Array(Vec<Value>),
     Map(HashMap<String, Value>),
@@ -209,6 +209,9 @@ impl Value {
             (&Value::String(_), &Schema::String) => true,
             (&Value::Fixed(n, _), &Schema::Fixed { size, .. }) => n == size,
             (&Value::String(ref s), &Schema::Enum { ref symbols, .. }) => symbols.contains(s),
+            (&Value::Enum(i, ref s), &Schema::Enum { ref symbols, .. }) => {
+                i > 0 && i < symbols.len() as i32 && symbols.contains(s)
+            },
             (&Value::Union(None), &Schema::Union(_)) => true,
             (&Value::Union(Some(ref value)), &Schema::Union(ref inner)) => value.validate(inner),
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
@@ -329,9 +332,20 @@ impl Value {
     }
 
     fn resolve_enum(self, symbols: &Vec<String>) -> Result<Self, Error> {
+        let validate_symbol = |symbol: String, symbols: &Vec<String>| {
+            if let Some(index) = symbols.iter().position(|ref item| item == &&symbol) {
+                Ok(Value::Enum(index as i32, symbol))
+            } else {
+                Err(err_msg(format!(
+                    "Enum default {} is not among allowed symbols {:?}",
+                    symbol, symbols,
+                )))
+            }
+        };
+
         match self {
-            Value::Enum(i) => if i < symbols.len() as i32 {
-                Ok(Value::Enum(i))
+            Value::Enum(i, s) => if i > 0 && i < symbols.len() as i32 {
+                validate_symbol(s, symbols)
             } else {
                 Err(err_msg(format!(
                     "Enum value {} is out of bound {}",
@@ -339,15 +353,7 @@ impl Value {
                     symbols.len() as i32
                 )))
             },
-            Value::String(ref s) => if let Some(i) = symbols.iter().position(|ref item| item == &s)
-            {
-                Ok(Value::Enum(i as i32))
-            } else {
-                Err(err_msg(format!(
-                    "Enum default {} is not among allowed symbols {:?}",
-                    s, symbols,
-                )))
-            },
+            Value::String(s) => validate_symbol(s, symbols),
             other => Err(err_msg(format!(
                 "Enum({:?}) expected, got {:?}",
                 symbols, other

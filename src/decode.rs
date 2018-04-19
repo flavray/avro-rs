@@ -130,7 +130,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             if let Value::Int(index) = decode(&Schema::Int, reader)? {
                 if index >= 0 && (index as usize) <= symbols.len() {
                     let symbol = symbols[index as usize].clone();
-                    Ok(Value::String(symbol))
+                    Ok(Value::Enum(index, symbol))
                 } else {
                     Err(err_msg("enum symbol index out of bounds"))
                 }
