@@ -70,11 +70,11 @@ extern crate snap;
 
 mod codec;
 mod de;
+mod decode;
+mod encode;
 mod ser;
 mod util;
 
-pub mod decode;
-pub mod encode;
 pub mod reader;
 pub mod schema;
 pub mod types;

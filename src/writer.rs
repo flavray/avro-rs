@@ -6,11 +6,11 @@ use rand::random;
 use serde::Serialize;
 use serde_json;
 
-use Codec;
-use encode::{encode, encode_raw};
+use encode::{encode, encode_to_vec};
 use schema::Schema;
 use ser::Serializer;
 use types::{ToAvro, Value};
+use Codec;
 
 pub const SYNC_SIZE: usize = 16;
 pub const SYNC_INTERVAL: usize = 1000 * SYNC_SIZE; // TODO: parametrize in Writer
@@ -92,7 +92,7 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     fn append_raw(&mut self, value: Value) -> Result<usize, Error> {
-        self.append_bytes(encode_raw(value).as_ref())
+        self.append_bytes(encode_to_vec(value).as_ref())
     }
 
     fn append_bytes(&mut self, bytes: &[u8]) -> Result<usize, Error> {
@@ -188,8 +188,8 @@ impl<'a> SingleWriter<'a> {
         let num_bytes = self.buffer.len();
 
         writer.write_all(self.header.as_slice())?;
-        writer.write_all(encode_raw(1i64.avro()).as_ref())?;
-        writer.write_all(encode_raw(num_bytes.avro()).as_ref())?;
+        writer.write_all(encode_to_vec(1i64.avro()).as_ref())?;
+        writer.write_all(encode_to_vec(num_bytes.avro()).as_ref())?;
         writer.write_all(self.buffer.as_ref())?;
         writer.write_all(SINGLE_WRITER_MARKER)?;
 
