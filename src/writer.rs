@@ -1,3 +1,4 @@
+//! Logic handling writing in Avro format at user level.
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -12,11 +13,12 @@ use ser::Serializer;
 use types::{ToAvro, Value};
 use Codec;
 
-pub const SYNC_SIZE: usize = 16;
-pub const SYNC_INTERVAL: usize = 1000 * SYNC_SIZE; // TODO: parametrize in Writer
+const SYNC_SIZE: usize = 16;
+const SYNC_INTERVAL: usize = 1000 * SYNC_SIZE; // TODO: parametrize in Writer
 
 const AVRO_OBJECT_HEADER: &'static [u8] = &[b'O', b'b', b'j', 1u8];
 
+/// Main interface for writing Avro formatted values.
 pub struct Writer<'a, W> {
     schema: &'a Schema,
     serializer: Serializer,
@@ -29,10 +31,15 @@ pub struct Writer<'a, W> {
 }
 
 impl<'a, W: Write> Writer<'a, W> {
+    /// Creates a `Writer` given a `Schema` and something implementing the `Write` trait to write
+    /// to.
+    /// No compression `Codec` will be used.
     pub fn new(schema: &'a Schema, writer: W) -> Writer<'a, W> {
         Self::with_codec(schema, writer, Codec::Null)
     }
 
+    /// Creates a `Writer` with a specific `Codec` given a `Schema` and something implementing the
+    /// `Write` trait to write to.
     pub fn with_codec(schema: &'a Schema, writer: W, codec: Codec) -> Writer<'a, W> {
         let mut marker = Vec::with_capacity(16);
         for _ in 0..16 {
@@ -51,13 +58,22 @@ impl<'a, W: Write> Writer<'a, W> {
         }
     }
 
+    /// Get a reference to the `Schema` associated to a `Writer`.
     pub fn schema(&self) -> &'a Schema {
         self.schema
     }
 
+    /// Append a compatible value (implementing the `ToAvro` trait) to a `Writer`, also performing
+    /// schema validation.
+    ///
+    /// Return the number of bytes written (it might be 0, see below).
+    ///
+    /// **NOTE** This function is not guaranteed to perform any actual write, since it relies on
+    /// internal buffering for performance reasons. If you want to be sure the value has been
+    /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn append<T: ToAvro>(&mut self, value: T) -> Result<usize, Error> {
         if !self.has_header {
-            let header = header(self.schema, self.codec, self.marker.as_ref());
+            let header = header(self.schema, self.codec, self.marker.as_ref())?;
             self.append_bytes(header.as_ref())?;
             self.has_header = true;
         }
@@ -73,25 +89,45 @@ impl<'a, W: Write> Writer<'a, W> {
         Ok(0) // Technically, no bytes have been written
     }
 
+    /// Append anything implementing the `Serialize` to a `Writer` for
+    /// [`serde`](https://docs.serde.rs/serde/index.html) compatibility, also performing schema
+    /// validation.
+    ///
+    /// Return the number of bytes written.
+    ///
+    /// **NOTE** This function is not guaranteed to perform any actual write, since it relies on
+    /// internal buffering for performance reasons. If you want to be sure the value has been
+    /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn append_ser<S: Serialize>(&mut self, value: S) -> Result<usize, Error> {
         let avro_value = value.serialize(&mut self.serializer)?;
         self.append(avro_value)
     }
 
+    /// Generate and append synchronization marker to the payload.
     fn append_marker(&mut self) -> Result<usize, Error> {
         // using .writer.write directly to avoid mutable borrow of self
         // with ref borrowing of self.marker
         Ok(self.writer.write(&self.marker)?)
     }
 
+    /// Append a raw Avro Value to the payload avoiding to encode it again.
     fn append_raw(&mut self, value: Value) -> Result<usize, Error> {
         self.append_bytes(encode_to_vec(value).as_ref())
     }
 
+    /// Append pure bytes to the payload.
     fn append_bytes(&mut self, bytes: &[u8]) -> Result<usize, Error> {
         Ok(self.writer.write(bytes)?)
     }
 
+    /// Extend a `Writer` with an `Iterator` of compatible values (implementing the `ToAvro`
+    /// trait).
+    ///
+    /// Return the number of bytes written.
+    ///
+    /// **NOTE** This function is not guaranteed to perform any actual write, since it relies on
+    /// internal buffering for performance reasons. If you want to be sure the value has been
+    /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn extend<I, T: ToAvro>(&mut self, values: I) -> Result<usize, Error>
     where
         I: Iterator<Item = T>,
@@ -119,6 +155,10 @@ impl<'a, W: Write> Writer<'a, W> {
         Ok(num_bytes)
     }
 
+    /// Flush the content appended to a `Writer`. Call this function to make sure all the content
+    /// has been written before releasing the `Writer`.
+    ///
+    /// Return the number of bytes written.
     pub fn flush(&mut self) -> Result<usize, Error> {
         if self.num_values == 0 {
             return Ok(0)
@@ -139,13 +179,18 @@ impl<'a, W: Write> Writer<'a, W> {
         Ok(num_bytes)
     }
 
+    /// Return what the `Writer` is writing to, consuming the `Writer` itself.
+    ///
+    /// **NOTE** This function doesn't guarantee that everything gets written before consuming the
+    /// buffer. Please call [`flush`](struct.Writer.html#method.flush) before.
     pub fn into_inner(self) -> W {
         self.writer
     }
 }
 
-fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Vec<u8> {
-    let schema_bytes = serde_json::to_string(schema).unwrap().into_bytes();
+/// Create an Avro header given a schema, a codec and a sync marker.
+fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Result<Vec<u8>, Error> {
+    let schema_bytes = serde_json::to_string(schema)?.into_bytes();
 
     let mut metadata = HashMap::with_capacity(2);
     metadata.insert("avro.schema", Value::Bytes(schema_bytes));
@@ -156,9 +201,14 @@ fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Vec<u8> {
     encode(metadata.avro(), &mut header);
     header.extend_from_slice(marker);
 
-    header
+    Ok(header)
 }
 
+/// Encode a compatible value (implementing the `ToAvro` trait) into Avro format, also performing
+/// schema validation.
+///
+/// This is an internal function which gets the bytes buffer where to write as parameter instead of
+/// creating a new one like `to_avro_datum`.
 fn write_avro_datum<T: ToAvro>(
     schema: &Schema,
     value: T,
@@ -172,6 +222,12 @@ fn write_avro_datum<T: ToAvro>(
     Ok(encode(avro.resolve(schema)?, buffer))
 }
 
+/// Encode a compatible value (implementing the `ToAvro` trait) into Avro format, also
+/// performing schema validation.
+///
+/// **NOTE** This function has a quite small niche of usage and does NOT generate headers and sync
+/// markers; use [`Writer`](struct.Writer.html) to be fully Avro-compatible if you don't know what
+/// you are doing, instead.
 pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Error> {
     let mut buffer = Vec::new();
     write_avro_datum(schema, value, &mut buffer)?;
