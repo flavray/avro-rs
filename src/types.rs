@@ -378,7 +378,7 @@ impl Value {
         }
     }
 
-    fn resolve_enum(self, symbols: &Vec<String>) -> Result<Self, Error> {
+    pub fn resolve_enum(self, symbols: &Vec<String>) -> Result<Self, Error> {
         let validate_symbol = |symbol: String, symbols: &Vec<String>| {
             if let Some(index) = symbols.iter().position(|ref item| item == &&symbol) {
                 Ok(Value::Enum(index as i32, symbol))

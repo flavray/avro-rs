@@ -15,9 +15,6 @@ use Codec;
 pub const SYNC_SIZE: usize = 16;
 pub const SYNC_INTERVAL: usize = 1000 * SYNC_SIZE; // TODO: parametrize in Writer
 
-// When using SingleWriter, generating a random sync marker has no real added value
-pub const SINGLE_WRITER_MARKER: &'static [u8] = &[0u8; 16];
-
 const AVRO_OBJECT_HEADER: &'static [u8] = &[b'O', b'b', b'j', 1u8];
 
 pub struct Writer<'a, W> {
@@ -65,12 +62,8 @@ impl<'a, W: Write> Writer<'a, W> {
             self.has_header = true;
         }
 
-        let avro = value.avro();
-        if !avro.validate(self.schema) {
-            return Err(err_msg("value does not match schema"))
-        }
+        write_avro_datum(self.schema, value, &mut self.buffer)?;
 
-        encode(avro.resolve(self.schema)?, &mut self.buffer);
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
@@ -151,54 +144,6 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 }
 
-pub struct SingleWriter<'a> {
-    schema: &'a Schema,
-    header: Vec<u8>,
-    buffer: Vec<u8>,
-    codec: Codec,
-}
-
-impl<'a> SingleWriter<'a> {
-    pub fn new(schema: &'a Schema) -> SingleWriter<'a> {
-        Self::with_codec(schema, Codec::Null)
-    }
-
-    pub fn with_codec(schema: &'a Schema, codec: Codec) -> SingleWriter<'a> {
-        Self {
-            schema,
-            header: header(schema, codec, SINGLE_WRITER_MARKER),
-            buffer: Vec::with_capacity(SYNC_INTERVAL),
-            codec,
-        }
-    }
-
-    pub fn schema(&self) -> &'a Schema {
-        self.schema
-    }
-
-    pub fn write<W: Write, T: ToAvro>(&mut self, writer: &mut W, value: T) -> Result<(), Error> {
-        let avro = value.avro();
-        if !avro.validate(self.schema) {
-            return Err(err_msg("value does not match schema"))
-        }
-
-        encode(avro, &mut self.buffer);
-        self.codec.compress(&mut self.buffer)?;
-
-        let num_bytes = self.buffer.len();
-
-        writer.write_all(self.header.as_slice())?;
-        writer.write_all(encode_to_vec(1i64.avro()).as_ref())?;
-        writer.write_all(encode_to_vec(num_bytes.avro()).as_ref())?;
-        writer.write_all(self.buffer.as_ref())?;
-        writer.write_all(SINGLE_WRITER_MARKER)?;
-
-        self.buffer.clear();
-
-        Ok(())
-    }
-}
-
 fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Vec<u8> {
     let schema_bytes = serde_json::to_string(schema).unwrap().into_bytes();
 
@@ -212,4 +157,23 @@ fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Vec<u8> {
     header.extend_from_slice(marker);
 
     header
+}
+
+fn write_avro_datum<T: ToAvro>(
+    schema: &Schema,
+    value: T,
+    buffer: &mut Vec<u8>,
+) -> Result<(), Error> {
+    let avro = value.avro();
+    if !avro.validate(schema) {
+        return Err(err_msg("value does not match schema"))
+    }
+    // TODO: this resolve call is super-expensive, try to pass the schema to avro() instead
+    Ok(encode(avro.resolve(schema)?, buffer))
+}
+
+pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Error> {
+    let mut buffer = Vec::new();
+    write_avro_datum(schema, value, &mut buffer)?;
+    Ok(buffer)
 }
