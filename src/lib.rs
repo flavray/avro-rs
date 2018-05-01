@@ -6,7 +6,7 @@
 //!
 //! use avro::Codec;
 //! use avro::from_value;
-//! use avro::reader::Reader;
+//! use avro::Reader;
 //! use avro::schema::Schema;
 //! use avro::types::Record;
 //! use avro::Writer;
@@ -78,16 +78,17 @@ mod codec;
 mod de;
 mod decode;
 mod encode;
+mod reader;
 mod ser;
 mod util;
 mod writer;
 
-pub mod reader;
 pub mod schema;
 pub mod types;
 
 pub use codec::Codec;
 pub use de::from_value;
+pub use reader::Reader;
 pub use writer::{to_avro_datum, Writer};
 
 #[cfg(test)]
