@@ -92,7 +92,7 @@ impl<'a, W: Write> Writer<'a, W> {
         Ok(n)
     }
 
-    /// Append anything implementing the `Serialize` to a `Writer` for
+    /// Append anything implementing the `Serialize` trait to a `Writer` for
     /// [`serde`](https://docs.serde.rs/serde/index.html) compatibility, also performing schema
     /// validation.
     ///
@@ -107,7 +107,7 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     /// Extend a `Writer` with an `Iterator` of compatible values (implementing the `ToAvro`
-    /// trait).
+    /// trait), also performing schema validation.
     ///
     /// Return the number of bytes written.
     ///
@@ -135,6 +135,42 @@ impl<'a, W: Write> Writer<'a, W> {
         let mut num_bytes = 0;
         for value in values {
             num_bytes += self.append(value)?;
+        }
+        num_bytes += self.flush()?;
+
+        Ok(num_bytes)
+    }
+
+    /// Extend a `Writer` with an `Iterator` of anything implementing the `Serialize` trait for
+    /// [`serde`](https://docs.serde.rs/serde/index.html) compatibility, also performing schema
+    /// validation.
+    ///
+    /// Return the number of bytes written.
+    ///
+    /// **NOTE** This function is not guaranteed to perform any actual write, since it relies on
+    /// internal buffering for performance reasons. If you want to be sure the value has been
+    /// written, then call [`flush`](struct.Writer.html#method.flush).
+    pub fn extend_ser<I, T: Serialize>(&mut self, values: I) -> Result<usize, Error>
+    where
+        I: Iterator<Item = T>,
+    {
+        /*
+        https://github.com/rust-lang/rfcs/issues/811 :(
+        let mut stream = values
+            .filter_map(|value| value.serialize(&mut self.serializer).ok())
+            .map(|value| value.encode(self.schema))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| err_msg("value does not match given schema"))?
+            .into_iter()
+            .fold(Vec::new(), |mut acc, stream| {
+                num_values += 1;
+                acc.extend(stream); acc
+            });
+        */
+
+        let mut num_bytes = 0;
+        for value in values {
+            num_bytes += self.append_ser(value)?;
         }
         num_bytes += self.flush()?;
 
@@ -372,7 +408,7 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     struct TestSerdeSerialize {
         a: i64,
         b: String,
@@ -383,12 +419,12 @@ mod tests {
         let schema = Schema::parse_str(SCHEMA).unwrap();
         let mut writer = Writer::new(&schema, Vec::new());
 
-        let test = TestSerdeSerialize {
+        let record = TestSerdeSerialize {
             a: 27,
             b: "foo".to_owned(),
         };
 
-        let n1 = writer.append_ser(test).unwrap();
+        let n1 = writer.append_ser(record).unwrap();
         let n2 = writer.flush().unwrap();
         let result = writer.into_inner();
 
@@ -401,6 +437,59 @@ mod tests {
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
         data.extend(vec![b'f', b'o', b'o'].into_iter());
+
+        // starts with magic
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .take(header.len())
+                .collect::<Vec<u8>>(),
+            header
+        );
+        // ends with data and sync marker
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .rev()
+                .skip(16)
+                .take(data.len())
+                .collect::<Vec<u8>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<u8>>(),
+            data
+        );
+    }
+
+    #[test]
+    fn test_writer_extend_ser() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut writer = Writer::new(&schema, Vec::new());
+
+        let record = TestSerdeSerialize {
+            a: 27,
+            b: "foo".to_owned(),
+        };
+        let record_copy = record.clone();
+        let records = vec![record, record_copy];
+
+        let n1 = writer.extend_ser(records.into_iter()).unwrap();
+        let n2 = writer.flush().unwrap();
+        let result = writer.into_inner();
+
+        assert_eq!(n1 + n2, result.len());
+
+        let mut header = Vec::new();
+        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+
+        let mut data = Vec::new();
+        zig_i64(27, &mut data);
+        zig_i64(3, &mut data);
+        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        let data_copy = data.clone();
+        data.extend(data_copy);
 
         // starts with magic
         assert_eq!(
