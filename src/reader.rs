@@ -1,3 +1,4 @@
+//! Logic handling reading from Avro format at user level.
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read};
 use std::rc::Rc;
@@ -11,6 +12,21 @@ use schema::Schema;
 use types::Value;
 use Codec;
 
+/// Main interface for reading Avro formatted values.
+///
+/// To be used as in iterator:
+///
+/// ```no_run
+/// # use avro::reader::Reader;
+/// # use std::io::Cursor;
+/// # let input = Cursor::new(Vec::<u8>::new());
+/// for value in Reader::new(input) {
+///     match value {
+///         Ok(v) => println!("{:?}", v),
+///         Err(e) => println!("Error: {}", e),
+///     };
+/// }
+/// ```
 pub struct Reader<'a, R> {
     reader: R,
     reader_schema: Option<&'a Schema>,
@@ -18,47 +34,50 @@ pub struct Reader<'a, R> {
     codec: Codec,
     marker: [u8; 16],
     items: VecDeque<Value>,
+    already_read_header: bool,
 }
 
 impl<'a, R: Read> Reader<'a, R> {
+    /// Creates a `Reader` given something implementing the `io::Read` trait to read from.
+    /// No reader `Schema` will be set.
     pub fn new(reader: R) -> Reader<'a, R> {
-        let mut reader = Reader {
+        Reader {
             reader,
             reader_schema: None,
             writer_schema: Schema::Null,
             codec: Codec::Null,
             marker: [0u8; 16],
             items: VecDeque::new(),
-        };
-
-        reader.read_header().unwrap(); // TODO
-
-        reader
+            already_read_header: false,
+        }
     }
 
+    /// Creates a `Reader` given a reader `Schema` and something implementing the `io::Read` trait
+    /// to read from.
     pub fn with_schema(schema: &'a Schema, reader: R) -> Reader<'a, R> {
-        let mut reader = Reader {
+        Reader {
             reader,
             reader_schema: Some(schema),
             writer_schema: Schema::Null,
             codec: Codec::Null,
             marker: [0u8; 16],
             items: VecDeque::new(),
-        };
-
-        reader.read_header().unwrap(); // TODO
-
-        reader
+            already_read_header: false,
+        }
     }
 
+    /// Get a reference to the writer `Schema`.
     pub fn writer_schema(&self) -> &Schema {
         &self.writer_schema
     }
 
+    /// Get a reference to the optional reader `Schema`.
     pub fn reader_schema(&self) -> Option<&Schema> {
         self.reader_schema
     }
 
+    /// Try to read the header and to set the writer `Schema`, the `Codec` and the marker based on
+    /// its content.
     fn read_header(&mut self) -> Result<(), Error> {
         let meta_schema = Schema::Map(Rc::new(Schema::Bytes));
 
@@ -110,7 +129,16 @@ impl<'a, R: Read> Reader<'a, R> {
         Ok(())
     }
 
+    /// Try to read a data block, also performing schema resolution for the objects contained in
+    /// the block. The objects are stored in an internal buffer to the `Reader`.
+    ///
+    /// It will also read the header in case it hasn't been read yet.
     fn read_block(&mut self) -> Result<(), Error> {
+        if !self.already_read_header {
+            self.read_header()?;
+            self.already_read_header = true;
+        }
+
         match decode(&Schema::Long, &mut self.reader) {
             Ok(block) => {
                 if let Value::Long(block_len) = block {
