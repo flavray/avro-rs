@@ -165,7 +165,7 @@ impl<S: Serialize> ToAvro for S {
 }
 */
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Record {
     pub rschema: Rc<RecordSchema>,
     pub fields: Vec<(String, Value)>,
@@ -378,7 +378,7 @@ impl Value {
         }
     }
 
-    pub fn resolve_enum(self, symbols: &Vec<String>) -> Result<Self, Error> {
+    fn resolve_enum(self, symbols: &Vec<String>) -> Result<Self, Error> {
         let validate_symbol = |symbol: String, symbols: &Vec<String>| {
             if let Some(index) = symbols.iter().position(|ref item| item == &&symbol) {
                 Ok(Value::Enum(index as i32, symbol))

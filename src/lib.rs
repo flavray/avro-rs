@@ -64,9 +64,15 @@ extern crate libflate;
 extern crate rand;
 #[macro_use]
 extern crate serde;
+
 extern crate serde_json;
 #[cfg(feature = "snappy")]
 extern crate snap;
+
+// test dependency
+#[cfg(test)]
+#[macro_use]
+extern crate serde_derive;
 
 mod codec;
 mod de;

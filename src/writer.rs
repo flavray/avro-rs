@@ -31,7 +31,7 @@ pub struct Writer<'a, W> {
 }
 
 impl<'a, W: Write> Writer<'a, W> {
-    /// Creates a `Writer` given a `Schema` and something implementing the `Write` trait to write
+    /// Creates a `Writer` given a `Schema` and something implementing the `io::Write` trait to write
     /// to.
     /// No compression `Codec` will be used.
     pub fn new(schema: &'a Schema, writer: W) -> Writer<'a, W> {
@@ -39,7 +39,7 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     /// Creates a `Writer` with a specific `Codec` given a `Schema` and something implementing the
-    /// `Write` trait to write to.
+    /// `io::Write` trait to write to.
     pub fn with_codec(schema: &'a Schema, writer: W, codec: Codec) -> Writer<'a, W> {
         let mut marker = Vec::with_capacity(16);
         for _ in 0..16 {
@@ -72,21 +72,24 @@ impl<'a, W: Write> Writer<'a, W> {
     /// internal buffering for performance reasons. If you want to be sure the value has been
     /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn append<T: ToAvro>(&mut self, value: T) -> Result<usize, Error> {
-        if !self.has_header {
-            let header = header(self.schema, self.codec, self.marker.as_ref())?;
-            self.append_bytes(header.as_ref())?;
+        let n = if !self.has_header {
+            let header = self.header()?;
+            let n = self.append_bytes(header.as_ref())?;
             self.has_header = true;
-        }
+            n
+        } else {
+            0
+        };
 
         write_avro_datum(self.schema, value, &mut self.buffer)?;
 
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush()
+            return self.flush().map(|b| b + n)
         }
 
-        Ok(0) // Technically, no bytes have been written
+        Ok(n)
     }
 
     /// Append anything implementing the `Serialize` to a `Writer` for
@@ -101,23 +104,6 @@ impl<'a, W: Write> Writer<'a, W> {
     pub fn append_ser<S: Serialize>(&mut self, value: S) -> Result<usize, Error> {
         let avro_value = value.serialize(&mut self.serializer)?;
         self.append(avro_value)
-    }
-
-    /// Generate and append synchronization marker to the payload.
-    fn append_marker(&mut self) -> Result<usize, Error> {
-        // using .writer.write directly to avoid mutable borrow of self
-        // with ref borrowing of self.marker
-        Ok(self.writer.write(&self.marker)?)
-    }
-
-    /// Append a raw Avro Value to the payload avoiding to encode it again.
-    fn append_raw(&mut self, value: Value) -> Result<usize, Error> {
-        self.append_bytes(encode_to_vec(value).as_ref())
-    }
-
-    /// Append pure bytes to the payload.
-    fn append_bytes(&mut self, bytes: &[u8]) -> Result<usize, Error> {
-        Ok(self.writer.write(bytes)?)
     }
 
     /// Extend a `Writer` with an `Iterator` of compatible values (implementing the `ToAvro`
@@ -150,7 +136,7 @@ impl<'a, W: Write> Writer<'a, W> {
         for value in values {
             num_bytes += self.append(value)?;
         }
-        self.flush()?;
+        num_bytes += self.flush()?;
 
         Ok(num_bytes)
     }
@@ -186,22 +172,39 @@ impl<'a, W: Write> Writer<'a, W> {
     pub fn into_inner(self) -> W {
         self.writer
     }
-}
 
-/// Create an Avro header given a schema, a codec and a sync marker.
-fn header(schema: &Schema, codec: Codec, marker: &[u8]) -> Result<Vec<u8>, Error> {
-    let schema_bytes = serde_json::to_string(schema)?.into_bytes();
+    /// Generate and append synchronization marker to the payload.
+    fn append_marker(&mut self) -> Result<usize, Error> {
+        // using .writer.write directly to avoid mutable borrow of self
+        // with ref borrowing of self.marker
+        Ok(self.writer.write(&self.marker)?)
+    }
 
-    let mut metadata = HashMap::with_capacity(2);
-    metadata.insert("avro.schema", Value::Bytes(schema_bytes));
-    metadata.insert("avro.codec", codec.avro());
+    /// Append a raw Avro Value to the payload avoiding to encode it again.
+    fn append_raw(&mut self, value: Value) -> Result<usize, Error> {
+        self.append_bytes(encode_to_vec(value).as_ref())
+    }
 
-    let mut header = Vec::new();
-    header.extend_from_slice(AVRO_OBJECT_HEADER);
-    encode(metadata.avro(), &mut header);
-    header.extend_from_slice(marker);
+    /// Append pure bytes to the payload.
+    fn append_bytes(&mut self, bytes: &[u8]) -> Result<usize, Error> {
+        Ok(self.writer.write(bytes)?)
+    }
 
-    Ok(header)
+    /// Create an Avro header based on schema, codec and sync marker.
+    fn header(&self) -> Result<Vec<u8>, Error> {
+        let schema_bytes = serde_json::to_string(self.schema)?.into_bytes();
+
+        let mut metadata = HashMap::with_capacity(2);
+        metadata.insert("avro.schema", Value::Bytes(schema_bytes));
+        metadata.insert("avro.codec", self.codec.avro());
+
+        let mut header = Vec::new();
+        header.extend_from_slice(AVRO_OBJECT_HEADER);
+        encode(metadata.avro(), &mut header);
+        header.extend_from_slice(&self.marker);
+
+        Ok(header)
+    }
 }
 
 /// Encode a compatible value (implementing the `ToAvro` trait) into Avro format, also performing
@@ -232,4 +235,247 @@ pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Er
     let mut buffer = Vec::new();
     write_avro_datum(schema, value, &mut buffer)?;
     Ok(buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use types::Record;
+    use util::zig_i64;
+
+    static SCHEMA: &'static str = r#"
+            {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                    {"name": "a", "type": "long", "default": 42},
+                    {"name": "b", "type": "string"}
+                ]
+            }
+        "#;
+
+    #[test]
+    fn test_to_avro_datum() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut record = Record::new(&schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+
+        let mut expected = Vec::new();
+        zig_i64(27, &mut expected);
+        zig_i64(3, &mut expected);
+        expected.extend(vec![b'f', b'o', b'o'].into_iter());
+
+        assert_eq!(to_avro_datum(&schema, record).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_writer_append() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut writer = Writer::new(&schema, Vec::new());
+
+        let mut record = Record::new(&schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+
+        let n1 = writer.append(record.clone()).unwrap();
+        let n2 = writer.append(record.clone()).unwrap();
+        let n3 = writer.flush().unwrap();
+        let result = writer.into_inner();
+
+        assert_eq!(n1 + n2 + n3, result.len());
+
+        let mut header = Vec::new();
+        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+
+        let mut data = Vec::new();
+        zig_i64(27, &mut data);
+        zig_i64(3, &mut data);
+        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        let data_copy = data.clone();
+        data.extend(data_copy);
+
+        // starts with magic
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .take(header.len())
+                .collect::<Vec<u8>>(),
+            header
+        );
+        // ends with data and sync marker
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .rev()
+                .skip(16)
+                .take(data.len())
+                .collect::<Vec<u8>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<u8>>(),
+            data
+        );
+    }
+
+    #[test]
+    fn test_writer_extend() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut writer = Writer::new(&schema, Vec::new());
+
+        let mut record = Record::new(&schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+        let record_copy = record.clone();
+        let records = vec![record, record_copy];
+
+        let n1 = writer.extend(records.into_iter()).unwrap();
+        let n2 = writer.flush().unwrap();
+        let result = writer.into_inner();
+
+        assert_eq!(n1 + n2, result.len());
+
+        let mut header = Vec::new();
+        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+
+        let mut data = Vec::new();
+        zig_i64(27, &mut data);
+        zig_i64(3, &mut data);
+        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        let data_copy = data.clone();
+        data.extend(data_copy);
+
+        // starts with magic
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .take(header.len())
+                .collect::<Vec<u8>>(),
+            header
+        );
+        // ends with data and sync marker
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .rev()
+                .skip(16)
+                .take(data.len())
+                .collect::<Vec<u8>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<u8>>(),
+            data
+        );
+    }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    struct TestSerdeSerialize {
+        a: i64,
+        b: String,
+    }
+
+    #[test]
+    fn test_writer_append_ser() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut writer = Writer::new(&schema, Vec::new());
+
+        let test = TestSerdeSerialize {
+            a: 27,
+            b: "foo".to_owned(),
+        };
+
+        let n1 = writer.append_ser(test).unwrap();
+        let n2 = writer.flush().unwrap();
+        let result = writer.into_inner();
+
+        assert_eq!(n1 + n2, result.len());
+
+        let mut header = Vec::new();
+        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+
+        let mut data = Vec::new();
+        zig_i64(27, &mut data);
+        zig_i64(3, &mut data);
+        data.extend(vec![b'f', b'o', b'o'].into_iter());
+
+        // starts with magic
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .take(header.len())
+                .collect::<Vec<u8>>(),
+            header
+        );
+        // ends with data and sync marker
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .rev()
+                .skip(16)
+                .take(data.len())
+                .collect::<Vec<u8>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<u8>>(),
+            data
+        );
+    }
+
+    #[test]
+    fn test_writer_with_codec() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Deflate);
+
+        let mut record = Record::new(&schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+
+        let n1 = writer.append(record.clone()).unwrap();
+        let n2 = writer.append(record.clone()).unwrap();
+        let n3 = writer.flush().unwrap();
+        let result = writer.into_inner();
+
+        assert_eq!(n1 + n2 + n3, result.len());
+
+        let mut header = Vec::new();
+        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+
+        let mut data = Vec::new();
+        zig_i64(27, &mut data);
+        zig_i64(3, &mut data);
+        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        let data_copy = data.clone();
+        data.extend(data_copy);
+        Codec::Deflate.compress(&mut data).unwrap();
+
+        // starts with magic
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .take(header.len())
+                .collect::<Vec<u8>>(),
+            header
+        );
+        // ends with data and sync marker
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .rev()
+                .skip(16)
+                .take(data.len())
+                .collect::<Vec<u8>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<u8>>(),
+            data
+        );
+    }
 }
