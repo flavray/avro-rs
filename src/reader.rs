@@ -14,7 +14,7 @@ use Codec;
 
 /// Main interface for reading Avro formatted values.
 ///
-/// To be used as in iterator:
+/// To be used as an iterator:
 ///
 /// ```no_run
 /// # use avro::Reader;
@@ -158,13 +158,11 @@ impl<'a, R: Read> Reader<'a, R> {
                         self.items.reserve_exact(block_len as usize);
 
                         for _ in 0..block_len {
-                            let item = decode(&self.writer_schema, &mut &bytes[..])?;
-
-                            let item = match self.reader_schema {
-                                Some(ref schema) => item.resolve(schema)?,
-                                None => item,
-                            };
-
+                            let item = from_avro_datum(
+                                &self.writer_schema,
+                                &mut &bytes[..],
+                                self.reader_schema,
+                            )?;
                             self.items.push_back(item)
                         }
 
@@ -201,9 +199,30 @@ impl<'a, R: Read> Iterator for Reader<'a, R> {
     }
 }
 
+/// Decode a `Value` encoded in Avro format given its `Schema` and anything implementing `io::Read`
+/// to read from.
+///
+/// In case a reader `Schema` is provided, schema resolution will also be performed.
+///
+/// **NOTE** This function has a quite small niche of usage and does NOT take care of reading the
+/// header and consecutive data blocks; use [`Reader`](struct.Reader.html) if you don't know what
+/// you are doing, instead.
+pub fn from_avro_datum<R: Read>(
+    writer_schema: &Schema,
+    reader: &mut R,
+    reader_schema: Option<&Schema>,
+) -> Result<Value, Error> {
+    let value = decode(writer_schema, reader)?;
+    match reader_schema {
+        Some(ref schema) => value.resolve(schema),
+        None => Ok(value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use types::{Record, ToAvro};
     use Reader;
 
@@ -233,6 +252,22 @@ mod tests {
         6u8, 102u8, 111u8, 111u8, 54u8, 6u8, 102u8, 111u8, 111u8, 94u8, 61u8, 54u8, 221u8, 190u8,
         207u8, 108u8, 180u8, 158u8, 57u8, 114u8, 40u8, 173u8, 199u8, 228u8, 239,
     ];
+
+    #[test]
+    fn test_from_avro_datum() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut encoded: &'static [u8] = &[54, 6, 102, 111, 111];
+
+        let mut record = Record::new(&schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+        let expected = record.avro();
+
+        assert_eq!(
+            from_avro_datum(&schema, &mut encoded, None).unwrap(),
+            expected
+        );
+    }
 
     #[test]
     fn test_reader_iterator() {
@@ -269,6 +304,25 @@ mod tests {
             .rev()
             .collect::<Vec<u8>>();
         let reader = Reader::with_schema(&schema, &invalid[..]).unwrap();
+        for value in reader {
+            assert!(value.is_err());
+        }
+    }
+
+    #[test]
+    fn test_reader_empty_buffer() {
+        let empty = Cursor::new(Vec::new());
+        Reader::new(empty).is_err();
+    }
+
+    #[test]
+    fn test_reader_only_header() {
+        let invalid = ENCODED
+            .to_owned()
+            .into_iter()
+            .take(165)
+            .collect::<Vec<u8>>();
+        let reader = Reader::new(&invalid[..]).unwrap();
         for value in reader {
             assert!(value.is_err());
         }
