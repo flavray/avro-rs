@@ -20,7 +20,7 @@ use Codec;
 /// # use avro::Reader;
 /// # use std::io::Cursor;
 /// # let input = Cursor::new(Vec::<u8>::new());
-/// for value in Reader::new(input) {
+/// for value in Reader::new(input).unwrap() {
 ///     match value {
 ///         Ok(v) => println!("{:?}", v),
 ///         Err(e) => println!("Error: {}", e),
@@ -34,36 +34,44 @@ pub struct Reader<'a, R> {
     codec: Codec,
     marker: [u8; 16],
     items: VecDeque<Value>,
-    already_read_header: bool,
+    errored: bool,
 }
 
 impl<'a, R: Read> Reader<'a, R> {
     /// Creates a `Reader` given something implementing the `io::Read` trait to read from.
     /// No reader `Schema` will be set.
-    pub fn new(reader: R) -> Reader<'a, R> {
-        Reader {
+    ///
+    /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
+    pub fn new(reader: R) -> Result<Reader<'a, R>, Error> {
+        let mut reader = Reader {
             reader,
             reader_schema: None,
             writer_schema: Schema::Null,
             codec: Codec::Null,
             marker: [0u8; 16],
             items: VecDeque::new(),
-            already_read_header: false,
-        }
+            errored: false,
+        };
+        reader.read_header()?;
+        Ok(reader)
     }
 
     /// Creates a `Reader` given a reader `Schema` and something implementing the `io::Read` trait
     /// to read from.
-    pub fn with_schema(schema: &'a Schema, reader: R) -> Reader<'a, R> {
-        Reader {
+    ///
+    /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
+    pub fn with_schema(schema: &'a Schema, reader: R) -> Result<Reader<'a, R>, Error> {
+        let mut reader = Reader {
             reader,
             reader_schema: Some(schema),
             writer_schema: Schema::Null,
             codec: Codec::Null,
             marker: [0u8; 16],
             items: VecDeque::new(),
-            already_read_header: false,
-        }
+            errored: false,
+        };
+        reader.read_header()?;
+        Ok(reader)
     }
 
     /// Get a reference to the writer `Schema`.
@@ -98,9 +106,8 @@ impl<'a, R: Read> Reader<'a, R> {
                     }
                 })
                 .and_then(|json| Schema::parse(&json).ok());
-
             if let Some(schema) = schema {
-                self.writer_schema = schema
+                self.writer_schema = schema;
             } else {
                 return Err(err_msg("unable to parse schema"))
             }
@@ -123,7 +130,6 @@ impl<'a, R: Read> Reader<'a, R> {
 
         let mut buf = [0u8; 16];
         self.reader.read_exact(&mut buf)?;
-
         self.marker = buf;
 
         Ok(())
@@ -131,14 +137,7 @@ impl<'a, R: Read> Reader<'a, R> {
 
     /// Try to read a data block, also performing schema resolution for the objects contained in
     /// the block. The objects are stored in an internal buffer to the `Reader`.
-    ///
-    /// It will also read the header in case it hasn't been read yet.
     fn read_block(&mut self) -> Result<(), Error> {
-        if !self.already_read_header {
-            self.read_header()?;
-            self.already_read_header = true;
-        }
-
         match decode(&Schema::Long, &mut self.reader) {
             Ok(block) => {
                 if let Value::Long(block_len) = block {
@@ -174,6 +173,7 @@ impl<'a, R: Read> Reader<'a, R> {
                 }
             },
             Err(e) => match e.downcast::<::std::io::Error>()?.kind() {
+                // to not return any error in case we only finished to read cleanly from the stream
                 ErrorKind::UnexpectedEof => return Ok(()),
                 _ => (),
             },
@@ -186,12 +186,91 @@ impl<'a, R: Read> Iterator for Reader<'a, R> {
     type Item = Result<Value, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // to prevent keep on reading after the first error occurs
+        if self.errored {
+            return None
+        };
         if self.items.len() == 0 {
             if let Err(e) = self.read_block() {
+                self.errored = true;
                 return Some(Err(err_msg(e)))
             }
         }
 
         self.items.pop_front().map(Ok)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use types::{Record, ToAvro};
+    use Reader;
+
+    static SCHEMA: &'static str = r#"
+            {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                    {"name": "a", "type": "long", "default": 42},
+                    {"name": "b", "type": "string"}
+                ]
+            }
+        "#;
+    static ENCODED: &'static [u8] = &[
+        79u8, 98u8, 106u8, 1u8, 4u8, 22u8, 97u8, 118u8, 114u8, 111u8, 46u8, 115u8, 99u8, 104u8,
+        101u8, 109u8, 97u8, 222u8, 1u8, 123u8, 34u8, 116u8, 121u8, 112u8, 101u8, 34u8, 58u8, 34u8,
+        114u8, 101u8, 99u8, 111u8, 114u8, 100u8, 34u8, 44u8, 34u8, 110u8, 97u8, 109u8, 101u8, 34u8,
+        58u8, 34u8, 116u8, 101u8, 115u8, 116u8, 34u8, 44u8, 34u8, 102u8, 105u8, 101u8, 108u8,
+        100u8, 115u8, 34u8, 58u8, 91u8, 123u8, 34u8, 110u8, 97u8, 109u8, 101u8, 34u8, 58u8, 34u8,
+        97u8, 34u8, 44u8, 34u8, 116u8, 121u8, 112u8, 101u8, 34u8, 58u8, 34u8, 108u8, 111u8, 110u8,
+        103u8, 34u8, 44u8, 34u8, 100u8, 101u8, 102u8, 97u8, 117u8, 108u8, 116u8, 34u8, 58u8, 52u8,
+        50u8, 125u8, 44u8, 123u8, 34u8, 110u8, 97u8, 109u8, 101u8, 34u8, 58u8, 34u8, 98u8, 34u8,
+        44u8, 34u8, 116u8, 121u8, 112u8, 101u8, 34u8, 58u8, 34u8, 115u8, 116u8, 114u8, 105u8,
+        110u8, 103u8, 34u8, 125u8, 93u8, 125u8, 20u8, 97u8, 118u8, 114u8, 111u8, 46u8, 99u8, 111u8,
+        100u8, 101u8, 99u8, 8u8, 110u8, 117u8, 108u8, 108u8, 0u8, 94u8, 61u8, 54u8, 221u8, 190u8,
+        207u8, 108u8, 180u8, 158u8, 57u8, 114u8, 40u8, 173u8, 199u8, 228u8, 239u8, 4u8, 20u8, 54u8,
+        6u8, 102u8, 111u8, 111u8, 54u8, 6u8, 102u8, 111u8, 111u8, 94u8, 61u8, 54u8, 221u8, 190u8,
+        207u8, 108u8, 180u8, 158u8, 57u8, 114u8, 40u8, 173u8, 199u8, 228u8, 239,
+    ];
+
+    #[test]
+    fn test_reader_iterator() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let reader = Reader::with_schema(&schema, ENCODED).unwrap();
+
+        let mut record = Record::new(&schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+        let expected = record.avro();
+
+        for value in reader {
+            assert_eq!(value.unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_reader_invalid_header() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let invalid = ENCODED.to_owned().into_iter().skip(1).collect::<Vec<u8>>();
+        assert!(Reader::with_schema(&schema, &invalid[..]).is_err());
+    }
+
+    #[test]
+    fn test_reader_invalid_block() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let invalid = ENCODED
+            .to_owned()
+            .into_iter()
+            .rev()
+            .skip(19)
+            .collect::<Vec<u8>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<u8>>();
+        let reader = Reader::with_schema(&schema, &invalid[..]).unwrap();
+        for value in reader {
+            assert!(value.is_err());
+        }
     }
 }
