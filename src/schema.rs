@@ -20,7 +20,12 @@ pub enum Schema {
     Array(Rc<Schema>),
     Map(Rc<Schema>),
     Union(Rc<Schema>),
-    Record(Rc<RecordSchema>),
+    Record {
+        name: Name,
+        doc: Documentation,
+        fields: Vec<RecordField>,
+        lookup: HashMap<String, usize>,
+    },
     Enum {
         name: Name,
         doc: Documentation,
@@ -31,38 +36,6 @@ pub enum Schema {
         size: usize,
     },
 }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct RecordSchema {
-    pub name: Name,
-    pub doc: Documentation,
-    pub fields: Vec<RecordField>,
-    pub lookup: HashMap<String, usize>, // TODO: &'a str?
-}
-
-/*
-impl RecordSchema {
-    /*
-    pub fn lookup<'a>(&'a self) -> HashMap<&'a str, usize> {
-        let mut lookup: HashMap<&'a str, usize> = HashMap::new();
-        for ref field in self.fields.iter() {
-            lookup.insert(&(field.name), field.position);
-        }
-        lookup
-    }
-    */
-
-    /*
-    pub fn lookup(&self) -> HashMap<String, usize> {
-        let mut lookup = HashMap::new();
-        for ref field in self.fields.iter() {
-            lookup.insert(field.name.clone(), field.position);
-        }
-        lookup
-    }
-    */
-}
-*/
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Name {
@@ -105,20 +78,21 @@ impl Name {
         })
     }
 
-    /*
-    fn fullname(&self, default_namespace: Option<String>) -> String {
+    pub fn fullname(&self, default_namespace: Option<&str>) -> String {
         if self.name.contains(".") {
             self.name.clone()
         } else {
-            // TODO: why is .clone() needed? :(
-            let namespace = self.namespace.clone().or(default_namespace);
+            let namespace = self.namespace
+                .as_ref()
+                .map(|s| s.as_ref())
+                .or(default_namespace);
+
             match namespace {
-                Some(namespace) => format!("{}.{}", namespace, self.name),
+                Some(ref namespace) => format!("{}.{}", namespace, self.name),
                 None => self.name.clone(),
             }
         }
     }
-    */
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -154,7 +128,7 @@ impl RecordField {
 
         let order = field
             .get("order")
-            .and_then(|o| o.as_str())
+            .and_then(|order| order.as_str())
             .and_then(|order| match order {
                 "ascending" => Some(RecordFieldOrder::Ascending),
                 "descending" => Some(RecordFieldOrder::Descending),
@@ -213,6 +187,7 @@ impl Schema {
                 "fixed" => Schema::parse_fixed(complex),
                 other => Schema::parse_primitive(other),
             },
+            // Avro supports "recursive" definition of types. e.g: {"type": {"type": "string"}}
             Some(&Value::Object(ref data)) => match data.get("type") {
                 Some(ref value) => Schema::parse(value),
                 None => Err(err_msg(format!("Unknown complex type: {:?}", complex))),
@@ -243,12 +218,12 @@ impl Schema {
             lookup.insert(field.name.clone(), field.position);
         }
 
-        Ok(Schema::Record(Rc::new(RecordSchema {
+        Ok(Schema::Record {
             name,
             doc: complex.doc(),
             fields,
             lookup,
-        })))
+        })
     }
 
     fn parse_enum(complex: &Map<String, Value>) -> Result<Self, Error> {
@@ -361,12 +336,16 @@ impl Serialize for Schema {
                 seq.serialize_element(&*inner.clone())?;
                 seq.end()
             },
-            Schema::Record(ref rschema) => {
+            Schema::Record {
+                ref name,
+                ref fields,
+                ..
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "record")?;
-                map.serialize_entry("name", &rschema.name.name)?;
+                map.serialize_entry("name", &name.name)?;
                 // TODO: namespace, etc...
-                map.serialize_entry("fields", &rschema.fields)?;
+                map.serialize_entry("fields", fields)?;
                 map.end()
             },
             Schema::Enum {
