@@ -4,12 +4,7 @@
 //! #[macro_use]
 //! extern crate serde_derive;
 //!
-//! use avro::Codec;
-//! use avro::from_value;
-//! use avro::Reader;
-//! use avro::schema::Schema;
-//! use avro::types::Record;
-//! use avro::Writer;
+//! use avro::{Codec, Reader, Writer, from_value, schema::Schema, types::Record};
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Test {
