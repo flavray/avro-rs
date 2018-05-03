@@ -165,13 +165,20 @@ impl<S: Serialize> ToAvro for S {
 }
 */
 
+/// Utility interface to build `Value::Record` objects.
 #[derive(Debug, Clone)]
 pub struct Record {
+    /// List of fields contained in the record.
+    /// Ordered according to the fields in the schema given to create this
+    /// `Record` object. Any unset field defaults to `Value::Null`.
     pub fields: Vec<(String, Value)>,
     schema_lookup: Rc<HashMap<String, usize>>,
 }
 
 impl Record {
+    /// Create a `Record` given a `Schema`.
+    ///
+    /// If the `Schema` is not a `Schema::Record` variant, `None` will be returned.
     pub fn new(schema: &Schema) -> Option<Record> {
         match schema {
             &Schema::Record {
@@ -193,6 +200,11 @@ impl Record {
         }
     }
 
+    /// Put a compatible value (implementing the `ToAvro` trait) in the
+    /// `Record` for a given `field` name.
+    ///
+    /// **NOTE** Only ensure that the field name is present in the `Schema` given when creating
+    /// this `Record`. Does not perform any schema validation.
     pub fn put<V>(&mut self, field: &str, value: V)
     where
         V: ToAvro,
