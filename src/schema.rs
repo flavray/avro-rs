@@ -271,6 +271,8 @@ impl Schema {
         }
     }
 
+    /// Parse a `serde_json::Value` representing a Avro record type into a
+    /// `Schema`.
     fn parse_record(complex: &Map<String, Value>) -> Result<Self, Error> {
         let name = Name::parse(complex)?;
 
@@ -301,6 +303,8 @@ impl Schema {
         })
     }
 
+    /// Parse a `serde_json::Value` representing a Avro enum type into a
+    /// `Schema`.
     fn parse_enum(complex: &Map<String, Value>) -> Result<Self, Error> {
         let name = Name::parse(complex)?;
 
@@ -323,6 +327,8 @@ impl Schema {
         })
     }
 
+    /// Parse a `serde_json::Value` representing a Avro array type into a
+    /// `Schema`.
     fn parse_array(complex: &Map<String, Value>) -> Result<Self, Error> {
         complex
             .get("items")
@@ -331,6 +337,8 @@ impl Schema {
             .map(|schema| Schema::Array(Rc::new(schema)))
     }
 
+    /// Parse a `serde_json::Value` representing a Avro map type into a
+    /// `Schema`.
     fn parse_map(complex: &Map<String, Value>) -> Result<Self, Error> {
         complex
             .get("values")
@@ -339,6 +347,8 @@ impl Schema {
             .map(|schema| Schema::Map(Rc::new(schema)))
     }
 
+    /// Parse a `serde_json::Value` representing a Avro union type into a
+    /// `Schema`.
     fn parse_union(items: &Vec<Value>) -> Result<Self, Error> {
         /*
         items.iter()
@@ -364,6 +374,8 @@ impl Schema {
         */
     }
 
+    /// Parse a `serde_json::Value` representing a Avro fixed type into a
+    /// `Schema`.
     fn parse_fixed(complex: &Map<String, Value>) -> Result<Self, Error> {
         let name = Name::parse(complex)?;
 
