@@ -54,7 +54,10 @@ pub enum Schema {
         name: Name,
         doc: Documentation,
         fields: Vec<RecordField>,
-        lookup: HashMap<String, usize>,
+
+        // TODO: this does not look great.
+        // This is just a trick to avoid borrows of Schema into types::Record.
+        lookup: Rc<HashMap<String, usize>>,
     },
     /// An `enum` Avro schema.
     Enum {
@@ -293,7 +296,7 @@ impl Schema {
             name,
             doc: complex.doc(),
             fields,
-            lookup,
+            lookup: Rc::new(lookup),
         })
     }
 
@@ -538,7 +541,7 @@ mod tests {
                     position: 1,
                 },
             ],
-            lookup,
+            lookup: Rc::new(lookup),
         };
 
         assert_eq!(expected, schema);

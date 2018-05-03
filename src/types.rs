@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use failure::{err_msg, Error};
 use serde_json::Value as JsonValue;
@@ -165,13 +166,12 @@ impl<S: Serialize> ToAvro for S {
 */
 
 #[derive(Debug, Clone)]
-pub struct Record<'a> {
+pub struct Record {
     pub fields: Vec<(String, Value)>,
-    schema: &'a Schema,
-    schema_lookup: &'a HashMap<String, usize>,
+    schema_lookup: Rc<HashMap<String, usize>>,
 }
 
-impl<'a> Record<'a> {
+impl Record {
     pub fn new(schema: &Schema) -> Option<Record> {
         match schema {
             &Schema::Record {
@@ -186,8 +186,7 @@ impl<'a> Record<'a> {
 
                 Some(Record {
                     fields,
-                    schema,
-                    schema_lookup,
+                    schema_lookup: schema_lookup.clone(),
                 })
             },
             _ => None,
@@ -203,13 +202,9 @@ impl<'a> Record<'a> {
             None => (),
         }
     }
-
-    pub fn schema(&self) -> &Schema {
-        self.schema
-    }
 }
 
-impl<'a> ToAvro for Record<'a> {
+impl ToAvro for Record {
     fn avro(self) -> Value {
         Value::Record(self.fields)
     }
@@ -605,7 +600,7 @@ mod tests {
                     position: 1,
                 },
             ],
-            lookup: HashMap::new(),
+            lookup: Rc::new(HashMap::new()),
         };
 
         assert!(
