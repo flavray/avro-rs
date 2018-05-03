@@ -1,3 +1,4 @@
+//! Logic handling the intermediate representation of Avro values.
 use std::collections::HashMap;
 use std::rc::Rc;
 

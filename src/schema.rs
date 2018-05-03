@@ -1,3 +1,4 @@
+//! Logic for parsing and interacting with schemas in Avro format.
 use std::collections::HashMap;
 use std::rc::Rc;
 
