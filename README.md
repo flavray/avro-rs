@@ -28,7 +28,7 @@ extern crate avro;
 extern crate serde_derive;
 extern crate failure;
 
-use avro::{Codec, Reader, Writer, from_value, schema::Schema, types::Record};
+use avro::{Codec, Reader, Schema, Writer, from_value, types::Record};
 use failure::Error;
 
 #[derive(Debug, Deserialize, Serialize)]
