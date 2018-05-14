@@ -26,8 +26,10 @@ extern crate avro;
 
 #[macro_use]
 extern crate serde_derive;
+extern crate failure;
 
 use avro::{Codec, Reader, Writer, from_value, schema::Schema, types::Record};
+use failure::Error;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Test {
@@ -35,7 +37,7 @@ struct Test {
     b: String,
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     let raw_schema = r#"
         {
             "type": "record",
@@ -47,7 +49,7 @@ fn main() {
         }
     "#;
 
-    let schema = Schema::parse_str(raw_schema).unwrap();
+    let schema = Schema::parse_str(raw_schema)?;
 
     println!("{:?}", schema);
 
@@ -57,23 +59,24 @@ fn main() {
     record.put("a", 27i64);
     record.put("b", "foo");
 
-    writer.append(record).unwrap();
+    writer.append(record)?;
 
     let test = Test {
         a: 27,
         b: "foo".to_owned(),
     };
 
-    writer.append_ser(test).unwrap();
+    writer.append_ser(test)?;
 
-    writer.flush().unwrap();
+    writer.flush()?;
 
     let input = writer.into_inner();
-    let reader = Reader::with_schema(&schema, &input[..]).unwrap();
+    let reader = Reader::with_schema(&schema, &input[..])?;
 
     for record in reader {
-        println!("{:?}", from_value::<Test>(&record.unwrap()));
+        println!("{:?}", from_value::<Test>(&record?));
     }
+    Ok(())
 }
 ```
 
