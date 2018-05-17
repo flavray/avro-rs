@@ -215,7 +215,7 @@
 //! Avro supports three different compression codecs when encoding data:
 //!
 //! * **Null**: leaves data uncompressed;
-//! * **Deflate: writes the data block using the deflate algorithm as specified in RFC 1951, and
+//! * **Deflate**: writes the data block using the deflate algorithm as specified in RFC 1951, and
 //! typically implemented using the zlib library. Note that this format (unlike the "zlib format" in
 //! RFC 1950) does not have a checksum.
 //! * **Snappy**: uses Google's [Snappy](http://google.github.io/snappy/) compression library. Each
