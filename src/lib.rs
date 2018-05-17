@@ -520,9 +520,9 @@ pub mod types;
 
 pub use codec::Codec;
 pub use de::from_value;
-pub use reader::Reader;
-pub use writer::{to_avro_datum, Writer};
+pub use reader::{from_avro_datum, Reader};
 pub use schema::Schema;
+pub use writer::{to_avro_datum, Writer};
 
 #[cfg(test)]
 mod tests {
