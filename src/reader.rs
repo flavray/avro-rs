@@ -11,79 +11,37 @@ use decode::decode;
 use schema::ParseSchemaError;
 use schema::Schema;
 use types::Value;
-use util::DecodeError;
+use util::{self, DecodeError};
 use Codec;
 
-/// Main interface for reading Avro formatted values.
-///
-/// To be used as an iterator:
-///
-/// ```no_run
-/// # use avro_rs::Reader;
-/// # use std::io::Cursor;
-/// # let input = Cursor::new(Vec::<u8>::new());
-/// for value in Reader::new(input).unwrap() {
-///     match value {
-///         Ok(v) => println!("{:?}", v),
-///         Err(e) => println!("Error: {}", e),
-///     };
-/// }
-/// ```
-pub struct Reader<'a, R> {
+// Internal Block reader.
+#[derive(Debug, Clone)]
+struct Block<R> {
     reader: R,
-    reader_schema: Option<&'a Schema>,
-    writer_schema: Schema,
-    codec: Codec,
+    // Internal buffering to reduce allocation.
+    buf: Vec<u8>,
+    buf_idx: usize,
+    // Number of elements expected to exist within this block.
+    message_count: usize,
     marker: [u8; 16],
-    items: VecDeque<Value>,
-    errored: bool,
+    codec: Codec,
+    writer_schema: Schema,
 }
 
-impl<'a, R: Read> Reader<'a, R> {
-    /// Creates a `Reader` given something implementing the `io::Read` trait to read from.
-    /// No reader `Schema` will be set.
-    ///
-    /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
-    pub fn new(reader: R) -> Result<Reader<'a, R>, Error> {
-        let mut reader = Reader {
+impl<R: Read> Block<R> {
+    fn new(reader: R) -> Result<Block<R>, Error> {
+        let mut block = Block {
             reader,
-            reader_schema: None,
-            writer_schema: Schema::Null,
             codec: Codec::Null,
-            marker: [0u8; 16],
-            items: VecDeque::new(),
-            errored: false,
-        };
-        reader.read_header()?;
-        Ok(reader)
-    }
-
-    /// Creates a `Reader` given a reader `Schema` and something implementing the `io::Read` trait
-    /// to read from.
-    ///
-    /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
-    pub fn with_schema(schema: &'a Schema, reader: R) -> Result<Reader<'a, R>, Error> {
-        let mut reader = Reader {
-            reader,
-            reader_schema: Some(schema),
             writer_schema: Schema::Null,
-            codec: Codec::Null,
-            marker: [0u8; 16],
-            items: VecDeque::new(),
-            errored: false,
+            buf: vec![],
+            buf_idx: 0,
+            message_count: 0,
+            marker: [0; 16],
         };
-        reader.read_header()?;
-        Ok(reader)
-    }
 
-    /// Get a reference to the writer `Schema`.
-    pub fn writer_schema(&self) -> &Schema {
-        &self.writer_schema
-    }
-
-    /// Get a reference to the optional reader `Schema`.
-    pub fn reader_schema(&self) -> Option<&Schema> {
-        self.reader_schema
+        block.read_header()?;
+        Ok(block)
     }
 
     /// Try to read the header and to set the writer `Schema`, the `Codec` and the marker based on
@@ -138,51 +96,162 @@ impl<'a, R: Read> Reader<'a, R> {
         Ok(())
     }
 
+    fn fill_buf(&mut self, n: usize) -> Result<(), Error> {
+        // We don't have enough space in the buffer, need to grow it.
+        if n >= self.buf.capacity() {
+            self.buf.reserve(n);
+        }
+
+        unsafe { self.buf.set_len(n); }
+        self.reader.read_exact(&mut self.buf[..n])?;
+        self.buf_idx = 0;
+        Ok(())
+    }
+
     /// Try to read a data block, also performing schema resolution for the objects contained in
     /// the block. The objects are stored in an internal buffer to the `Reader`.
-    fn read_block(&mut self) -> Result<(), Error> {
-        match decode(&Schema::Long, &mut self.reader) {
-            Ok(block) => {
-                if let Value::Long(block_len) = block {
-                    if let Value::Long(block_bytes) = decode(&Schema::Long, &mut self.reader)? {
-                        let mut bytes = vec![0u8; block_bytes as usize];
-                        self.reader.read_exact(&mut bytes)?;
+    fn read_block_next(&mut self) -> Result<(), Error> {
+        if !self.is_empty() {
+            // I suppose this isn't technically an error...
+            panic!("(TODO Replace this with an error) Invalid state; shouldn't call read_block_next");
+        }
+        match util::read_long(&mut self.reader) {
+            Ok(block_len) => {
+                self.message_count = block_len as usize;
+                let block_bytes = util::read_long(&mut self.reader)?;
+                self.fill_buf(block_bytes as usize)?;
+                let mut marker = [0u8; 16];
+                self.reader.read_exact(&mut marker)?;
 
-                        let mut marker = [0u8; 16];
-                        self.reader.read_exact(&mut marker)?;
-
-                        if marker != self.marker {
-                            return Err(DecodeError::new(
-                                "block marker does not match header marker",
-                            ).into())
-                        }
-
-                        self.codec.decompress(&mut bytes)?;
-
-                        self.items.clear();
-                        self.items.reserve_exact(block_len as usize);
-
-                        let mut block_bytes = &bytes[..];
-                        for _ in 0..block_len {
-                            let item = from_avro_datum(
-                                &self.writer_schema,
-                                &mut block_bytes,
-                                self.reader_schema,
-                            )?;
-                            self.items.push_back(item)
-                        }
-
-                        return Ok(())
-                    }
+                if marker != self.marker {
+                    return Err(DecodeError::new(
+                        "block marker does not match header marker",
+                    ).into())
                 }
+
+                // TODO (JAB): This is bad, but will fix later.
+                // Can use some "limited read" type to decode directly into the buffer.
+                self.codec.decompress(&mut self.buf)?;
+                
+                return Ok(())
             },
             Err(e) => match e.downcast::<::std::io::Error>()?.kind() {
                 // to not return any error in case we only finished to read cleanly from the stream
                 ErrorKind::UnexpectedEof => return Ok(()),
+                // TODO (JAB): This variant should probably return an error?
                 _ => (),
             },
         };
         Err(DecodeError::new("unable to read block").into())
+    }
+
+
+    pub fn len(&self) -> usize {
+        self.message_count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn read_next(&mut self, read_schema: Option<&Schema>) -> Result<Option<Value>, Error> {
+        if self.is_empty() {
+            self.read_block_next()?;
+            if self.is_empty() {
+                return Ok(None);
+            }
+        }
+
+        let mut block_bytes = &self.buf[self.buf_idx..];
+        let b_original = block_bytes.len();
+        let item = from_avro_datum(
+            &self.writer_schema,
+            &mut block_bytes,
+            read_schema,
+        )?;
+        self.buf_idx += b_original - block_bytes.len();
+        self.message_count -= 1;
+        Ok(Some(item))
+    }
+}
+
+// NOTE: This Reader can only read Avro Object Containers, not an arbitrary stream of Avro
+// data. I'll need to implement that separately. Both can be implemented generically if
+// structured properly.
+/// Main interface for reading Avro formatted values.
+///
+/// To be used as an iterator:
+///
+/// ```no_run
+/// # use avro_rs::Reader;
+/// # use std::io::Cursor;
+/// # let input = Cursor::new(Vec::<u8>::new());
+/// for value in Reader::new(input).unwrap() {
+///     match value {
+///         Ok(v) => println!("{:?}", v),
+///         Err(e) => println!("Error: {}", e),
+///     };
+/// }
+/// ```
+pub struct Reader<'a, R> {
+    block: Block<R>,
+    reader_schema: Option<&'a Schema>,
+    errored: bool,
+    should_resolve_schema: bool,
+}
+
+impl<'a, R: Read> Reader<'a, R> {
+    /// Creates a `Reader` given something implementing the `io::Read` trait to read from.
+    /// No reader `Schema` will be set.
+    ///
+    /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
+    pub fn new(reader: R) -> Result<Reader<'a, R>, Error> {
+        let block = Block::new(reader)?;
+        let reader = Reader {
+            block,
+            reader_schema: None,
+            errored: false,
+            should_resolve_schema: false,
+        };
+        Ok(reader)
+    }
+
+    /// Creates a `Reader` given a reader `Schema` and something implementing the `io::Read` trait
+    /// to read from.
+    ///
+    /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
+    pub fn with_schema(schema: &'a Schema, reader: R) -> Result<Reader<'a, R>, Error> {
+        let block = Block::new(reader)?;
+        let mut reader = Reader {
+            block,
+            reader_schema: Some(schema),
+            errored: false,
+            should_resolve_schema: false,
+        };
+        // Check if the reader and writer schemas disagree.
+        reader.should_resolve_schema = reader.writer_schema() != schema;
+        Ok(reader)
+    }
+
+    /// Get a reference to the writer `Schema`.
+    pub fn writer_schema(&self) -> &Schema {
+        &self.block.writer_schema
+    }
+
+    /// Get a reference to the optional reader `Schema`.
+    pub fn reader_schema(&self) -> Option<&Schema> {
+        self.reader_schema
+    }
+
+    #[inline]
+    fn read_next(&mut self) -> Result<Option<Value>, Error> {
+        let read_schema = if self.should_resolve_schema {
+            self.reader_schema
+        } else {
+            None
+        };
+
+        self.block.read_next(read_schema)
     }
 }
 
@@ -194,14 +263,13 @@ impl<'a, R: Read> Iterator for Reader<'a, R> {
         if self.errored {
             return None
         };
-        if self.items.len() == 0 {
-            if let Err(e) = self.read_block() {
+        match self.read_next() {
+            Ok(opt) => opt.map(Ok),
+            Err(e) => {
                 self.errored = true;
-                return Some(Err(err_msg(e)))
+                Some(Err(e))
             }
         }
-
-        self.items.pop_front().map(Ok)
     }
 }
 

@@ -8,6 +8,22 @@ use schema::Schema;
 use types::Value;
 use util::{zag_i32, zag_i64, DecodeError};
 
+#[derive(Debug, Clone, Copy)]
+pub struct ValueReader<'a> {
+    schema: &'a Schema,
+    data: &'a [u8],
+}
+
+#[inline]
+fn decode_long<R: Read>(reader: &mut R) -> Result<Value, Error> {
+    zag_i64(reader).map(Value::Long)
+}
+
+#[inline]
+fn decode_int<R: Read>(reader: &mut R) -> Result<Value, Error> {
+    zag_i32(reader).map(Value::Int)
+}
+
 /// Decode a `Value` from avro format given its `Schema`.
 pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> {
     match schema {
@@ -22,8 +38,8 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 _ => Err(DecodeError::new("not a bool").into()),
             }
         },
-        &Schema::Int => zag_i32(reader).map(Value::Int),
-        &Schema::Long => zag_i64(reader).map(Value::Long),
+        &Schema::Int => decode_int(reader),
+        &Schema::Long => decode_long(reader),
         &Schema::Float => {
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf[..])?;
@@ -35,7 +51,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             Ok(Value::Double(unsafe { transmute::<[u8; 8], f64>(buf) }))
         },
         &Schema::Bytes => {
-            if let Value::Long(len) = decode(&Schema::Long, reader)? {
+            if let Value::Long(len) = decode_long(reader)? {
                 let mut buf = vec![0u8; len as usize];
                 reader.read_exact(&mut buf)?;
                 Ok(Value::Bytes(buf))
@@ -44,10 +60,12 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             }
         },
         &Schema::String => {
-            if let Value::Long(len) = decode(&Schema::Long, reader)? {
+            if let Value::Long(len) = decode_long(reader)? {
                 // let mut buf = String::with_capacity(len as usize);
                 // reader.read_exact(&mut buf.as_bytes_mut())?;
-                let mut buf = vec![0u8; len as usize];
+                let len = len as usize;
+                let mut buf = Vec::with_capacity(len);
+                unsafe { buf.set_len(len); }
                 reader.read_exact(&mut buf)?;
 
                 String::from_utf8(buf)
@@ -66,7 +84,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let mut items = Vec::new();
 
             loop {
-                if let Value::Long(len) = decode(&Schema::Long, reader)? {
+                if let Value::Long(len) = decode_long(reader)? {
                     // arrays are 0-terminated, 0i64 is also encoded as 0 in Avro
                     // reading a length of 0 means the end of the array
                     if len == 0 {
@@ -88,7 +106,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let mut items = HashMap::new();
 
             loop {
-                if let Value::Long(len) = decode(&Schema::Long, reader)? {
+                if let Value::Long(len) = decode_long(reader)? {
                     // maps are 0-terminated, 0i64 is also encoded as 0 in Avro
                     // reading a length of 0 means the end of the map
                     if len == 0 {
@@ -126,7 +144,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             .collect::<Result<Vec<(String, Value)>, _>>()
             .map(|items| Value::Record(items)),
         &Schema::Enum { ref symbols, .. } => {
-            if let Value::Int(index) = decode(&Schema::Int, reader)? {
+            if let Value::Int(index) = decode_int(reader)? {
                 if index >= 0 && (index as usize) <= symbols.len() {
                     let symbol = symbols[index as usize].clone();
                     Ok(Value::Enum(index, symbol))

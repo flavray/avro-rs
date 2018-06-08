@@ -160,14 +160,14 @@ fn make_records(record: &Value, count: usize) -> Vec<Value> {
     records
 }
 
-fn write(schema: &Schema, records: Vec<Value>) -> Vec<u8> {
+fn write(schema: &Schema, records: &[Value]) -> Vec<u8> {
     let mut writer = Writer::new(&schema, Vec::new());
-    writer.extend(records.into_iter()).unwrap();
+    writer.extend_from_slice(records).unwrap();
     writer.into_inner()
 }
 
-fn read(schema: &Schema, bytes: Vec<u8>) {
-    let reader = Reader::with_schema(schema, &bytes[..]);
+fn read(schema: &Schema, bytes: &[u8]) {
+    let reader = Reader::with_schema(schema, bytes).unwrap();
     for record in reader {
         let _ = record;
     }
@@ -176,14 +176,16 @@ fn read(schema: &Schema, bytes: Vec<u8>) {
 fn bench_write(b: &mut test::Bencher, make_record: &Fn() -> (Schema, Value), n_records: usize) {
     let (schema, record) = make_record();
     let records = make_records(&record, n_records);
-    b.iter(|| write(&schema, records.clone()));
+    b.iter(|| write(&schema, &records));
 }
 
 fn bench_read(b: &mut test::Bencher, make_record: &Fn() -> (Schema, Value), n_records: usize) {
     let (schema, record) = make_record();
     let records = make_records(&record, n_records);
-    let bytes = write(&schema, records);
-    b.iter(|| read(&schema, bytes.clone()));
+    let bytes = write(&schema, &records);
+    println!("bytes.len() = {}", bytes.len());
+    println!("records.len() = {}", records.len());
+    b.iter(|| read(&schema, &bytes));
 }
 
 #[bench]
@@ -244,4 +246,9 @@ fn bench_big_schema_read_100_record(b: &mut test::Bencher) {
 #[bench]
 fn bench_big_schema_read_10000_record(b: &mut test::Bencher) {
     bench_read(b, &make_big_record, 10000);
+}
+
+#[bench]
+fn bench_big_schema_read_100000_record(b: &mut test::Bencher) {
+    bench_read(b, &make_big_record, 100000);
 }

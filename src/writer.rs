@@ -8,7 +8,7 @@ use rand::random;
 use serde::Serialize;
 use serde_json;
 
-use encode::{encode, encode_to_vec};
+use encode::{encode, encode_ref, encode_to_vec, encode_ref_to_vec};
 use schema::Schema;
 use ser::Serializer;
 use types::{ToAvro, Value};
@@ -96,7 +96,29 @@ impl<'a, W: Write> Writer<'a, W> {
             0
         };
 
-        write_avro_datum(self.schema, value, &mut self.buffer)?;
+        let avro = value.avro();
+        write_value_ref(self.schema, &avro, &mut self.buffer)?;
+
+        self.num_values += 1;
+
+        if self.buffer.len() >= SYNC_INTERVAL {
+            return self.flush().map(|b| b + n)
+        }
+
+        Ok(n)
+    }
+
+    pub fn append_value_ref(&mut self, value: &Value) -> Result<usize, Error> {
+        let n = if !self.has_header {
+            let header = self.header()?;
+            let n = self.append_bytes(header.as_ref())?;
+            self.has_header = true;
+            n
+        } else {
+            0
+        };
+
+        write_value_ref(self.schema, value, &mut self.buffer)?;
 
         self.num_values += 1;
 
@@ -130,7 +152,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// call to [`flush`](struct.Writer.html#method.flush) is performed).
     pub fn extend<I, T: ToAvro>(&mut self, values: I) -> Result<usize, Error>
     where
-        I: Iterator<Item = T>,
+        I: IntoIterator<Item = T>,
     {
         /*
         https://github.com/rust-lang/rfcs/issues/811 :(
@@ -165,7 +187,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// call to [`flush`](struct.Writer.html#method.flush) is performed).
     pub fn extend_ser<I, T: Serialize>(&mut self, values: I) -> Result<usize, Error>
     where
-        I: Iterator<Item = T>,
+        I: IntoIterator<Item = T>,
     {
         /*
         https://github.com/rust-lang/rfcs/issues/811 :(
@@ -184,6 +206,17 @@ impl<'a, W: Write> Writer<'a, W> {
         let mut num_bytes = 0;
         for value in values {
             num_bytes += self.append_ser(value)?;
+        }
+        num_bytes += self.flush()?;
+
+        Ok(num_bytes)
+    }
+
+    pub fn extend_from_slice(&mut self, values: &[Value]) -> Result<usize, Error> {
+
+        let mut num_bytes = 0;
+        for value in values {
+            num_bytes += self.append_value_ref(value)?;
         }
         num_bytes += self.flush()?;
 
@@ -276,6 +309,17 @@ fn write_avro_datum<T: ToAvro>(
         return Err(ValidationError::new("value does not match schema").into())
     }
     Ok(encode(avro, schema, buffer))
+}
+
+fn write_value_ref(
+    schema: &Schema,
+    value: &Value,
+    buffer: &mut Vec<u8>,
+) -> Result<(), Error> {
+    if !value.validate(schema) {
+        return Err(ValidationError::new("value does not match schema").into())
+    }
+    Ok(encode_ref(value, schema, buffer))
 }
 
 /// Encode a compatible value (implementing the `ToAvro` trait) into Avro format, also
