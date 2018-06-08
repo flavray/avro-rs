@@ -52,7 +52,9 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
         },
         &Schema::Bytes => {
             if let Value::Long(len) = decode_long(reader)? {
-                let mut buf = vec![0u8; len as usize];
+                let len = len as usize;
+                let mut buf = Vec::with_capacity(len);
+                unsafe { buf.set_len(len); }
                 reader.read_exact(&mut buf)?;
                 Ok(Value::Bytes(buf))
             } else {
@@ -61,8 +63,6 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
         },
         &Schema::String => {
             if let Value::Long(len) = decode_long(reader)? {
-                // let mut buf = String::with_capacity(len as usize);
-                // reader.read_exact(&mut buf.as_bytes_mut())?;
                 let len = len as usize;
                 let mut buf = Vec::with_capacity(len);
                 unsafe { buf.set_len(len); }
@@ -138,11 +138,24 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 _ => Err(DecodeError::new("union index out of bounds").into()),
             }
         },
-        &Schema::Record { ref fields, .. } => fields
-            .iter()
-            .map(|field| decode(&field.schema, reader).map(|value| (field.name.clone(), value)))
-            .collect::<Result<Vec<(String, Value)>, _>>()
-            .map(|items| Value::Record(items)),
+        &Schema::Record { ref fields, .. } => {
+            // Benchmarks indicate ~10% improvement using this method.
+            // Putting it in the `Value::Record` initially may be overkill, but
+            // not using the Iterator API appears to perform better.
+            let mut records = Value::Record(Vec::new());
+            if let &mut Value::Record(ref mut items) = &mut records {
+                for field in fields {
+                    // This clone is also expensive. See if we can do away with it...
+                    items.push((field.name.clone(), decode(&field.schema, reader)?));
+                }
+            }
+            Ok(records)
+            // fields
+            // .iter()
+            // .map(|field| decode(&field.schema, reader).map(|value| (field.name.clone(), value)))
+            // .collect::<Result<Vec<(String, Value)>, _>>()
+            // .map(|items| Value::Record(items))
+        },
         &Schema::Enum { ref symbols, .. } => {
             if let Value::Int(index) = decode_int(reader)? {
                 if index >= 0 && (index as usize) <= symbols.len() {
