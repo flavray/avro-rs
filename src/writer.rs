@@ -8,7 +8,7 @@ use rand::random;
 use serde::Serialize;
 use serde_json;
 
-use encode::{encode, encode_ref, encode_to_vec, encode_ref_to_vec};
+use encode::{encode, encode_ref, encode_to_vec};
 use schema::Schema;
 use ser::Serializer;
 use types::{ToAvro, Value};

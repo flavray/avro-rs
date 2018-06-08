@@ -1,10 +1,9 @@
 //! Logic handling reading from Avro format at user level.
-use std::collections::VecDeque;
 use std::io::{ErrorKind, Read};
 use std::rc::Rc;
 use std::str::{from_utf8, FromStr};
 
-use failure::{err_msg, Error};
+use failure::Error;
 use serde_json::from_slice;
 
 use decode::decode;

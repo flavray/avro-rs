@@ -157,9 +157,3 @@ pub fn encode_to_vec(value: Value, schema: &Schema) -> Vec<u8> {
     encode(value, schema, &mut buffer);
     buffer
 }
-
-pub fn encode_ref_to_vec(value: &Value, schema: &Schema) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    encode_ref(value, schema, &mut buffer);
-    buffer
-}
