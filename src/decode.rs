@@ -8,12 +8,6 @@ use schema::Schema;
 use types::Value;
 use util::{zag_i32, zag_i64, DecodeError};
 
-#[derive(Debug, Clone, Copy)]
-pub struct ValueReader<'a> {
-    schema: &'a Schema,
-    data: &'a [u8],
-}
-
 #[inline]
 fn decode_long<R: Read>(reader: &mut R) -> Result<Value, Error> {
     zag_i64(reader).map(Value::Long)

@@ -196,10 +196,16 @@ fn write_json(records: &[serde_json::Value]) -> Vec<u8> {
     serde_json::to_vec(records).unwrap()
 }
 
-fn read(schema: &Schema, bytes: &[u8]) {
-    let reader = Reader::with_schema(schema, bytes).unwrap();
+fn read<'a, I: Into<Option<&'a Schema>>>(schema: I, bytes: &[u8]) {
+    let schema = schema.into();
+    let reader = if let Some(s) = schema {
+        Reader::with_schema(s, bytes).unwrap()
+    } else {
+        Reader::new(bytes).unwrap()
+    };
+
     for record in reader {
-        let _ = record;
+        let _ = record.unwrap();
     }
 }
 
@@ -232,6 +238,13 @@ fn bench_read_json(b: &mut test::Bencher, make_record: &Fn() -> (serde_json::Val
     println!("bytes.len() = {}", bytes.len());
     println!("records.len() = {}", records.len());
     b.iter(|| read_json(&bytes));
+}
+
+fn bench_from_file(b: &mut test::Bencher, file_path: &str) {
+    use std::fs;
+    let bytes = fs::read(file_path).unwrap();
+    println!("{} had {} bytes", file_path, bytes.len());
+    b.iter(|| read(None, &bytes));
 }
 
 #[bench]
@@ -302,4 +315,10 @@ fn bench_big_schema_read_100000_record(b: &mut test::Bencher) {
 #[bench]
 fn bench_big_schema_json_read_100000_record(b: &mut test::Bencher) {
     bench_read_json(b, &make_big_json_record, 100000);
+}
+
+
+#[bench]
+fn bench_file_quickstop_null(b: &mut test::Bencher) {
+    bench_from_file(b, "benches/quickstop-null.avro");
 }
