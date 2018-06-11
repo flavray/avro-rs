@@ -266,6 +266,10 @@ fn bench_big_schema_read_100000_record(b: &mut test::Bencher) {
     bench_read(b, &make_big_record, 100000);
 }
 
+// This benchmark reads from the `benches/quickstop-null.avro` file, which was pulled from
+// the `goavro` project benchmarks:
+// https://github.com/linkedin/goavro/blob/master/fixtures/quickstop-null.avro
+// This was done for the sake of comparing this crate against the `goavro` implementation.
 #[bench]
 fn bench_file_quickstop_null(b: &mut test::Bencher) {
     bench_from_file(b, "benches/quickstop-null.avro");
