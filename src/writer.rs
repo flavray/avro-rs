@@ -102,12 +102,19 @@ impl<'a, W: Write> Writer<'a, W> {
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush().map(|b| b + n)
+            return self.flush().map(|b| b + n);
         }
 
         Ok(n)
     }
 
+    /// Append a compatible value to a `Writer`, also performing schema validation.
+    ///
+    /// Return the number of bytes written (it might be 0, see below).
+    ///
+    /// **NOTE** This function is not guaranteed to perform any actual write, since it relies on
+    /// internal buffering for performance reasons. If you want to be sure the value has been
+    /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn append_value_ref(&mut self, value: &Value) -> Result<usize, Error> {
         let n = if !self.has_header {
             let header = self.header()?;
@@ -123,7 +130,7 @@ impl<'a, W: Write> Writer<'a, W> {
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush().map(|b| b + n)
+            return self.flush().map(|b| b + n);
         }
 
         Ok(n)
@@ -212,8 +219,14 @@ impl<'a, W: Write> Writer<'a, W> {
         Ok(num_bytes)
     }
 
+    /// Extend a `Writer` by appending each `Value` from a slice, while also performing schema
+    /// validation on each value appended.
+    ///
+    /// Return the number of bytes written.
+    ///
+    /// **NOTE** This function forces the written data to be flushed (an implicit
+    /// call to [`flush`](struct.Writer.html#method.flush) is performed).
     pub fn extend_from_slice(&mut self, values: &[Value]) -> Result<usize, Error> {
-
         let mut num_bytes = 0;
         for value in values {
             num_bytes += self.append_value_ref(value)?;
@@ -229,7 +242,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// Return the number of bytes written.
     pub fn flush(&mut self) -> Result<usize, Error> {
         if self.num_values == 0 {
-            return Ok(0)
+            return Ok(0);
         }
 
         self.codec.compress(&mut self.buffer)?;
@@ -306,18 +319,14 @@ fn write_avro_datum<T: ToAvro>(
 ) -> Result<(), Error> {
     let avro = value.avro();
     if !avro.validate(schema) {
-        return Err(ValidationError::new("value does not match schema").into())
+        return Err(ValidationError::new("value does not match schema").into());
     }
     Ok(encode(avro, schema, buffer))
 }
 
-fn write_value_ref(
-    schema: &Schema,
-    value: &Value,
-    buffer: &mut Vec<u8>,
-) -> Result<(), Error> {
+fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Result<(), Error> {
     if !value.validate(schema) {
-        return Err(ValidationError::new("value does not match schema").into())
+        return Err(ValidationError::new("value does not match schema").into());
     }
     Ok(encode_ref(value, schema, buffer))
 }
@@ -378,9 +387,8 @@ mod tests {
         zig_i64(1, &mut expected);
         zig_i64(3, &mut expected);
 
-        assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);   
+        assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
     }
-
 
     #[test]
     fn test_writer_append() {
