@@ -52,7 +52,7 @@ impl<R: Read> Block<R> {
         self.reader.read_exact(&mut buf)?;
 
         if buf != ['O' as u8, 'b' as u8, 'j' as u8, 1u8] {
-            return Err(DecodeError::new("wrong magic in header").into())
+            return Err(DecodeError::new("wrong magic in header").into());
         }
 
         if let Value::Map(meta) = decode(&meta_schema, &mut self.reader)? {
@@ -69,7 +69,7 @@ impl<R: Read> Block<R> {
             if let Some(schema) = schema {
                 self.writer_schema = schema;
             } else {
-                return Err(ParseSchemaError::new("unable to parse schema").into())
+                return Err(ParseSchemaError::new("unable to parse schema").into());
             }
 
             if let Some(codec) = meta.get("avro.codec")
@@ -85,7 +85,7 @@ impl<R: Read> Block<R> {
                 self.codec = codec;
             }
         } else {
-            return Err(DecodeError::new("no metadata in header").into())
+            return Err(DecodeError::new("no metadata in header").into());
         }
 
         let mut buf = [0u8; 16];
@@ -101,7 +101,9 @@ impl<R: Read> Block<R> {
             self.buf.reserve(n);
         }
 
-        unsafe { self.buf.set_len(n); }
+        unsafe {
+            self.buf.set_len(n);
+        }
         self.reader.read_exact(&mut self.buf[..n])?;
         self.buf_idx = 0;
         Ok(())
@@ -110,10 +112,7 @@ impl<R: Read> Block<R> {
     /// Try to read a data block, also performing schema resolution for the objects contained in
     /// the block. The objects are stored in an internal buffer to the `Reader`.
     fn read_block_next(&mut self) -> Result<(), Error> {
-        if !self.is_empty() {
-            // I suppose this isn't technically an error...
-            panic!("(TODO Replace this with an error) Invalid state; shouldn't call read_block_next");
-        }
+        assert!(self.is_empty(), "Expected self to be empty!");
         match util::read_long(&mut self.reader) {
             Ok(block_len) => {
                 self.message_count = block_len as usize;
@@ -123,27 +122,30 @@ impl<R: Read> Block<R> {
                 self.reader.read_exact(&mut marker)?;
 
                 if marker != self.marker {
-                    return Err(DecodeError::new(
-                        "block marker does not match header marker",
-                    ).into())
+                    return Err(
+                        DecodeError::new("block marker does not match header marker").into(),
+                    );
                 }
 
-                // TODO (JAB): This is bad, but will fix later.
-                // Can use some "limited read" type to decode directly into the buffer.
+                // NOTE (JAB): This doesn't fit this Reader pattern very well.
+                // `self.buf` is a growable buffer that is reused as the reader is iterated.
+                // For non `Codec::Null` variants, `decompress` will allocate a new `Vec`
+                // and replace `buf` with the new one, instead of reusing the same buffer.
+                // We can address this by using some "limited read" type to decode directly
+                // into the buffer. But this is fine, for now.
                 self.codec.decompress(&mut self.buf)?;
-                
-                return Ok(())
-            },
+
+                return Ok(());
+            }
             Err(e) => match e.downcast::<::std::io::Error>()?.kind() {
                 // to not return any error in case we only finished to read cleanly from the stream
                 ErrorKind::UnexpectedEof => return Ok(()),
-                // TODO (JAB): This variant should probably return an error?
+                // Passes through to the `Err` below.
                 _ => (),
             },
         };
         Err(DecodeError::new("unable to read block").into())
     }
-
 
     pub fn len(&self) -> usize {
         self.message_count
@@ -163,20 +165,13 @@ impl<R: Read> Block<R> {
 
         let mut block_bytes = &self.buf[self.buf_idx..];
         let b_original = block_bytes.len();
-        let item = from_avro_datum(
-            &self.writer_schema,
-            &mut block_bytes,
-            read_schema,
-        )?;
+        let item = from_avro_datum(&self.writer_schema, &mut block_bytes, read_schema)?;
         self.buf_idx += b_original - block_bytes.len();
         self.message_count -= 1;
         Ok(Some(item))
     }
 }
 
-// NOTE: This Reader can only read Avro Object Containers, not an arbitrary stream of Avro
-// data. I'll need to implement that separately. Both can be implemented generically if
-// structured properly.
 /// Main interface for reading Avro formatted values.
 ///
 /// To be used as an iterator:
@@ -260,7 +255,7 @@ impl<'a, R: Read> Iterator for Reader<'a, R> {
     fn next(&mut self) -> Option<Self::Item> {
         // to prevent keep on reading after the first error occurs
         if self.errored {
-            return None
+            return None;
         };
         match self.read_next() {
             Ok(opt) => opt.map(Ok),
@@ -348,14 +343,13 @@ mod tests {
     #[test]
     fn test_union() {
         let schema = Schema::parse_str(UNION_SCHEMA).unwrap();
-        let mut encoded: &'static [u8] = &[2,0];
+        let mut encoded: &'static [u8] = &[2, 0];
 
         assert_eq!(
             from_avro_datum(&schema, &mut encoded, None).unwrap(),
             Value::Union(Some(Box::new(Value::Long(0))))
         );
     }
-
 
     #[test]
     fn test_reader_iterator() {
