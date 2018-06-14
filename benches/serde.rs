@@ -166,13 +166,16 @@ fn write(schema: &Schema, records: &[Value]) -> Vec<u8> {
     writer.into_inner()
 }
 
-fn read<'a, I: Into<Option<&'a Schema>>>(schema: I, bytes: &[u8]) {
-    let schema = schema.into();
-    let reader = if let Some(s) = schema {
-        Reader::with_schema(s, bytes).unwrap()
-    } else {
-        Reader::new(bytes).unwrap()
-    };
+fn read(schema: &Schema, bytes: &[u8]) {
+    let reader = Reader::with_schema(schema, bytes).unwrap();
+
+    for record in reader {
+        let _ = record.unwrap();
+    }
+}
+
+fn read_schemaless(bytes: &[u8]) {
+    let reader = Reader::new(bytes).unwrap();
 
     for record in reader {
         let _ = record.unwrap();
@@ -198,7 +201,7 @@ fn bench_from_file(b: &mut test::Bencher, file_path: &str) {
     use std::fs;
     let bytes = fs::read(file_path).unwrap();
     println!("{} had {} bytes", file_path, bytes.len());
-    b.iter(|| read(None, &bytes));
+    b.iter(|| read_schemaless(&bytes));
 }
 
 #[bench]
