@@ -51,7 +51,7 @@ impl<R: Read> Block<R> {
         let mut buf = [0u8; 4];
         self.reader.read_exact(&mut buf)?;
 
-        if buf != ['O' as u8, 'b' as u8, 'j' as u8, 1u8] {
+        if buf != [b'O', b'b', b'j', 1u8] {
             return Err(DecodeError::new("wrong magic in header").into())
         }
 
@@ -60,7 +60,7 @@ impl<R: Read> Block<R> {
             let schema = meta
                 .get("avro.schema")
                 .and_then(|bytes| {
-                    if let &Value::Bytes(ref bytes) = bytes {
+                    if let Value::Bytes(ref bytes) = *bytes {
                         from_slice(bytes.as_ref()).ok()
                     } else {
                         None
@@ -76,7 +76,7 @@ impl<R: Read> Block<R> {
             if let Some(codec) = meta
                 .get("avro.codec")
                 .and_then(|codec| {
-                    if let &Value::Bytes(ref bytes) = codec {
+                    if let Value::Bytes(ref bytes) = *codec {
                         from_utf8(bytes.as_ref()).ok()
                     } else {
                         None
@@ -137,11 +137,9 @@ impl<R: Read> Block<R> {
 
                 return Ok(())
             },
-            Err(e) => match e.downcast::<::std::io::Error>()?.kind() {
+            Err(e) => if let ErrorKind::UnexpectedEof = e.downcast::<::std::io::Error>()?.kind() {
                 // to not return any error in case we only finished to read cleanly from the stream
-                ErrorKind::UnexpectedEof => return Ok(()),
-                // Passes through to the `Err` below.
-                _ => (),
+                return Ok(())
             },
         };
         Err(DecodeError::new("unable to read block").into())
