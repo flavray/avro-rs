@@ -44,12 +44,12 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         Value::String(s) => match schema {
             &Schema::String => {
                 encode_bytes(s, buffer);
-            }
+            },
             &Schema::Enum { ref symbols, .. } => {
                 if let Some(index) = symbols.iter().position(|item| item == s) {
                     encode_int(index as i32, buffer);
                 }
-            }
+            },
             _ => (),
         },
         Value::Fixed(_, bytes) => buffer.extend(bytes),
@@ -60,7 +60,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 encode_long(1, buffer);
                 encode_ref(&*item, inner, buffer);
             }
-        }
+        },
         Value::Array(items) => {
             if let &Schema::Array(ref inner) = schema {
                 encode_long(items.len() as i64, buffer);
@@ -69,7 +69,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 }
                 buffer.push(0u8);
             }
-        }
+        },
         Value::Map(items) => {
             if let &Schema::Map(ref inner) = schema {
                 encode_long(items.len() as i64, buffer);
@@ -79,7 +79,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 }
                 buffer.push(0u8);
             }
-        }
+        },
         Value::Record(fields) => {
             if let &Schema::Record {
                 fields: ref schema_fields,
@@ -90,7 +90,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                     encode_ref(value, &schema_fields[i].schema, buffer);
                 }
             }
-        }
+        },
     }
 }
 

@@ -149,7 +149,8 @@ impl Name {
         if self.name.contains(".") {
             self.name.clone()
         } else {
-            let namespace = self.namespace
+            let namespace = self
+                .namespace
                 .as_ref()
                 .map(|s| s.as_ref())
                 .or(default_namespace);

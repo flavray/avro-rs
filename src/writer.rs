@@ -102,7 +102,7 @@ impl<'a, W: Write> Writer<'a, W> {
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush().map(|b| b + n);
+            return self.flush().map(|b| b + n)
         }
 
         Ok(n)
@@ -130,7 +130,7 @@ impl<'a, W: Write> Writer<'a, W> {
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush().map(|b| b + n);
+            return self.flush().map(|b| b + n)
         }
 
         Ok(n)
@@ -242,7 +242,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// Return the number of bytes written.
     pub fn flush(&mut self) -> Result<usize, Error> {
         if self.num_values == 0 {
-            return Ok(0);
+            return Ok(0)
         }
 
         self.codec.compress(&mut self.buffer)?;
@@ -319,14 +319,14 @@ fn write_avro_datum<T: ToAvro>(
 ) -> Result<(), Error> {
     let avro = value.avro();
     if !avro.validate(schema) {
-        return Err(ValidationError::new("value does not match schema").into());
+        return Err(ValidationError::new("value does not match schema").into())
     }
     Ok(encode(avro, schema, buffer))
 }
 
 fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Result<(), Error> {
     if !value.validate(schema) {
-        return Err(ValidationError::new("value does not match schema").into());
+        return Err(ValidationError::new("value does not match schema").into())
     }
     Ok(encode_ref(value, schema, buffer))
 }
