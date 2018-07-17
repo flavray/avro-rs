@@ -1,4 +1,5 @@
 //! Logic for parsing and interacting with schemas in Avro format.
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -436,19 +437,19 @@ impl Serialize for Schema {
                 map.serialize_entry("type", "array")?;
                 map.serialize_entry("items", &*inner.clone())?;
                 map.end()
-            }
+            },
             Schema::Map(ref inner) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "map")?;
                 map.serialize_entry("values", &*inner.clone())?;
                 map.end()
-            }
+            },
             Schema::Union(ref inner) => {
                 let mut seq = serializer.serialize_seq(Some(2))?;
                 seq.serialize_element("null")?;
                 seq.serialize_element(&*inner.clone())?;
                 seq.end()
-            }
+            },
             Schema::Record {
                 ref name,
                 ref doc,
@@ -469,7 +470,7 @@ impl Serialize for Schema {
                 }
                 map.serialize_entry("fields", fields)?;
                 map.end()
-            }
+            },
             Schema::Enum {
                 ref name,
                 ref symbols,
@@ -480,14 +481,14 @@ impl Serialize for Schema {
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("symbols", symbols)?;
                 map.end()
-            }
+            },
             Schema::Fixed { ref name, ref size } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "fixed")?;
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("size", size)?;
                 map.end()
-            }
+            },
         }
     }
 }
@@ -513,7 +514,6 @@ impl Serialize for RecordField {
 /// https://avro.apache.org/docs/1.8.2/spec.html#Parsing+Canonical+Form+for+Schemas
 fn parsing_canonical_form(schema: &serde_json::Value) -> String {
     match schema {
-        serde_json::Value::Number(n) => pcf_float(n),
         serde_json::Value::Object(map) => pcf_map(map),
         serde_json::Value::String(s) => pcf_string(s),
         serde_json::Value::Array(v) => pcf_array(v),
@@ -522,7 +522,6 @@ fn parsing_canonical_form(schema: &serde_json::Value) -> String {
 }
 
 fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
-    use std::borrow::Cow;
     // Look for the namespace variant up front.
     let ns = schema.get("namespace").and_then(|v| v.as_str());
     let mut fields = Vec::new();
@@ -531,13 +530,13 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
         if schema.len() == 1 && k == "type" {
             // Invariant: function is only callable from a valid schema, so this is acceptable.
             if let serde_json::Value::String(s) = v {
-                return pcf_string(s);
+                return pcf_string(s)
             }
         }
 
         // Strip out unused fields ([STRIP] rule)
         if field_ordering_position(k).is_none() {
-            continue;
+            continue
         }
 
         // Fully qualify the name, if it isn't already ([FULLNAMES] rule).
@@ -547,12 +546,12 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
             let n = match ns {
                 Some(namespace) if !name.contains('.') => {
                     Cow::Owned(format!("{}.{}", namespace, name))
-                }
+                },
                 _ => Cow::Borrowed(name),
             };
 
             fields.push((k, format!("{}:{}", pcf_string(k), pcf_string(&*n))));
-            continue;
+            continue
         }
 
         // Strip off quotes surrounding "size" type, if they exist ([INTEGERS] rule).
@@ -562,7 +561,7 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
                 None => v.as_i64().unwrap(),
             };
             fields.push((k, format!("{}:{}", pcf_string(k), i)));
-            continue;
+            continue
         }
 
         // For anything else, recursively process the result.
@@ -593,10 +592,6 @@ fn pcf_array(arr: &[serde_json::Value]) -> String {
 
 fn pcf_string(s: &str) -> String {
     format!("\"{}\"", s)
-}
-
-fn pcf_float(schema: &serde_json::Number) -> String {
-    schema.as_i64().unwrap().to_string()
 }
 
 // Used to define the ordering and inclusion of fields.
