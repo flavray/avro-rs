@@ -400,3 +400,8 @@ impl ser::SerializeStructVariant for StructSerializer {
         unimplemented!()
     }
 }
+
+pub fn to_value<S: Serialize>(value: S) -> Result<Value, Error> {
+    let mut serializer = Serializer::default();
+    value.serialize(&mut serializer)
+}
