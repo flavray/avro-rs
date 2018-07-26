@@ -54,14 +54,7 @@ pub enum Schema {
     /// `Map` keys are assumed to be `string`.
     Map(Rc<Schema>),
     /// A `union` Avro schema.
-    ///
-    /// `Union` holds a counted reference (`Rc`) to its non-`null` `Schema`.
-    ///
-    /// **NOTE** Only `["null", "< type >"]` unions are currently supported.
-    /// Any other combination of `Schema`s contained in a `union` will be
-    /// considered invalid and errors will be reported when trying to parse
-    /// such a schema.
-    Union(Rc<Schema>),
+    Union(UnionSchema),
     /// A `record` Avro schema.
     ///
     /// The `lookup` table maps field names to their position in the `Vec`
@@ -230,6 +223,36 @@ impl RecordField {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionSchema {
+    schemas: Vec<Schema>,
+}
+
+impl UnionSchema {
+    pub(crate) fn new(schemas: Vec<Schema>) -> Self {
+        UnionSchema { schemas }
+    }
+
+    /// Returns a slice to all variants of this schema.
+    pub fn variants(&self) -> &[Schema] {
+        &self.schemas
+    }
+
+    /// Returns true if the first variant of this `UnionSchema` is `Null`.
+    pub fn is_nullable(&self) -> bool {
+        !self.schemas.is_empty() && self.schemas[0] == Schema::Null
+    }
+
+    /// Optionally returns a reference to the schema matched by this value, as well as its position
+    /// within this enum.
+    pub fn find_schema(&self, value: &::types::Value) -> Option<(usize, &Schema)> {
+        self.variants()
+            .iter()
+            .enumerate()
+            .find(|&(_, p)| value.validate(p))
+    }
+}
+
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     pub fn parse_str(input: &str) -> Result<Self, Error> {
@@ -384,11 +407,23 @@ impl Schema {
             .map(|schemas| Schema::Union(schemas))
         */
 
-        if items.len() == 2 && items[0] == Value::String("null".to_owned()) {
-            Schema::parse(&items[1]).map(|s| Schema::Union(Rc::new(s)))
-        } else {
-            Err(ParseSchemaError::new("Unions only support null and type").into())
-        }
+        // TODO (JAB): Fix this, duplicate types are not permitted.
+        items
+            .iter()
+            .map(|item| match Schema::parse(item) {
+                Ok(Schema::Union(_)) => {
+                    Err(ParseSchemaError::new("Unions may not directly contain a union").into())
+                },
+                s => s,
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|schemas| Schema::Union(UnionSchema::new(schemas)))
+
+        // if items.len() == 2 && items[0] == Value::String("null".to_owned()) {
+        //     Schema::parse(&items[1]).map(|s| Schema::Union(Rc::new(s)))
+        // } else {
+        //     Err(ParseSchemaError::new("Unions only support null and type").into())
+        // }
 
         /*
         match items.as_slice() {
@@ -445,9 +480,15 @@ impl Serialize for Schema {
                 map.end()
             },
             Schema::Union(ref inner) => {
-                let mut seq = serializer.serialize_seq(Some(2))?;
-                seq.serialize_element("null")?;
-                seq.serialize_element(&*inner.clone())?;
+                let variants = inner.variants();
+                let mut seq = serializer.serialize_seq(Some(variants.len()))?;
+                for v in variants {
+                    seq.serialize_element(v)?;
+                }
+
+                // let mut seq = serializer.serialize_seq(Some(2))?;
+                // seq.serialize_element("null")?;
+                // seq.serialize_element(&*inner.clone())?;
                 seq.end()
             },
             Schema::Record {
@@ -641,12 +682,15 @@ mod tests {
     #[test]
     fn test_union_schema() {
         let schema = Schema::parse_str(r#"["null", "int"]"#).unwrap();
-        assert_eq!(Schema::Union(Rc::new(Schema::Int)), schema);
+        assert_eq!(
+            Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int])),
+            schema
+        );
     }
 
     #[test]
     fn test_union_unsupported_schema() {
-        let schema = Schema::parse_str(r#"["null", "int", "string"]"#);
+        let schema = Schema::parse_str(r#"["null", ["null", "int"], "string"]"#);
         assert!(schema.is_err());
     }
 
