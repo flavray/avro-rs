@@ -125,11 +125,6 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 Some(variant) => decode(variant, reader).map(|x| Value::Union(Box::new(x))),
                 None => Err(DecodeError::new("Union index out of bounds").into()),
             }
-            // match index {
-            //     0 => Ok(Value::Union(None)),
-            //     1 => decode(inner, reader).map(|x| Value::Union(Some(Box::new(x)))),
-            //     _ => Err(DecodeError::new("union index out of bounds").into()),
-            // }
         },
         Schema::Record { ref fields, .. } => {
             // Benchmarks indicate ~10% improvement using this method.

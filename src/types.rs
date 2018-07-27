@@ -569,6 +569,18 @@ mod tests {
                 false,
             ),
             (
+                Value::Union(Box::new(Value::Int(42))),
+                Schema::Union(
+                    UnionSchema::new(vec![
+                        Schema::Null,
+                        Schema::Double,
+                        Schema::String,
+                        Schema::Int,
+                    ]).unwrap(),
+                ),
+                true,
+            ),
+            (
                 Value::Array(vec![Value::Long(42i64)]),
                 Schema::Array(Rc::new(Schema::Long)),
                 true,

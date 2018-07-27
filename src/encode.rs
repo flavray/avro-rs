@@ -54,7 +54,6 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         },
         Value::Fixed(_, bytes) => buffer.extend(bytes),
         Value::Enum(i, _) => encode_int(*i, buffer),
-        // Value::Union(None) => buffer.push(0u8),
         Value::Union(item) => {
             if let Schema::Union(ref inner) = *schema {
                 // Find the schema that is matched here. Due to validation, this should always

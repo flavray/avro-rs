@@ -768,6 +768,35 @@ mod tests {
     }
 
     #[test]
+    fn test_multi_union_schema() {
+        let schema = Schema::parse_str(r#"["null", "int", "float", "string", "bytes"]"#);
+        assert!(schema.is_ok());
+        let schema = schema.unwrap();
+        assert_eq!(SchemaKind::from(&schema), SchemaKind::Union);
+        let union_schema = match schema {
+            Schema::Union(u) => u,
+            _ => unreachable!(),
+        };
+        assert_eq!(union_schema.variants().len(), 5);
+        let mut variants = union_schema.variants().iter();
+        assert_eq!(SchemaKind::from(variants.next().unwrap()), SchemaKind::Null);
+        assert_eq!(SchemaKind::from(variants.next().unwrap()), SchemaKind::Int);
+        assert_eq!(
+            SchemaKind::from(variants.next().unwrap()),
+            SchemaKind::Float
+        );
+        assert_eq!(
+            SchemaKind::from(variants.next().unwrap()),
+            SchemaKind::String
+        );
+        assert_eq!(
+            SchemaKind::from(variants.next().unwrap()),
+            SchemaKind::Bytes
+        );
+        assert_eq!(variants.next(), None);
+    }
+
+    #[test]
     fn test_record_schema() {
         let schema = Schema::parse_str(
             r#"
