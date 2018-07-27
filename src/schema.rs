@@ -295,7 +295,7 @@ impl RecordField {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct UnionSchema {
     schemas: Vec<Schema>,
     // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
@@ -345,6 +345,13 @@ impl UnionSchema {
             .get(&kind)
             .cloned()
             .map(|i| (i, &self.schemas[i]))
+    }
+}
+
+// No need to compare variant_index, it is derivative of schemas.
+impl PartialEq for UnionSchema {
+    fn eq(&self, other: &UnionSchema) -> bool {
+        self.schemas.eq(&other.schemas)
     }
 }
 

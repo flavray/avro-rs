@@ -6,7 +6,7 @@ use std::rc::Rc;
 use failure::Error;
 use serde_json::Value as JsonValue;
 
-use schema::{RecordField, Schema, UnionSchema};
+use schema::{RecordField, Schema, SchemaKind, UnionSchema};
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -298,7 +298,18 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(self, schema: &Schema) -> Result<Self, Error> {
+    pub fn resolve(mut self, schema: &Schema) -> Result<Self, Error> {
+        // Check if this schema is a union, and if the reader schema is not.
+        if SchemaKind::from(&self) == SchemaKind::Union
+            && SchemaKind::from(schema) != SchemaKind::Union
+        {
+            // Pull out the Union, and attempt to resolve against it.
+            let v = match self {
+                Value::Union(b) => *b,
+                _ => unreachable!(),
+            };
+            self = v;
+        }
         match *schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
@@ -309,7 +320,6 @@ impl Value {
             Schema::Bytes => self.resolve_bytes(),
             Schema::String => self.resolve_string(),
             Schema::Fixed { size, .. } => self.resolve_fixed(size),
-            // Schema::Union(ref inner) => self.resolve_union(inner),
             Schema::Union(ref inner) => self.resolve_union(inner),
             Schema::Enum { ref symbols, .. } => self.resolve_enum(symbols),
             Schema::Array(ref inner) => self.resolve_array(inner),
@@ -458,14 +468,6 @@ impl Value {
             .find_schema(&v)
             .ok_or_else(|| SchemaResolutionError::new("Could not find matching type in union"))?;
         v.resolve(inner)
-        // match self {
-        //     Value::Union(None) => Ok(Value::Union(None)),
-        //     Value::Union(Some(inner)) => Ok(Value::Union(Some(Box::new(inner.resolve(schema)?)))),
-        //     other => Err(SchemaResolutionError::new(format!(
-        //         "Union({:?}) expected, got {:?}",
-        //         schema, other
-        //     )).into()),
-        // }
     }
 
     fn resolve_array(self, schema: &Schema) -> Result<Self, Error> {
