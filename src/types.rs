@@ -553,17 +553,17 @@ mod tests {
             (Value::Int(42), Schema::Boolean, false),
             (
                 Value::Union(Box::new(Value::Null)),
-                Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int])),
+                Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
                 true,
             ),
             (
                 Value::Union(Box::new(Value::Int(42))),
-                Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int])),
+                Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
                 true,
             ),
             (
                 Value::Union(Box::new(Value::Null)),
-                Schema::Union(UnionSchema::new(vec![Schema::Double, Schema::Int])),
+                Schema::Union(UnionSchema::new(vec![Schema::Double, Schema::Int]).unwrap()),
                 false,
             ),
             (
