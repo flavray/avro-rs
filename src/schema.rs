@@ -82,7 +82,7 @@ pub enum Schema {
 /// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
 /// It may have utility as part of the public API, but defining as `pub(crate)` for now.
 ///
-/// NOTE This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
+/// **NOTE** This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
 /// be constructed in order to get the discriminant, which makes it difficult to implement a
 /// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
 /// intermediate type should be especially fast, as the number of enum variants is small, which
@@ -300,7 +300,7 @@ pub struct UnionSchema {
     schemas: Vec<Schema>,
     // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
     // schema index given a value.
-    // NOTE that this approach does not work for named types, and will have to be modified
+    // **NOTE** that this approach does not work for named types, and will have to be modified
     // to support that. A simple solution is to also keep a mapping of the names used.
     variant_index: HashMap<SchemaKind, usize>,
 }
@@ -558,10 +558,6 @@ impl Serialize for Schema {
                 for v in variants {
                     seq.serialize_element(v)?;
                 }
-
-                // let mut seq = serializer.serialize_seq(Some(2))?;
-                // seq.serialize_element("null")?;
-                // seq.serialize_element(&*inner.clone())?;
                 seq.end()
             },
             Schema::Record {
