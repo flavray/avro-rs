@@ -114,7 +114,11 @@ mod tests {
     fn test_encode_empty_array() {
         let mut buf = Vec::new();
         let empty: Vec<Value> = Vec::new();
-        encode(&Value::Array(empty), &Schema::Array(Rc::new(Schema::Int)), &mut buf);
+        encode(
+            &Value::Array(empty),
+            &Schema::Array(Rc::new(Schema::Int)),
+            &mut buf,
+        );
         assert_eq!(vec![0u8], buf);
     }
 
@@ -122,7 +126,11 @@ mod tests {
     fn test_encode_empty_map() {
         let mut buf = Vec::new();
         let empty: HashMap<String, Value> = HashMap::new();
-        encode(&Value::Map(empty), &Schema::Map(Rc::new(Schema::Int)), &mut buf);
+        encode(
+            &Value::Map(empty),
+            &Schema::Map(Rc::new(Schema::Int)),
+            &mut buf,
+        );
         assert_eq!(vec![0u8], buf);
     }
 }
