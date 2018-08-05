@@ -195,16 +195,15 @@ pub enum RecordFieldOrder {
 
 impl RecordField {
     /// Parse a `serde_json::Value` into a `RecordField`.
-    fn parse(field: &Map<String, Value>, position: usize) -> Result<Self, Error> {
+    fn parse(field: &Map<String, Value>, position: usize, context: &mut SchemaParseContext) -> Result<Self, Error> {
         let name = field
             .name()
             .ok_or_else(|| ParseSchemaError::new("No `name` in record field"))?;
 
-        // TODO: "type" = "<record name>"
         let schema = field
             .get("type")
             .ok_or_else(|| ParseSchemaError::new("No `type` in record field").into())
-            .and_then(|type_| Schema::parse(type_))?;
+            .and_then(|type_| Schema::parse_with_context(type_, context))?;
 
         let default = field.get("default").cloned();
 
@@ -230,6 +229,30 @@ impl RecordField {
     }
 }
 
+struct SchemaParseContext {
+    current_namespace: Option<String>,
+    type_registry: HashMap<String, Schema>,
+}
+
+impl SchemaParseContext {
+    fn new() -> Self {
+        Self {
+            current_namespace: None,
+            type_registry: HashMap::new(),
+        }
+    }
+
+    fn register_type(&mut self, name: Name, schema: Schema) {
+        let key = name.fullname(self.current_namespace.as_ref().map(String::as_str));
+        self.type_registry.insert(key, schema.clone());
+    }
+
+    fn lookup_type(&self, name: &Name) -> Option<Schema> {
+        let key = name.fullname(self.current_namespace.as_ref().map(String::as_str));
+        self.type_registry.get(&key).cloned()
+    }
+}
+
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     pub fn parse_str(input: &str) -> Result<Self, Error> {
@@ -240,10 +263,14 @@ impl Schema {
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
     /// schema.
     pub fn parse(value: &Value) -> Result<Self, Error> {
+        let mut context = SchemaParseContext::new();
+        Self::parse_with_context(value, &mut context)
+    }
+    fn parse_with_context(value: &Value, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match *value {
-            Value::String(ref t) => Schema::parse_primitive(t.as_str()),
-            Value::Object(ref data) => Schema::parse_complex(data),
-            Value::Array(ref data) => Schema::parse_union(data),
+            Value::String(ref t) => Schema::parse_primitive(t.as_str(), context),
+            Value::Object(ref data) => Schema::parse_complex(data, context),
+            Value::Array(ref data) => Schema::parse_union(data, context),
             _ => Err(ParseSchemaError::new("Must be a JSON string, object or array").into()),
         }
     }
@@ -259,7 +286,7 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a primitive Avro type into a
     /// `Schema`.
-    fn parse_primitive(primitive: &str) -> Result<Self, Error> {
+    fn parse_primitive(primitive: &str, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match primitive {
             "null" => Ok(Schema::Null),
             "boolean" => Ok(Schema::Boolean),
@@ -269,8 +296,13 @@ impl Schema {
             "float" => Ok(Schema::Float),
             "bytes" => Ok(Schema::Bytes),
             "string" => Ok(Schema::String),
-            other => Err(ParseSchemaError::new(format!("Unknown type: {}", other)).into()),
+            other => Schema::parse_reference(other, context),
         }
+    }
+
+    fn parse_reference(reference: &str, context: &mut SchemaParseContext) -> Result<Self, Error> {
+        context.lookup_type(&Name::new(reference))
+            .ok_or_else(|| ParseSchemaError::new(format!("Unknown type: {}", reference)).into())
     }
 
     /// Parse a `serde_json::Value` representing a complex Avro type into a
@@ -278,18 +310,16 @@ impl Schema {
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
-    fn parse_complex(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_complex(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match complex.get("type") {
             Some(&Value::String(ref t)) => match t.as_str() {
-                "record" => Schema::parse_record(complex),
-                "enum" => Schema::parse_enum(complex),
-                "array" => Schema::parse_array(complex),
-                "map" => Schema::parse_map(complex),
-                "fixed" => Schema::parse_fixed(complex),
-                other => Schema::parse_primitive(other),
+                "array" => Schema::parse_array(complex, context),
+                "map" => Schema::parse_map(complex, context),
+                "record" | "enum" | "fixed" => Schema::parse_named(complex, context),
+                other => Schema::parse_primitive(other, context),
             },
             Some(&Value::Object(ref data)) => match data.get("type") {
-                Some(ref value) => Schema::parse(value),
+                Some(ref value) => Schema::parse_with_context(value, context),
                 None => Err(
                     ParseSchemaError::new(format!("Unknown complex type: {:?}", complex)).into(),
                 ),
@@ -298,9 +328,27 @@ impl Schema {
         }
     }
 
+    fn parse_named(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+        let name = Name::parse(complex)?;
+
+        let schema = match complex.get("type") {
+            Some(&Value::String(ref t)) => match t.as_str() {
+                "record" => Schema::parse_record(complex, context),
+                "enum" => Schema::parse_enum(complex),
+                "fixed" => Schema::parse_fixed(complex),
+                _ => panic!("parse_named got wrong type"),
+            },
+            _ => panic!("parse_named got wrong type"),
+        };
+        if schema.is_ok() {
+            context.register_type(name, schema.as_ref().unwrap().clone());
+        }
+        schema
+    }
+
     /// Parse a `serde_json::Value` representing a Avro record type into a
     /// `Schema`.
-    fn parse_record(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_record(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         let name = Name::parse(complex)?;
 
         let mut lookup = HashMap::new();
@@ -314,7 +362,7 @@ impl Schema {
                     .iter()
                     .filter_map(|field| field.as_object())
                     .enumerate()
-                    .map(|(position, field)| RecordField::parse(field, position))
+                    .map(|(position, field)| RecordField::parse(field, position, context))
                     .collect::<Result<_, _>>()
             })?;
 
@@ -356,27 +404,27 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro array type into a
     /// `Schema`.
-    fn parse_array(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_array(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         complex
             .get("items")
             .ok_or_else(|| ParseSchemaError::new("No `items` in array").into())
-            .and_then(|items| Schema::parse(items))
+            .and_then(|items| Schema::parse_with_context(items, context))
             .map(|schema| Schema::Array(Rc::new(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro map type into a
     /// `Schema`.
-    fn parse_map(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_map(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         complex
             .get("values")
             .ok_or_else(|| ParseSchemaError::new("No `values` in map").into())
-            .and_then(|items| Schema::parse(items))
+            .and_then(|items| Schema::parse_with_context(items, context))
             .map(|schema| Schema::Map(Rc::new(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro union type into a
     /// `Schema`.
-    fn parse_union(items: &[Value]) -> Result<Self, Error> {
+    fn parse_union(items: &[Value], context: &mut SchemaParseContext) -> Result<Self, Error> {
         /*
         items.iter()
             .map(|item| Schema::parse(item))
@@ -385,7 +433,7 @@ impl Schema {
         */
 
         if items.len() == 2 && items[0] == Value::String("null".to_owned()) {
-            Schema::parse(&items[1]).map(|s| Schema::Union(Rc::new(s)))
+            Schema::parse_with_context(&items[1], context).map(|s| Schema::Union(Rc::new(s)))
         } else {
             Err(ParseSchemaError::new("Unions only support null and type").into())
         }
@@ -723,6 +771,77 @@ mod tests {
         let expected = Schema::Fixed {
             name: Name::new("test"),
             size: 16usize,
+        };
+
+        assert_eq!(expected, schema);
+    }
+
+    #[test]
+    fn test_nested_named_fixed_schema() {
+        let schema = Schema::parse_str(
+            r#"
+            {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                    {
+                        "name": "a",
+                        "type": {
+                           "name": "fixed_test",
+                           "namespace": "com.test",
+                           "type": "fixed",
+                           "size": 2
+                         }
+                    },
+                    {
+                        "name": "b",
+                        "type": "com.test.fixed_test"
+                    }
+                ]
+            }
+        "#,
+        ).unwrap();
+
+        let mut lookup = HashMap::new();
+        lookup.insert("a".to_owned(), 0);
+        lookup.insert("b".to_owned(), 1);
+
+        let expected = Schema::Record {
+            name: Name::new("test"),
+            doc: None,
+            fields: vec![
+                RecordField {
+                    name: "a".to_string(),
+                    doc: None,
+                    default: None,
+                    schema: Schema::Fixed {
+                        name: Name {
+                            name: "fixed_test".to_string(),
+                            namespace: Some("com.test".to_string()),
+                            aliases: None,
+                        },
+                        size: 2usize,
+                    },
+                    order: RecordFieldOrder::Ascending,
+                    position: 0,
+                },
+                RecordField {
+                    name: "b".to_string(),
+                    doc: None,
+                    default: None,
+                    schema: Schema::Fixed {
+                        name: Name {
+                            name: "fixed_test".to_string(),
+                            namespace: Some("com.test".to_string()),
+                            aliases: None,
+                        },
+                        size: 2usize,
+                    },
+                    order: RecordFieldOrder::Ascending,
+                    position: 1,
+                },
+            ],
+            lookup: Rc::new(lookup),
         };
 
         assert_eq!(expected, schema);
