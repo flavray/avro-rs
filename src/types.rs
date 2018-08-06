@@ -280,12 +280,11 @@ impl Value {
                 items.iter().all(|(_, value)| value.validate(inner))
             },
             (&Value::Record(ref record_fields), &Schema::Record { ref fields, .. }) => {
-                fields.len() == record_fields.len()
-                    && fields.iter().zip(record_fields.iter()).all(
-                        |(field, &(ref name, ref value))| {
-                            field.name == *name && value.validate(&field.schema)
-                        },
-                    )
+                fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
+                    |(field, &(ref name, ref value))| {
+                        field.name == *name && value.validate(&field.schema)
+                    },
+                )
             },
             _ => false,
         }
@@ -532,8 +531,7 @@ impl Value {
                 value
                     .resolve(&field.schema)
                     .map(|value| (field.name.clone(), value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            }).collect::<Result<Vec<_>, _>>()?;
 
         Ok(Value::Record(new_fields))
     }
