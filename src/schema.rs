@@ -82,7 +82,7 @@ pub enum Schema {
 /// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
 /// It may have utility as part of the public API, but defining as `pub(crate)` for now.
 ///
-/// NOTE This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
+/// **NOTE** This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
 /// be constructed in order to get the discriminant, which makes it difficult to implement a
 /// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
 /// intermediate type should be especially fast, as the number of enum variants is small, which
@@ -300,7 +300,7 @@ pub struct UnionSchema {
     schemas: Vec<Schema>,
     // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
     // schema index given a value.
-    // NOTE that this approach does not work for named types, and will have to be modified
+    // **NOTE** that this approach does not work for named types, and will have to be modified
     // to support that. A simple solution is to also keep a mapping of the names used.
     variant_index: HashMap<SchemaKind, usize>,
 }
@@ -545,25 +545,21 @@ impl Serialize for Schema {
                 map.serialize_entry("type", "array")?;
                 map.serialize_entry("items", &*inner.clone())?;
                 map.end()
-            },
+            }
             Schema::Map(ref inner) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "map")?;
                 map.serialize_entry("values", &*inner.clone())?;
                 map.end()
-            },
+            }
             Schema::Union(ref inner) => {
                 let variants = inner.variants();
                 let mut seq = serializer.serialize_seq(Some(variants.len()))?;
                 for v in variants {
                     seq.serialize_element(v)?;
                 }
-
-                // let mut seq = serializer.serialize_seq(Some(2))?;
-                // seq.serialize_element("null")?;
-                // seq.serialize_element(&*inner.clone())?;
                 seq.end()
-            },
+            }
             Schema::Record {
                 ref name,
                 ref doc,
@@ -584,7 +580,7 @@ impl Serialize for Schema {
                 }
                 map.serialize_entry("fields", fields)?;
                 map.end()
-            },
+            }
             Schema::Enum {
                 ref name,
                 ref symbols,
@@ -595,14 +591,14 @@ impl Serialize for Schema {
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("symbols", symbols)?;
                 map.end()
-            },
+            }
             Schema::Fixed { ref name, ref size } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "fixed")?;
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("size", size)?;
                 map.end()
-            },
+            }
         }
     }
 }
@@ -644,13 +640,13 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
         if schema.len() == 1 && k == "type" {
             // Invariant: function is only callable from a valid schema, so this is acceptable.
             if let serde_json::Value::String(s) = v {
-                return pcf_string(s)
+                return pcf_string(s);
             }
         }
 
         // Strip out unused fields ([STRIP] rule)
         if field_ordering_position(k).is_none() {
-            continue
+            continue;
         }
 
         // Fully qualify the name, if it isn't already ([FULLNAMES] rule).
@@ -660,12 +656,12 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
             let n = match ns {
                 Some(namespace) if !name.contains('.') => {
                     Cow::Owned(format!("{}.{}", namespace, name))
-                },
+                }
                 _ => Cow::Borrowed(name),
             };
 
             fields.push((k, format!("{}:{}", pcf_string(k), pcf_string(&*n))));
-            continue
+            continue;
         }
 
         // Strip off quotes surrounding "size" type, if they exist ([INTEGERS] rule).
@@ -675,7 +671,7 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
                 None => v.as_i64().unwrap(),
             };
             fields.push((k, format!("{}:{}", pcf_string(k), i)));
-            continue
+            continue;
         }
 
         // For anything else, recursively process the result.
