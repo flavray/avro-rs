@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::mem::transmute;
+use std::rc::Rc;
 
 use failure::Error;
 
-use schema::Schema;
+use schema::{Schema, SchemaParseContext};
 use types::Value;
 use util::{safe_len, zag_i32, zag_i64, DecodeError};
 
@@ -24,7 +25,7 @@ fn decode_len<R: Read>(reader: &mut R) -> Result<usize, Error> {
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> {
+pub fn decode<R: Read>(schema: Rc<Schema>, reader: &mut R, context: &mut SchemaParseContext) -> Result<Value, Error> {
     match *schema {
         Schema::Null => Ok(Value::Null),
         Schema::Boolean => {
@@ -88,7 +89,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    items.push(decode(inner, reader)?);
+                    items.push(decode(inner.clone(), reader, context)?);
                 }
             }
 
@@ -107,8 +108,8 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    if let Value::String(key) = decode(&Schema::String, reader)? {
-                        let value = decode(inner, reader)?;
+                    if let Value::String(key) = decode(Rc::new(Schema::String), reader, context)? {
+                        let value = decode(inner.clone(), reader, context)?;
                         items.insert(key, value);
                     } else {
                         return Err(DecodeError::new("map key is not a string").into())
@@ -123,16 +124,17 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
 
             match index {
                 0 => Ok(Value::Union(None)),
-                1 => decode(inner, reader).map(|x| Value::Union(Some(Box::new(x)))),
+                1 => decode(inner.clone(), reader, context).map(|x| Value::Union(Some(Box::new(x)))),
                 _ => Err(DecodeError::new("union index out of bounds").into()),
             }
         },
-        Schema::Record { ref fields, .. } => {
+        Schema::Record { ref fields, ref name, .. } => {
+            context.register_type(name.clone(), schema.clone());
             // Benchmarks indicate ~10% improvement using this method.
             let mut items = Vec::new();
             for field in fields {
                 // This clone is also expensive. See if we can do away with it...
-                items.push((field.name.clone(), decode(&field.schema, reader)?));
+                items.push((field.name.clone(), decode(field.schema.clone(), reader, context)?));
             }
             Ok(Value::Record(items))
             // fields
@@ -153,5 +155,8 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 Err(DecodeError::new("enum symbol not found").into())
             }
         },
+        Schema::TypeReference(ref name) => context.lookup_type(name, &context)
+            .map_or_else(|| Err(DecodeError::new("enum symbol not found").into()),
+                         |s| decode(s, reader, context)),
     }
 }

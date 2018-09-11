@@ -6,7 +6,7 @@ use std::rc::Rc;
 use failure::Error;
 use serde_json::Value as JsonValue;
 
-use schema::{RecordField, Schema};
+use schema::{RecordField, Schema, SchemaParseContext};
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -297,7 +297,7 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(self, schema: &Schema) -> Result<Self, Error> {
+    pub fn resolve(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match *schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
@@ -308,11 +308,18 @@ impl Value {
             Schema::Bytes => self.resolve_bytes(),
             Schema::String => self.resolve_string(),
             Schema::Fixed { size, .. } => self.resolve_fixed(size),
-            Schema::Union(ref inner) => self.resolve_union(inner),
+            Schema::Union(ref inner) => self.resolve_union(inner.clone(), context),
             Schema::Enum { ref symbols, .. } => self.resolve_enum(symbols),
-            Schema::Array(ref inner) => self.resolve_array(inner),
-            Schema::Map(ref inner) => self.resolve_map(inner),
-            Schema::Record { ref fields, .. } => self.resolve_record(fields),
+            Schema::Array(ref inner) => self.resolve_array(inner.clone(), context),
+            Schema::Map(ref inner) => self.resolve_map(inner.clone(), context),
+            Schema::Record { ref fields, ref name, .. } => {
+                context.register_type(name.clone(), schema.clone());
+                self.resolve_record(fields, context)
+            } ,
+            Schema::TypeReference(ref name) => context.lookup_type(name, &context)
+                .map_or_else(|| Err(SchemaResolutionError::new(format!("Couldn't resolve type reference: {:?}", name)).into()),
+                             |s| self.resolve(s, context)),
+
         }
     }
 
@@ -444,10 +451,10 @@ impl Value {
         }
     }
 
-    fn resolve_union(self, schema: &Schema) -> Result<Self, Error> {
+    fn resolve_union(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Union(None) => Ok(Value::Union(None)),
-            Value::Union(Some(inner)) => Ok(Value::Union(Some(Box::new(inner.resolve(schema)?)))),
+            Value::Union(Some(inner)) => Ok(Value::Union(Some(Box::new(inner.resolve(schema, context)?)))),
             other => Err(SchemaResolutionError::new(format!(
                 "Union({:?}) expected, got {:?}",
                 schema, other
@@ -455,11 +462,11 @@ impl Value {
         }
     }
 
-    fn resolve_array(self, schema: &Schema) -> Result<Self, Error> {
+    fn resolve_array(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Array(items) => Ok(Value::Array(items
                 .into_iter()
-                .map(|item| item.resolve(schema))
+                .map(|item| item.resolve(schema.clone(), context))
                 .collect::<Result<Vec<_>, _>>()?)),
             other => Err(SchemaResolutionError::new(format!(
                 "Array({:?}) expected, got {:?}",
@@ -468,11 +475,11 @@ impl Value {
         }
     }
 
-    fn resolve_map(self, schema: &Schema) -> Result<Self, Error> {
+    fn resolve_map(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Map(items) => Ok(Value::Map(items
                 .into_iter()
-                .map(|(key, value)| value.resolve(schema).map(|value| (key, value)))
+                .map(|(key, value)| value.resolve(schema.clone(), context).map(|value| (key, value)))
                 .collect::<Result<HashMap<_, _>, _>>()?)),
             other => Err(SchemaResolutionError::new(format!(
                 "Map({:?}) expected, got {:?}",
@@ -481,7 +488,7 @@ impl Value {
         }
     }
 
-    fn resolve_record(self, fields: &[RecordField]) -> Result<Self, Error> {
+    fn resolve_record(self, fields: &[RecordField], context: &mut SchemaParseContext) -> Result<Self, Error> {
         let mut items = match self {
             Value::Map(items) => Ok(items),
             Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
@@ -497,7 +504,7 @@ impl Value {
                 let value = match items.remove(&field.name) {
                     Some(value) => value,
                     None => match field.default {
-                        Some(ref value) => match field.schema {
+                        Some(ref value) => match *field.schema {
                             Schema::Enum { ref symbols, .. } => {
                                 value.clone().avro().resolve_enum(symbols)?
                             },
@@ -512,7 +519,7 @@ impl Value {
                     },
                 };
                 value
-                    .resolve(&field.schema)
+                    .resolve(field.schema.clone(), context)
                     .map(|value| (field.name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -628,7 +635,7 @@ mod tests {
                     name: "a".to_string(),
                     doc: None,
                     default: None,
-                    schema: Schema::Long,
+                    schema: Rc::new(Schema::Long),
                     order: RecordFieldOrder::Ascending,
                     position: 0,
                 },
@@ -636,7 +643,7 @@ mod tests {
                     name: "b".to_string(),
                     doc: None,
                     default: None,
-                    schema: Schema::String,
+                    schema: Rc::new(Schema::String),
                     order: RecordFieldOrder::Ascending,
                     position: 1,
                 },

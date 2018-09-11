@@ -7,8 +7,7 @@ use failure::Error;
 use serde_json::from_slice;
 
 use decode::decode;
-use schema::ParseSchemaError;
-use schema::Schema;
+use schema::{ParseSchemaError, Schema, SchemaParseContext};
 use types::Value;
 use util::{self, DecodeError};
 use Codec;
@@ -24,7 +23,7 @@ struct Block<R> {
     message_count: usize,
     marker: [u8; 16],
     codec: Codec,
-    writer_schema: Schema,
+    writer_schema: Rc<Schema>,
 }
 
 impl<R: Read> Block<R> {
@@ -32,7 +31,7 @@ impl<R: Read> Block<R> {
         let mut block = Block {
             reader,
             codec: Codec::Null,
-            writer_schema: Schema::Null,
+            writer_schema: Rc::new(Schema::Null),
             buf: vec![],
             buf_idx: 0,
             message_count: 0,
@@ -46,7 +45,7 @@ impl<R: Read> Block<R> {
     /// Try to read the header and to set the writer `Schema`, the `Codec` and the marker based on
     /// its content.
     fn read_header(&mut self) -> Result<(), Error> {
-        let meta_schema = Schema::Map(Rc::new(Schema::Bytes));
+        let meta_schema = Rc::new(Schema::Map(Rc::new(Schema::Bytes)));
 
         let mut buf = [0u8; 4];
         self.reader.read_exact(&mut buf)?;
@@ -55,7 +54,7 @@ impl<R: Read> Block<R> {
             return Err(DecodeError::new("wrong magic in header").into())
         }
 
-        if let Value::Map(meta) = decode(&meta_schema, &mut self.reader)? {
+        if let Value::Map(meta) = decode(meta_schema, &mut self.reader, &mut SchemaParseContext::new())? {
             // TODO: surface original parse schema errors instead of coalescing them here
             let schema = meta.get("avro.schema")
                 .and_then(|bytes| {
@@ -67,7 +66,7 @@ impl<R: Read> Block<R> {
                 })
                 .and_then(|json| Schema::parse(&json).ok());
             if let Some(schema) = schema {
-                self.writer_schema = schema;
+                self.writer_schema = Rc::new(schema);
             } else {
                 return Err(ParseSchemaError::new("unable to parse schema").into())
             }
@@ -151,7 +150,7 @@ impl<R: Read> Block<R> {
         self.len() == 0
     }
 
-    fn read_next(&mut self, read_schema: Option<&Schema>) -> Result<Option<Value>, Error> {
+    fn read_next(&mut self, read_schema: Option<Rc<Schema>>) -> Result<Option<Value>, Error> {
         if self.is_empty() {
             self.read_block_next()?;
             if self.is_empty() {
@@ -161,7 +160,7 @@ impl<R: Read> Block<R> {
 
         let mut block_bytes = &self.buf[self.buf_idx..];
         let b_original = block_bytes.len();
-        let item = from_avro_datum(&self.writer_schema, &mut block_bytes, read_schema)?;
+        let item = from_avro_datum(self.writer_schema.clone(), &mut block_bytes, read_schema)?;
         self.buf_idx += b_original - block_bytes.len();
         self.message_count -= 1;
         Ok(Some(item))
@@ -183,19 +182,19 @@ impl<R: Read> Block<R> {
 ///     };
 /// }
 /// ```
-pub struct Reader<'a, R> {
+pub struct Reader<R> {
     block: Block<R>,
-    reader_schema: Option<&'a Schema>,
+    reader_schema: Option<Rc<Schema>>,
     errored: bool,
     should_resolve_schema: bool,
 }
 
-impl<'a, R: Read> Reader<'a, R> {
+impl<R: Read> Reader<R> {
     /// Creates a `Reader` given something implementing the `io::Read` trait to read from.
     /// No reader `Schema` will be set.
     ///
     /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
-    pub fn new(reader: R) -> Result<Reader<'a, R>, Error> {
+    pub fn new(reader: R) -> Result<Reader<R>, Error> {
         let block = Block::new(reader)?;
         let reader = Reader {
             block,
@@ -210,11 +209,11 @@ impl<'a, R: Read> Reader<'a, R> {
     /// to read from.
     ///
     /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
-    pub fn with_schema(schema: &'a Schema, reader: R) -> Result<Reader<'a, R>, Error> {
+    pub fn with_schema(schema: &Schema, reader: R) -> Result<Reader<R>, Error> {
         let block = Block::new(reader)?;
         let mut reader = Reader {
             block,
-            reader_schema: Some(schema),
+            reader_schema: Some(Rc::new(schema.clone())),
             errored: false,
             should_resolve_schema: false,
         };
@@ -229,14 +228,14 @@ impl<'a, R: Read> Reader<'a, R> {
     }
 
     /// Get a reference to the optional reader `Schema`.
-    pub fn reader_schema(&self) -> Option<&Schema> {
-        self.reader_schema
+    pub fn reader_schema(&self) -> Option<Rc<Schema>> {
+        self.reader_schema.clone()
     }
 
     #[inline]
     fn read_next(&mut self) -> Result<Option<Value>, Error> {
         let read_schema = if self.should_resolve_schema {
-            self.reader_schema
+            self.reader_schema.clone()
         } else {
             None
         };
@@ -245,7 +244,7 @@ impl<'a, R: Read> Reader<'a, R> {
     }
 }
 
-impl<'a, R: Read> Iterator for Reader<'a, R> {
+impl<'a, R: Read> Iterator for Reader<R> {
     type Item = Result<Value, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -272,13 +271,16 @@ impl<'a, R: Read> Iterator for Reader<'a, R> {
 /// header and consecutive data blocks; use [`Reader`](struct.Reader.html) if you don't know what
 /// you are doing, instead.
 pub fn from_avro_datum<R: Read>(
-    writer_schema: &Schema,
+    writer_schema: Rc<Schema>,
     reader: &mut R,
-    reader_schema: Option<&Schema>,
+    reader_schema: Option<Rc<Schema>>,
 ) -> Result<Value, Error> {
-    let value = decode(writer_schema, reader)?;
+    let value = decode(writer_schema, reader, &mut SchemaParseContext::new())?;
     match reader_schema {
-        Some(ref schema) => value.resolve(schema),
+        Some(schema) => {
+            let mut context = SchemaParseContext::new();
+            value.resolve(schema, &mut context)
+        },
         None => Ok(value),
     }
 }
@@ -331,7 +333,7 @@ mod tests {
         let expected = record.avro();
 
         assert_eq!(
-            from_avro_datum(&schema, &mut encoded, None).unwrap(),
+            from_avro_datum(Rc::new(schema), &mut encoded, None).unwrap(),
             expected
         );
     }
@@ -342,7 +344,7 @@ mod tests {
         let mut encoded: &'static [u8] = &[2, 0];
 
         assert_eq!(
-            from_avro_datum(&schema, &mut encoded, None).unwrap(),
+            from_avro_datum(Rc::new(schema), &mut encoded, None).unwrap(),
             Value::Union(Some(Box::new(Value::Long(0))))
         );
     }
@@ -410,4 +412,70 @@ mod tests {
             assert!(value.is_err());
         }
     }
+
+    static SCHEMA_RECURSIVE: &'static str = r#"
+              {
+                "type": "record",
+                "name": "test",
+                "fields": [
+                  {
+                    "name": "recurse",
+                    "type": ["null", "test"]
+                  }
+                ]
+
+              }
+    "#;
+
+    // to generate this data, I ran saved this above schema into a
+    // file named recursive.avsc and then ran:
+    //
+    // $ java -jar ./avro-tools-1.8.2.jar  random --schema-file recursive.avsc --count 1 - | tee recursive.avro | java -jar ./avro-tools-1.8.2.jar tojson --pretty -
+    //
+    // which generates random avro data which matches this schema showing you a json representation, when I saw one I liked, I generated binary data with this:
+    // $ hexdump recursive.avro | cut -c '9-' | sed 's/\([0-9a-z][0-9a-z]\) */0x\1u8, /g'
+    //
+    // (avro-tools downlaods are here: http://www.apache.org/dyn/closer.cgi/avro/ )
+
+    static ENCODED_RECURSIVE: &'static [u8] = &[
+        0x4fu8, 0x62u8, 0x6au8, 0x01u8, 0x04u8, 0x16u8, 0x61u8, 0x76u8,
+        0x72u8, 0x6fu8, 0x2eu8, 0x73u8, 0x63u8, 0x68u8, 0x65u8, 0x6du8,
+        0x61u8, 0xa8u8, 0x01u8, 0x7bu8, 0x22u8, 0x74u8, 0x79u8, 0x70u8,
+        0x65u8, 0x22u8, 0x3au8, 0x22u8, 0x72u8, 0x65u8, 0x63u8, 0x6fu8,
+        0x72u8, 0x64u8, 0x22u8, 0x2cu8, 0x22u8, 0x6eu8, 0x61u8, 0x6du8,
+        0x65u8, 0x22u8, 0x3au8, 0x22u8, 0x74u8, 0x65u8, 0x73u8, 0x74u8,
+        0x22u8, 0x2cu8, 0x22u8, 0x66u8, 0x69u8, 0x65u8, 0x6cu8, 0x64u8,
+        0x73u8, 0x22u8, 0x3au8, 0x5bu8, 0x7bu8, 0x22u8, 0x6eu8, 0x61u8,
+        0x6du8, 0x65u8, 0x22u8, 0x3au8, 0x22u8, 0x72u8, 0x65u8, 0x63u8,
+        0x75u8, 0x72u8, 0x73u8, 0x65u8, 0x22u8, 0x2cu8, 0x22u8, 0x74u8,
+        0x79u8, 0x70u8, 0x65u8, 0x22u8, 0x3au8, 0x5bu8, 0x22u8, 0x6eu8,
+        0x75u8, 0x6cu8, 0x6cu8, 0x22u8, 0x2cu8, 0x22u8, 0x74u8, 0x65u8,
+        0x73u8, 0x74u8, 0x22u8, 0x5du8, 0x7du8, 0x5du8, 0x7du8, 0x14u8,
+        0x61u8, 0x76u8, 0x72u8, 0x6fu8, 0x2eu8, 0x63u8, 0x6fu8, 0x64u8,
+        0x65u8, 0x63u8, 0x0eu8, 0x64u8, 0x65u8, 0x66u8, 0x6cu8, 0x61u8,
+        0x74u8, 0x65u8, 0x00u8, 0xecu8, 0x8au8, 0x7eu8, 0xc6u8, 0x24u8,
+        0x95u8, 0xb5u8, 0x02u8, 0x50u8, 0x50u8, 0x5bu8, 0x25u8, 0x78u8,
+        0x8du8, 0xfcu8, 0x7eu8, 0x02u8, 0x0au8, 0x63u8, 0x62u8, 0x62u8,
+        0x00u8, 0x00u8, 0xecu8, 0x8au8, 0x7eu8, 0xc6u8, 0x24u8, 0x95u8,
+        0xb5u8, 0x02u8, 0x50u8, 0x50u8, 0x5bu8, 0x25u8, 0x78u8, 0x8du8,
+        0xfcu8, 0x7eu8,
+    ];
+
+
+    #[test]
+    fn test_reader_recursive_schema() {
+        let schema = Schema::parse_str(SCHEMA_RECURSIVE).unwrap();
+        let reader = Reader::with_schema(&schema, ENCODED_RECURSIVE).unwrap();
+
+        let values: Vec<_> = reader.map(|x| x.unwrap()).collect();
+
+        assert!(values.len() == 1);
+        let value = &values[0];
+
+        assert_eq!(*value, Value::Record(vec!(("recurse".to_string(),
+                           Value::Union(Some(Box::new(Value::Record(vec!(("recurse".to_string(),
+                           Value::Union(Some(Box::new(Value::Record(vec!(("recurse".to_string(),
+                           Value::Union(None)))))))))))))))));
+    }
+
 }
