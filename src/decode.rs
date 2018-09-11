@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::mem::transmute;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use failure::Error;
 
@@ -25,7 +25,7 @@ fn decode_len<R: Read>(reader: &mut R) -> Result<usize, Error> {
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode<R: Read>(schema: Rc<Schema>, reader: &mut R, context: &mut SchemaParseContext) -> Result<Value, Error> {
+pub fn decode<R: Read>(schema: Arc<Schema>, reader: &mut R, context: &mut SchemaParseContext) -> Result<Value, Error> {
     match *schema {
         Schema::Null => Ok(Value::Null),
         Schema::Boolean => {
@@ -108,7 +108,7 @@ pub fn decode<R: Read>(schema: Rc<Schema>, reader: &mut R, context: &mut SchemaP
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    if let Value::String(key) = decode(Rc::new(Schema::String), reader, context)? {
+                    if let Value::String(key) = decode(Arc::new(Schema::String), reader, context)? {
                         let value = decode(inner.clone(), reader, context)?;
                         items.insert(key, value);
                     } else {
@@ -121,11 +121,10 @@ pub fn decode<R: Read>(schema: Rc<Schema>, reader: &mut R, context: &mut SchemaP
         },
         Schema::Union(ref inner) => {
             let index = zag_i64(reader)?;
-
-            match index {
-                0 => Ok(Value::Union(None)),
-                1 => decode(inner.clone(), reader, context).map(|x| Value::Union(Some(Box::new(x)))),
-                _ => Err(DecodeError::new("union index out of bounds").into()),
+            let variants = inner.variants();
+            match variants.get(index as usize) {
+                Some(variant) => decode(variant.clone(), reader, context).map(|x| Value::Union(Box::new(x))),
+                None => Err(DecodeError::new("Union index out of bounds").into()),
             }
         },
         Schema::Record { ref fields, ref name, .. } => {

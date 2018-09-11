@@ -6,7 +6,7 @@ use std::iter::once;
 
 use serde::ser::{self, Error as SerdeError, Serialize};
 
-use types::Value;
+use types::{ToAvro, Value};
 
 #[derive(Clone, Default)]
 pub struct Serializer {}
@@ -155,7 +155,7 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Union(None))
+        Ok(ToAvro::avro(None::<Self::Ok>))
     }
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
@@ -163,7 +163,7 @@ impl<'b> ser::Serializer for &'b mut Serializer {
         T: Serialize,
     {
         let v = value.serialize(&mut Serializer::default())?;
-        Ok(Value::Union(Some(Box::new(v))))
+        Ok(ToAvro::avro(Some(v)))
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
@@ -398,5 +398,39 @@ impl ser::SerializeStructVariant for StructSerializer {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         unimplemented!()
+    }
+}
+
+/// Interpret a serializeable instance as a `Value`.
+///
+/// This conversion can fail if the value is not valid as per the Avro specification.
+/// e.g: HashMap with non-string keys
+pub fn to_value<S: Serialize>(value: S) -> Result<Value, Error> {
+    let mut serializer = Serializer::default();
+    value.serialize(&mut serializer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize, Serialize)]
+    struct Test {
+        a: i64,
+        b: String,
+    }
+
+    #[test]
+    fn test_to_value() {
+        let test = Test {
+            a: 27,
+            b: "foo".to_owned(),
+        };
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Long(27)),
+            ("b".to_owned(), Value::String("foo".to_owned())),
+        ]);
+
+        assert_eq!(to_value(test).unwrap(), expected);
     }
 }

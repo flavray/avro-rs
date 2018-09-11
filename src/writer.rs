@@ -1,7 +1,7 @@
 //! Logic handling writing in Avro format at user level.
 use std::collections::HashMap;
 use std::io::Write;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use failure::Error;
 use rand::random;
@@ -298,7 +298,7 @@ impl<'a, W: Write> Writer<'a, W> {
         header.extend_from_slice(AVRO_OBJECT_HEADER);
         encode(
             &metadata.avro(),
-            &Schema::Map(Rc::new(Schema::Bytes)),
+            &Schema::Map(Arc::new(Schema::Bytes)),
             &mut header,
         );
         header.extend_from_slice(&self.marker);
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn test_union() {
         let schema = Schema::parse_str(UNION_SCHEMA).unwrap();
-        let union = Value::Union(Some(Box::new(Value::Long(3))));
+        let union = Value::Union(Box::new(Value::Long(3)));
 
         let mut expected = Vec::new();
         zig_i64(1, &mut expected);

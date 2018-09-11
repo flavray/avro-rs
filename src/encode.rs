@@ -54,28 +54,36 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         },
         Value::Fixed(_, bytes) => buffer.extend(bytes),
         Value::Enum(i, _) => encode_int(*i, buffer),
-        Value::Union(None) => buffer.push(0u8),
-        Value::Union(Some(item)) => {
+        Value::Union(item) => {
             if let Schema::Union(ref inner) = *schema {
-                encode_long(1, buffer);
-                encode_ref(&*item, inner, buffer);
+                // Find the schema that is matched here. Due to validation, this should always
+                // return a value.
+                let (idx, inner_schema) = inner
+                    .find_schema(item)
+                    .expect("Invalid Union validation occurred");
+                encode_long(idx as i64, buffer);
+                encode_ref(&*item, &inner_schema, buffer);
             }
         },
         Value::Array(items) => {
             if let Schema::Array(ref inner) = *schema {
-                encode_long(items.len() as i64, buffer);
-                for item in items.iter() {
-                    encode_ref(item, inner, buffer);
+                if items.len() > 0 {
+                    encode_long(items.len() as i64, buffer);
+                    for item in items.iter() {
+                        encode_ref(item, inner, buffer);
+                    }
                 }
                 buffer.push(0u8);
             }
         },
         Value::Map(items) => {
             if let Schema::Map(ref inner) = *schema {
-                encode_long(items.len() as i64, buffer);
-                for (key, value) in items {
-                    encode_bytes(key, buffer);
-                    encode_ref(value, inner, buffer);
+                if items.len() > 0 {
+                    encode_long(items.len() as i64, buffer);
+                    for (key, value) in items {
+                        encode_bytes(key, buffer);
+                        encode_ref(value, inner, buffer);
+                    }
                 }
                 buffer.push(0u8);
             }
@@ -98,4 +106,35 @@ pub fn encode_to_vec(value: &Value, schema: &Schema) -> Vec<u8> {
     let mut buffer = Vec::new();
     encode(&value, schema, &mut buffer);
     buffer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_encode_empty_array() {
+        let mut buf = Vec::new();
+        let empty: Vec<Value> = Vec::new();
+        encode(
+            &Value::Array(empty),
+            &Schema::Array(Arc::new(Schema::Int)),
+            &mut buf,
+        );
+        assert_eq!(vec![0u8], buf);
+    }
+
+    #[test]
+    fn test_encode_empty_map() {
+        let mut buf = Vec::new();
+        let empty: HashMap<String, Value> = HashMap::new();
+        encode(
+            &Value::Map(empty),
+            &Schema::Map(Arc::new(Schema::Int)),
+            &mut buf,
+        );
+        assert_eq!(vec![0u8], buf);
+    }
 }

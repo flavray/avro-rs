@@ -1,11 +1,13 @@
 //! Logic for parsing and interacting with schemas in Avro format.
+use std::borrow::Cow;
+use std::sync::Arc;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use failure::Error;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use serde_json::{self, Map, Value};
 
+use types;
 use util::MapHelper;
 
 /// Describes errors happened while parsing Avro schemas.
@@ -49,20 +51,13 @@ pub enum Schema {
     TypeReference(NameRef),
     /// A `array` Avro schema.
     /// `Array` holds a counted reference (`Rc`) to the `Schema` of its items.
-    Array(Rc<Schema>),
+    Array(Arc<Schema>),
     /// A `map` Avro schema.
-    /// `Map` holds a counted reference (`Rc`) to the `Schema` of its values.
+    /// `Map` holds a pointer to the `Schema` of its values, which must all be the same schema.
     /// `Map` keys are assumed to be `string`.
-    Map(Rc<Schema>),
+    Map(Arc<Schema>),
     /// A `union` Avro schema.
-    ///
-    /// `Union` holds a counted reference (`Rc`) to its non-`null` `Schema`.
-    ///
-    /// **NOTE** Only `["null", "< type >"]` unions are currently supported.
-    /// Any other combination of `Schema`s contained in a `union` will be
-    /// considered invalid and errors will be reported when trying to parse
-    /// such a schema.
-    Union(Rc<Schema>),
+    Union(UnionSchema),
     /// A `record` Avro schema.
     ///
     /// The `lookup` table maps field names to their position in the `Vec`
@@ -71,10 +66,7 @@ pub enum Schema {
         name: Name,
         doc: Documentation,
         fields: Vec<RecordField>,
-
-        // TODO: this does not look great.
-        // This is just a trick to avoid borrows of Schema into types::Record.
-        lookup: Rc<HashMap<String, usize>>,
+        lookup: HashMap<String, usize>,
     },
     /// An `enum` Avro schema.
     Enum {
@@ -84,6 +76,79 @@ pub enum Schema {
     },
     /// A `fixed` Avro schema.
     Fixed { name: Name, size: usize },
+}
+
+/// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
+/// It may have utility as part of the public API, but defining as `pub(crate)` for now.
+///
+/// **NOTE** This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
+/// be constructed in order to get the discriminant, which makes it difficult to implement a
+/// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
+/// intermediate type should be especially fast, as the number of enum variants is small, which
+/// _should_ compile into a jump-table for the conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SchemaKind {
+    Null,
+    Boolean,
+    Int,
+    Long,
+    Float,
+    Double,
+    Bytes,
+    String,
+    Array,
+    Map,
+    Union,
+    Record,
+    Enum,
+    Fixed,
+    TypeReference,
+}
+
+impl<'a> From<&'a Schema> for SchemaKind {
+    #[inline(always)]
+    fn from(schema: &'a Schema) -> SchemaKind {
+        // NOTE: I _believe_ this will always be fast as it should convert into a jump table.
+        match schema {
+            Schema::Null => SchemaKind::Null,
+            Schema::Boolean => SchemaKind::Boolean,
+            Schema::Int => SchemaKind::Int,
+            Schema::Long => SchemaKind::Long,
+            Schema::Float => SchemaKind::Float,
+            Schema::Double => SchemaKind::Double,
+            Schema::Bytes => SchemaKind::Bytes,
+            Schema::String => SchemaKind::String,
+            Schema::Array(_) => SchemaKind::Array,
+            Schema::Map(_) => SchemaKind::Map,
+            Schema::Union(_) => SchemaKind::Union,
+            Schema::Record { .. } => SchemaKind::Record,
+            Schema::Enum { .. } => SchemaKind::Enum,
+            Schema::Fixed { .. } => SchemaKind::Fixed,
+            Schema::TypeReference(_) => SchemaKind::TypeReference,
+        }
+    }
+}
+
+impl<'a> From<&'a types::Value> for SchemaKind {
+    #[inline(always)]
+    fn from(value: &'a types::Value) -> SchemaKind {
+        match value {
+            types::Value::Null => SchemaKind::Null,
+            types::Value::Boolean(_) => SchemaKind::Boolean,
+            types::Value::Int(_) => SchemaKind::Int,
+            types::Value::Long(_) => SchemaKind::Long,
+            types::Value::Float(_) => SchemaKind::Float,
+            types::Value::Double(_) => SchemaKind::Double,
+            types::Value::Bytes(_) => SchemaKind::Bytes,
+            types::Value::String(_) => SchemaKind::String,
+            types::Value::Array(_) => SchemaKind::Array,
+            types::Value::Map(_) => SchemaKind::Map,
+            types::Value::Union(_) => SchemaKind::Union,
+            types::Value::Record(_) => SchemaKind::Record,
+            types::Value::Enum(_, _) => SchemaKind::Enum,
+            types::Value::Fixed(_, _) => SchemaKind::Fixed,
+        }
+    }
 }
 
 /// Represents names for `record`, `enum` and `fixed` Avro schemas.
@@ -227,7 +292,7 @@ pub struct RecordField {
     /// is enabled.
     pub default: Option<Value>,
     /// Schema of the field.
-    pub schema: Rc<Schema>,
+    pub schema: Arc<Schema>,
     /// Order of the field.
     ///
     /// **NOTE** This currently has no effect.
@@ -266,8 +331,7 @@ impl RecordField {
                 "descending" => Some(RecordFieldOrder::Descending),
                 "ignore" => Some(RecordFieldOrder::Ignore),
                 _ => None,
-            })
-            .unwrap_or_else(|| RecordFieldOrder::Ascending);
+            }).unwrap_or_else(|| RecordFieldOrder::Ascending);
 
         Ok(RecordField {
             name,
@@ -282,7 +346,7 @@ impl RecordField {
 
 pub struct SchemaParseContext {
     pub current_namespace: Option<String>,
-    type_registry: HashMap<String, Rc<Schema>>,
+    type_registry: HashMap<String, Arc<Schema>>,
 }
 
 impl SchemaParseContext {
@@ -293,14 +357,78 @@ impl SchemaParseContext {
         }
     }
 
-    pub fn register_type(&mut self, name: Name, schema: Rc<Schema>) {
+    pub fn register_type(&mut self, name: Name, schema: Arc<Schema>) {
         for key in name.fullnames(&self.current_namespace) {
             self.type_registry.insert(key, schema.clone());
         }
     }
-
-    pub fn lookup_type(&self, name: &NameRef, context: &SchemaParseContext) -> Option<Rc<Schema>> {
+    pub fn lookup_type(&self, name: &NameRef, context: &SchemaParseContext) -> Option<Arc<Schema>> {
         self.type_registry.get(&name.fullname(&context.current_namespace)).cloned()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionSchema {
+    schemas: Vec<Arc<Schema>>,
+    // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
+    // schema index given a value.
+    // **NOTE** that this approach does not work for named types, and will have to be modified
+    // to support that. A simple solution is to also keep a mapping of the names used.
+    variant_index: HashMap<SchemaKind, usize>,
+}
+
+impl UnionSchema {
+    pub(crate) fn new(schemas: Vec<Arc<Schema>>) -> Result<Self, Error> {
+        let mut vindex = HashMap::new();
+        for (i, schema) in schemas.iter().enumerate() {
+            if let Schema::Union(_) = **schema {
+                Err(ParseSchemaError::new(
+                    "Unions may not directly contain a union",
+                ))?;
+            }
+            let kind = SchemaKind::from(&**schema);
+            if vindex.insert(kind, i).is_some() {
+                Err(ParseSchemaError::new(
+                    "Unions cannot contain duplicate types",
+                ))?;
+            }
+
+        }
+        Ok(UnionSchema {
+            schemas,
+            variant_index: vindex,
+        })
+    }
+
+
+    /// Returns a slice to all variants of this schema.
+    pub fn variants(&self) -> &[Arc<Schema>] {
+        &self.schemas
+    }
+
+    /// Returns true if the first variant of this `UnionSchema` is `Null`.
+    pub fn is_nullable(&self) -> bool {
+        !self.schemas.is_empty() && self.schemas[0] == Arc::new(Schema::Null)
+    }
+
+    /// Optionally returns a reference to the schema matched by this value, as well as its position
+    /// within this enum.
+    pub fn find_schema(&self, value: &::types::Value) -> Option<(usize, Arc<Schema>)> {
+        let kind = SchemaKind::from(value);
+        self.variant_index
+            .get(&kind)
+            .cloned()
+            .map(|i| (i, self.schemas[i].clone()))
+
+    }
+
+}
+
+// No need to compare variant_index, it is derivative of schemas.
+impl PartialEq for UnionSchema {
+    fn eq(&self, other: &UnionSchema) -> bool {
+        self.schemas.eq(&other.schemas)
+
     }
 }
 
@@ -322,33 +450,42 @@ impl Schema {
         res.map(|b| (*b).clone())
     }
 
-    fn parse_with_context<'a>(value: &'a Value , context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_with_context<'a>(value: &'a Value , context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         match *value {
             Value::String(ref t) => Schema::parse_type(t.as_str(), context),
             Value::Object(ref data) => Schema::parse_complex(data, context),
-            Value::Array(ref data) => Schema::parse_union(data, context),
+            Value::Array(ref data) => Schema::parse_union(data),
             _ => Err(ParseSchemaError::new("Must be a JSON string, object or array").into()),
         }
     }
 
+    /// Converts `self` into its [Parsing Canonical Form].
+    ///
+    /// [Parsing Canonical Form]:
+    /// https://avro.apache.org/docs/1.8.2/spec.html#Parsing+Canonical+Form+for+Schemas
+    pub fn canonical_form(&self) -> String {
+        let json = serde_json::to_value(self).unwrap();
+        parsing_canonical_form(&json)
+    }
+
     /// Parse a `serde_json::Value` representing a primitive Avro type into a
     /// `Schema`.
-    fn parse_type(primitive: &str, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_type(primitive: &str, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         match primitive {
-            "null" => Ok(Rc::new(Schema::Null)),
-            "boolean" => Ok(Rc::new(Schema::Boolean)),
-            "int" => Ok(Rc::new(Schema::Int)),
-            "long" => Ok(Rc::new(Schema::Long)),
-            "double" => Ok(Rc::new(Schema::Double)),
-            "float" => Ok(Rc::new(Schema::Float)),
-            "bytes" => Ok(Rc::new(Schema::Bytes)),
-            "string" => Ok(Rc::new(Schema::String)),
+            "null" => Ok(Arc::new(Schema::Null)),
+            "boolean" => Ok(Arc::new(Schema::Boolean)),
+            "int" => Ok(Arc::new(Schema::Int)),
+            "long" => Ok(Arc::new(Schema::Long)),
+            "double" => Ok(Arc::new(Schema::Double)),
+            "float" => Ok(Arc::new(Schema::Float)),
+            "bytes" => Ok(Arc::new(Schema::Bytes)),
+            "string" => Ok(Arc::new(Schema::String)),
             other => Schema::parse_reference(other, context),
         }
     }
 
-    fn parse_reference(reference: &str, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
-        NameRef::parse_str(reference, &context.current_namespace).map(Schema::TypeReference).map(Rc::new)
+    fn parse_reference(reference: &str, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
+        NameRef::parse_str(reference, &context.current_namespace).map(Schema::TypeReference).map(Arc::new)
     }
 
     /// Parse a `serde_json::Value` representing a complex Avro type into a
@@ -356,7 +493,7 @@ impl Schema {
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
-    fn parse_complex(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_complex(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         match complex.get("type") {
             Some(&Value::String(ref t)) => match t.as_str() {
                 "array" => Schema::parse_array(complex, context),
@@ -374,7 +511,7 @@ impl Schema {
         }
     }
 
-    fn parse_named(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_named(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         let name = Name::parse(complex, &context.current_namespace)?;
         context.current_namespace = name.name.namespace.clone();
 
@@ -397,7 +534,7 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro record type into a
     /// `Schema`.
-    fn parse_record(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_record(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         let name = Name::parse(complex, &context.current_namespace)?;
 
         let mut lookup = HashMap::new();
@@ -419,17 +556,17 @@ impl Schema {
             lookup.insert(field.name.clone(), field.position);
         }
 
-        Ok(Rc::new(Schema::Record {
+        Ok(Arc::new(Schema::Record {
             name,
             doc: complex.doc(),
             fields,
-            lookup: Rc::new(lookup),
+            lookup,
         }))
     }
 
     /// Parse a `serde_json::Value` representing a Avro enum type into a
     /// `Schema`.
-    fn parse_enum(complex: &Map<String, Value>, context: &SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_enum(complex: &Map<String, Value>, context: &SchemaParseContext) -> Result<Arc<Self>, Error> {
         let name = Name::parse(complex, &context.current_namespace)?;
 
         let symbols = complex
@@ -444,7 +581,7 @@ impl Schema {
                     .ok_or_else(|| ParseSchemaError::new("Unable to parse `symbols` in enum"))
             })?;
 
-        Ok(Rc::new(Schema::Enum {
+        Ok(Arc::new(Schema::Enum {
             name,
             doc: complex.doc(),
             symbols,
@@ -453,54 +590,37 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro array type into a
     /// `Schema`.
-    fn parse_array(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_array(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         complex
             .get("items")
             .ok_or_else(|| ParseSchemaError::new("No `items` in array").into())
             .and_then(|items| Schema::parse_with_context(items, context))
-            .map(|schema| Rc::new(Schema::Array(schema)))
+            .map(|schema| Arc::new(Schema::Array(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro map type into a
     /// `Schema`.
-    fn parse_map(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_map(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         complex
             .get("values")
             .ok_or_else(|| ParseSchemaError::new("No `values` in map").into())
             .and_then(|items| Schema::parse_with_context(items, context))
-            .map(|schema| Rc::new(Schema::Map(schema)))
+            .map(|schema| Arc::new(Schema::Map(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro union type into a
     /// `Schema`.
-    fn parse_union(items: &[Value], context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
-        /*
-        items.iter()
-            .map(|item| Schema::parse(item))
-            .collect::<Result<_, _>>()
-            .map(|schemas| Schema::Union(schemas))
-        */
-
-        if items.len() == 2 && items[0] == Value::String("null".to_owned()) {
-            Schema::parse_with_context(&items[1], context).map(|s| Rc::new(Schema::Union(s)))
-        } else {
-            Err(ParseSchemaError::new("Unions only support null and type").into())
-        }
-
-        /*
-        match items.as_slice() {
-            // &[Value::String(ref null), ref x] | &[ref x, Value::String(ref null)] if null == "null" => {
-            &[Value::String(ref null), ref x] if null == "null" => {
-                Schema::parse(&x).map(|s| Schema::Union(Rc::new(s)))
-            },
-            _ => Err(ParseSchemaError::new("Unions only support null and type")),
-        }
-        */
+    fn parse_union(items: &[Value]) -> Result<Arc<Self>, Error> {
+        items
+            .iter()
+            .map(|s| Schema::parse(s).map(Arc::new))
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|schemas| Ok(Arc::new(Schema::Union(UnionSchema::new(schemas)?))))
     }
 
     /// Parse a `serde_json::Value` representing a Avro fixed type into a
     /// `Schema`.
-    fn parse_fixed(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Rc<Self>, Error> {
+    fn parse_fixed(complex: &Map<String, Value>, context: &mut SchemaParseContext) -> Result<Arc<Self>, Error> {
         let name = Name::parse(complex, &context.current_namespace)?;
 
         let size = complex
@@ -508,7 +628,7 @@ impl Schema {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| ParseSchemaError::new("No `size` in fixed"))?;
 
-        Ok(Rc::new(Schema::Fixed {
+        Ok(Arc::new(Schema::Fixed {
             name,
             size: size as usize,
         }))
@@ -543,9 +663,11 @@ impl Serialize for Schema {
                 map.end()
             },
             Schema::Union(ref inner) => {
-                let mut seq = serializer.serialize_seq(Some(2))?;
-                seq.serialize_element("null")?;
-                seq.serialize_element(&*inner.clone())?;
+                let variants = inner.variants();
+                let mut seq = serializer.serialize_seq(Some(variants.len()))?;
+                for v in variants {
+                    seq.serialize_element(&**v)?;
+                }
                 seq.end()
             },
             Schema::Record {
@@ -608,6 +730,106 @@ impl Serialize for RecordField {
     }
 }
 
+/// Parses a **valid** avro schema into the Parsing Canonical Form.
+/// https://avro.apache.org/docs/1.8.2/spec.html#Parsing+Canonical+Form+for+Schemas
+fn parsing_canonical_form(schema: &serde_json::Value) -> String {
+    match schema {
+        serde_json::Value::Object(map) => pcf_map(map),
+        serde_json::Value::String(s) => pcf_string(s),
+        serde_json::Value::Array(v) => pcf_array(v),
+        _ => unreachable!(),
+    }
+}
+
+fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
+    // Look for the namespace variant up front.
+    let ns = schema.get("namespace").and_then(|v| v.as_str());
+    let mut fields = Vec::new();
+    for (k, v) in schema {
+        // Reduce primitive types to their simple form. ([PRIMITIVE] rule)
+        if schema.len() == 1 && k == "type" {
+            // Invariant: function is only callable from a valid schema, so this is acceptable.
+            if let serde_json::Value::String(s) = v {
+                return pcf_string(s)
+            }
+        }
+
+        // Strip out unused fields ([STRIP] rule)
+        if field_ordering_position(k).is_none() {
+            continue
+        }
+
+        // Fully qualify the name, if it isn't already ([FULLNAMES] rule).
+        if k == "name" {
+            // Invariant: Only valid schemas. Must be a string.
+            let name = v.as_str().unwrap();
+            let n = match ns {
+                Some(namespace) if !name.contains('.') => {
+                    Cow::Owned(format!("{}.{}", namespace, name))
+                },
+                _ => Cow::Borrowed(name),
+            };
+
+            fields.push((k, format!("{}:{}", pcf_string(k), pcf_string(&*n))));
+            continue
+        }
+
+        // Strip off quotes surrounding "size" type, if they exist ([INTEGERS] rule).
+        if k == "size" {
+            let i = match v.as_str() {
+                Some(s) => s.parse::<i64>().expect("Only valid schemas are accepted!"),
+                None => v.as_i64().unwrap(),
+            };
+            fields.push((k, format!("{}:{}", pcf_string(k), i)));
+            continue
+        }
+
+        // For anything else, recursively process the result.
+        fields.push((
+            k,
+            format!("{}:{}", pcf_string(k), parsing_canonical_form(v)),
+        ));
+    }
+
+    // Sort the fields by their canonical ordering ([ORDER] rule).
+    fields.sort_unstable_by_key(|(k, _)| field_ordering_position(k).unwrap());
+    let inter = fields
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{}}}", inter)
+}
+
+fn pcf_array(arr: &[serde_json::Value]) -> String {
+    let inter = arr
+        .iter()
+        .map(parsing_canonical_form)
+        .collect::<Vec<String>>()
+        .join(",");
+    format!("[{}]", inter)
+}
+
+fn pcf_string(s: &str) -> String {
+    format!("\"{}\"", s)
+}
+
+// Used to define the ordering and inclusion of fields.
+fn field_ordering_position(field: &str) -> Option<usize> {
+    let v = match field {
+        "name" => 1,
+        "type" => 2,
+        "fields" => 3,
+        "symbols" => 4,
+        "items" => 5,
+        "values" => 6,
+        "size" => 7,
+        _ => return None,
+    };
+
+    Some(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,25 +849,57 @@ mod tests {
     #[test]
     fn test_array_schema() {
         let schema = Schema::parse_str(r#"{"type": "array", "items": "string"}"#).unwrap();
-        assert_eq!(Schema::Array(Rc::new(Schema::String)), schema);
+        assert_eq!(Schema::Array(Arc::new(Schema::String)), schema);
     }
 
     #[test]
     fn test_map_schema() {
         let schema = Schema::parse_str(r#"{"type": "map", "values": "double"}"#).unwrap();
-        assert_eq!(Schema::Map(Rc::new(Schema::Double)), schema);
+        assert_eq!(Schema::Map(Arc::new(Schema::Double)), schema);
     }
 
     #[test]
     fn test_union_schema() {
         let schema = Schema::parse_str(r#"["null", "int"]"#).unwrap();
-        assert_eq!(Schema::Union(Rc::new(Schema::Int)), schema);
+        assert_eq!(
+            Schema::Union(UnionSchema::new(vec![Arc::new(Schema::Null), Arc::new(Schema::Int)]).unwrap()),
+            schema
+        );
     }
 
     #[test]
     fn test_union_unsupported_schema() {
-        let schema = Schema::parse_str(r#"["null", "int", "string"]"#);
+        let schema = Schema::parse_str(r#"["null", ["null", "int"], "string"]"#);
         assert!(schema.is_err());
+    }
+
+    #[test]
+    fn test_multi_union_schema() {
+        let schema = Schema::parse_str(r#"["null", "int", "float", "string", "bytes"]"#);
+        assert!(schema.is_ok());
+        let schema = schema.unwrap();
+        assert_eq!(SchemaKind::from(&schema), SchemaKind::Union);
+        let union_schema = match schema {
+            Schema::Union(u) => u,
+            _ => unreachable!(),
+        };
+        assert_eq!(union_schema.variants().len(), 5);
+        let mut variants = union_schema.variants().iter();
+        assert_eq!(SchemaKind::from(&**variants.next().unwrap()), SchemaKind::Null);
+        assert_eq!(SchemaKind::from(&**variants.next().unwrap()), SchemaKind::Int);
+        assert_eq!(
+            SchemaKind::from(&**variants.next().unwrap()),
+            SchemaKind::Float
+        );
+        assert_eq!(
+            SchemaKind::from(&**variants.next().unwrap()),
+            SchemaKind::String
+        );
+        assert_eq!(
+            SchemaKind::from(&**variants.next().unwrap()),
+            SchemaKind::Bytes
+        );
+        assert_eq!(variants.next(), None);
     }
 
     #[test]
@@ -675,7 +929,7 @@ mod tests {
                     name: "a".to_string(),
                     doc: None,
                     default: Some(Value::Number(42i64.into())),
-                    schema: Rc::new(Schema::Long),
+                    schema: Arc::new(Schema::Long),
                     order: RecordFieldOrder::Ascending,
                     position: 0,
                 },
@@ -683,12 +937,12 @@ mod tests {
                     name: "b".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::String),
+                    schema: Arc::new(Schema::String),
                     order: RecordFieldOrder::Ascending,
                     position: 1,
                 },
             ],
-            lookup: Rc::new(lookup),
+            lookup,
         };
 
         assert_eq!(expected, schema);
@@ -727,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn test_recursive_schema() {
+    fn test_parse_recursive_schema() {
         let schema = Schema::parse_str(r#"
                      {
                        "type": "record",
@@ -739,6 +993,26 @@ mod tests {
                          }
                        ]
                      }"#).unwrap();
+
+        let mut lookup = HashMap::new();
+        lookup.insert("recurse".to_owned(), 0);
+
+        let expected = Schema::Record{
+            doc: None,
+            name: Name { name: NameRef::parse_str("test", &None).unwrap(), aliases: None },
+            fields: vec!(
+                RecordField { name: "recurse".to_string(),
+                              doc: None,
+                              default: None,
+                              order: RecordFieldOrder::Ascending,
+                              position: 0,
+                              schema: Arc::new(Schema::Union(UnionSchema::new(vec!(Arc::new(Schema::Null),
+                                                                                   Arc::new(Schema::TypeReference(NameRef::parse_str("test", &None).unwrap())))).unwrap())) }
+            ),
+            lookup
+        };
+
+        assert_eq!(expected, schema);
     }
 
     #[test]
@@ -779,7 +1053,7 @@ mod tests {
                     name: "a".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::Fixed {
+                    schema: Arc::new(Schema::Fixed {
                         name: Name {
                             name: NameRef::parse_str("fixed_test", &Some("com.test".to_string())).unwrap(),
                             aliases: None,
@@ -793,12 +1067,12 @@ mod tests {
                     name: "b".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::TypeReference(NameRef::parse_str("fixed_test", &Some("com.test".to_string())).unwrap())),
+                    schema: Arc::new(Schema::TypeReference(NameRef::parse_str("fixed_test", &Some("com.test".to_string())).unwrap())),
                     order: RecordFieldOrder::Ascending,
                     position: 1,
                 },
             ],
-            lookup: Rc::new(lookup),
+            lookup: lookup,
         };
 
         assert_eq!(expected, schema);
@@ -855,11 +1129,11 @@ mod tests {
                     name: "one".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::Record{
+                    schema: Arc::new(Schema::Record{
                         name: Name { name: NameRef::parse_str("com.example.one", &None).unwrap(), aliases: None },
                         doc: None,
                         fields: Vec::new(),
-                        lookup: Rc::new(HashMap::new())
+                        lookup: HashMap::new()
                     }),
                     order: RecordFieldOrder::Ascending,
                     position: 0,
@@ -868,11 +1142,11 @@ mod tests {
                     name: "two".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::Record{
+                    schema: Arc::new(Schema::Record{
                         name: Name { name: NameRef::parse_str("biz.good.two", &None).unwrap(), aliases: None },
                         doc: None,
                         fields: Vec::new(),
-                        lookup: Rc::new(HashMap::new())
+                        lookup: HashMap::new()
                     }),
                     order: RecordFieldOrder::Ascending,
                     position: 1,
@@ -881,11 +1155,11 @@ mod tests {
                     name: "three".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::Record{
+                    schema: Arc::new(Schema::Record{
                         name: Name { name: NameRef::parse_str("com.example.sub.three", &None).unwrap(), aliases: None },
                         doc: None,
                         fields: Vec::new(),
-                        lookup: Rc::new(HashMap::new())
+                        lookup: HashMap::new()
                     }),
                     order: RecordFieldOrder::Ascending,
                     position: 2,
@@ -894,17 +1168,17 @@ mod tests {
                     name: "four".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::Record{
+                    schema: Arc::new(Schema::Record{
                         name: Name { name: NameRef::parse_str("four.five", &None).unwrap(), aliases: None },
                         doc: None,
                         fields: Vec::new(),
-                        lookup: Rc::new(HashMap::new())
+                        lookup: HashMap::new()
                     }),
                     order: RecordFieldOrder::Ascending,
                     position: 3,
                 },
             ],
-            lookup: Rc::new(lookup),
+            lookup: lookup,
         };
 
         assert_eq!(expected, schema);
@@ -912,9 +1186,9 @@ mod tests {
 
     #[test]
     fn test_no_documentation() {
-        let schema = Schema::parse_str(
-            r#"{"type": "enum", "name": "Coin", "symbols": ["heads", "tails"]}"#,
-        ).unwrap();
+        let schema =
+            Schema::parse_str(r#"{"type": "enum", "name": "Coin", "symbols": ["heads", "tails"]}"#)
+                .unwrap();
 
         let doc = match schema {
             Schema::Enum { doc, .. } => doc,
@@ -936,5 +1210,24 @@ mod tests {
         };
 
         assert_eq!("Some documentation".to_owned(), doc.unwrap());
+    }
+
+    // Tests to ensure Schema is Send + Sync. These tests don't need to _do_ anything, if they can
+    // compile, they pass.
+    #[test]
+    fn test_schema_is_send() {
+        fn send<S: Send>(_s: S) {}
+
+        let schema = Schema::Null;
+        send(schema);
+    }
+
+    #[test]
+    fn test_schema_is_sync() {
+        fn sync<S: Sync>(_s: S) {}
+
+        let schema = Schema::Null;
+        sync(&schema);
+        sync(schema);
     }
 }

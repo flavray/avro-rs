@@ -1,12 +1,12 @@
 //! Logic handling the intermediate representation of Avro values.
 use std::collections::HashMap;
 use std::hash::BuildHasher;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use failure::Error;
 use serde_json::Value as JsonValue;
 
-use schema::{RecordField, Schema, SchemaParseContext};
+use schema::{RecordField, Schema, SchemaKind, SchemaParseContext, UnionSchema};
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -54,12 +54,7 @@ pub enum Value {
     /// reading values.
     Enum(i32, String),
     /// An `union` Avro value.
-    ///
-    /// The current implementation limits union support to \["null", "< type >"\].
-    ///
-    /// `None` represents a `null` value, while `Some(<X>)` represents a `type`
-    /// value.
-    Union(Option<Box<Value>>),
+    Union(Box<Value>),
     /// An `array` Avro value.
     Array(Vec<Value>),
     /// A `map` Avro value.
@@ -126,7 +121,11 @@ where
     T: ToAvro,
 {
     fn avro(self) -> Value {
-        Value::Union(self.map(|v| Box::new(v.avro())))
+        let v = match self {
+            Some(v) => T::avro(v),
+            None => Value::Null,
+        };
+        Value::Union(Box::new(v))
     }
 }
 
@@ -174,15 +173,15 @@ impl<S: Serialize> ToAvro for S {
 
 /// Utility interface to build `Value::Record` objects.
 #[derive(Debug, Clone)]
-pub struct Record {
+pub struct Record<'a> {
     /// List of fields contained in the record.
     /// Ordered according to the fields in the schema given to create this
     /// `Record` object. Any unset field defaults to `Value::Null`.
     pub fields: Vec<(String, Value)>,
-    schema_lookup: Rc<HashMap<String, usize>>,
+    schema_lookup: &'a HashMap<String, usize>,
 }
 
-impl Record {
+impl<'a> Record<'a> {
     /// Create a `Record` given a `Schema`.
     ///
     /// If the `Schema` is not a `Schema::Record` variant, `None` will be returned.
@@ -200,7 +199,7 @@ impl Record {
 
                 Some(Record {
                     fields,
-                    schema_lookup: schema_lookup.clone(),
+                    schema_lookup,
                 })
             },
             _ => None,
@@ -222,7 +221,7 @@ impl Record {
     }
 }
 
-impl ToAvro for Record {
+impl<'a> ToAvro for Record<'a> {
     fn avro(self) -> Value {
         Value::Record(self.fields)
     }
@@ -271,8 +270,10 @@ impl Value {
                 .get(i as usize)
                 .map(|ref symbol| symbol == &s)
                 .unwrap_or(false),
-            (&Value::Union(None), &Schema::Union(_)) => true,
-            (&Value::Union(Some(ref value)), &Schema::Union(ref inner)) => value.validate(inner),
+            // (&Value::Union(None), &Schema::Union(_)) => true,
+            (&Value::Union(ref value), &Schema::Union(ref inner)) => {
+                inner.find_schema(value).is_some()
+            },
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate(inner))
             },
@@ -280,12 +281,11 @@ impl Value {
                 items.iter().all(|(_, value)| value.validate(inner))
             },
             (&Value::Record(ref record_fields), &Schema::Record { ref fields, .. }) => {
-                fields.len() == record_fields.len()
-                    && fields.iter().zip(record_fields.iter()).all(
-                        |(field, &(ref name, ref value))| {
-                            field.name == *name && value.validate(&field.schema)
-                        },
-                    )
+                fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
+                    |(field, &(ref name, ref value))| {
+                        field.name == *name && value.validate(&field.schema)
+                    },
+                )
             },
             _ => false,
         }
@@ -297,7 +297,18 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+    pub fn resolve(mut self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+        // Check if this schema is a union, and if the reader schema is not.
+        if SchemaKind::from(&self) == SchemaKind::Union
+            && SchemaKind::from(&*schema) != SchemaKind::Union
+        {
+            // Pull out the Union, and attempt to resolve against it.
+            let v = match self {
+                Value::Union(b) => *b,
+                _ => unreachable!(),
+            };
+            self = v;
+        }
         match *schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
@@ -308,7 +319,7 @@ impl Value {
             Schema::Bytes => self.resolve_bytes(),
             Schema::String => self.resolve_string(),
             Schema::Fixed { size, .. } => self.resolve_fixed(size),
-            Schema::Union(ref inner) => self.resolve_union(inner.clone(), context),
+            Schema::Union(ref inner) => self.resolve_union(&inner.clone(), context),
             Schema::Enum { ref symbols, .. } => self.resolve_enum(symbols),
             Schema::Array(ref inner) => self.resolve_array(inner.clone(), context),
             Schema::Map(ref inner) => self.resolve_map(inner.clone(), context),
@@ -451,18 +462,21 @@ impl Value {
         }
     }
 
-    fn resolve_union(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
-        match self {
-            Value::Union(None) => Ok(Value::Union(None)),
-            Value::Union(Some(inner)) => Ok(Value::Union(Some(Box::new(inner.resolve(schema, context)?)))),
-            other => Err(SchemaResolutionError::new(format!(
-                "Union({:?}) expected, got {:?}",
-                schema, other
-            )).into()),
-        }
+    fn resolve_union(self, schema: &UnionSchema, context: &mut SchemaParseContext) -> Result<Self, Error> {
+        let v = match self {
+            // Both are unions case.
+            Value::Union(v) => *v,
+            // Reader is a union, but writer is not.
+            v => v,
+        };
+        // Find the first match in the reader schema.
+        let (_, inner) = schema
+            .find_schema(&v)
+            .ok_or_else(|| SchemaResolutionError::new("Could not find matching type in union"))?;
+        v.resolve(inner, context)
     }
 
-    fn resolve_array(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+    fn resolve_array(self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Array(items) => Ok(Value::Array(items
                 .into_iter()
@@ -475,7 +489,7 @@ impl Value {
         }
     }
 
-    fn resolve_map(self, schema: Rc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+    fn resolve_map(self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Map(items) => Ok(Value::Map(items
                 .into_iter()
@@ -521,8 +535,7 @@ impl Value {
                 value
                     .resolve(field.schema.clone(), context)
                     .map(|value| (field.name.clone(), value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            }).collect::<Result<Vec<_>, _>>()?;
 
         Ok(Value::Record(new_fields))
     }
@@ -531,10 +544,7 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use std::rc::Rc;
-
-    use schema::{Name, RecordField, RecordFieldOrder};
+    use schema::{Name, RecordField, RecordFieldOrder, UnionSchema};
 
     #[test]
     fn validate() {
@@ -542,28 +552,40 @@ mod tests {
             (Value::Int(42), Schema::Int, true),
             (Value::Int(42), Schema::Boolean, false),
             (
-                Value::Union(None),
-                Schema::Union(Rc::new(Schema::Int)),
+                Value::Union(Box::new(Value::Null)),
+                Schema::Union(UnionSchema::new(vec![Arc::new(Schema::Null), Arc::new(Schema::Int)]).unwrap()),
                 true,
             ),
             (
-                Value::Union(Some(Box::new(Value::Int(42)))),
-                Schema::Union(Rc::new(Schema::Int)),
+                Value::Union(Box::new(Value::Int(42))),
+                Schema::Union(UnionSchema::new(vec![Arc::new(Schema::Null), Arc::new(Schema::Int)]).unwrap()),
                 true,
             ),
             (
-                Value::Union(Some(Box::new(Value::Null))),
-                Schema::Union(Rc::new(Schema::Int)),
+                Value::Union(Box::new(Value::Null)),
+                Schema::Union(UnionSchema::new(vec![Arc::new(Schema::Double), Arc::new(Schema::Int)]).unwrap()),
                 false,
             ),
             (
+                Value::Union(Box::new(Value::Int(42))),
+                Schema::Union(
+                    UnionSchema::new(vec![
+                        Arc::new(Schema::Null),
+                        Arc::new(Schema::Double),
+                        Arc::new(Schema::String),
+                        Arc::new(Schema::Int),
+                    ]).unwrap(),
+                ),
+                true,
+            ),
+            (
                 Value::Array(vec![Value::Long(42i64)]),
-                Schema::Array(Rc::new(Schema::Long)),
+                Schema::Array(Arc::new(Schema::Long)),
                 true,
             ),
             (
                 Value::Array(vec![Value::Boolean(true)]),
-                Schema::Array(Rc::new(Schema::Long)),
+                Schema::Array(Arc::new(Schema::Long)),
                 false,
             ),
             (Value::Record(vec![]), Schema::Null, false),
@@ -635,7 +657,7 @@ mod tests {
                     name: "a".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::Long),
+                    schema: Arc::new(Schema::Long),
                     order: RecordFieldOrder::Ascending,
                     position: 0,
                 },
@@ -643,12 +665,12 @@ mod tests {
                     name: "b".to_string(),
                     doc: None,
                     default: None,
-                    schema: Rc::new(Schema::String),
+                    schema: Arc::new(Schema::String),
                     order: RecordFieldOrder::Ascending,
                     position: 1,
                 },
             ],
-            lookup: Rc::new(HashMap::new()),
+            lookup: HashMap::new(),
         };
 
         assert!(
@@ -658,25 +680,33 @@ mod tests {
             ]).validate(&schema)
         );
 
-        assert!(!Value::Record(vec![
-            ("b".to_string(), Value::String("foo".to_string())),
-            ("a".to_string(), Value::Long(42i64)),
-        ]).validate(&schema));
+        assert!(
+            !Value::Record(vec![
+                ("b".to_string(), Value::String("foo".to_string())),
+                ("a".to_string(), Value::Long(42i64)),
+            ]).validate(&schema)
+        );
 
-        assert!(!Value::Record(vec![
-            ("a".to_string(), Value::Boolean(false)),
-            ("b".to_string(), Value::String("foo".to_string())),
-        ]).validate(&schema));
+        assert!(
+            !Value::Record(vec![
+                ("a".to_string(), Value::Boolean(false)),
+                ("b".to_string(), Value::String("foo".to_string())),
+            ]).validate(&schema)
+        );
 
-        assert!(!Value::Record(vec![
-            ("a".to_string(), Value::Long(42i64)),
-            ("c".to_string(), Value::String("foo".to_string())),
-        ]).validate(&schema));
+        assert!(
+            !Value::Record(vec![
+                ("a".to_string(), Value::Long(42i64)),
+                ("c".to_string(), Value::String("foo".to_string())),
+            ]).validate(&schema)
+        );
 
-        assert!(!Value::Record(vec![
-            ("a".to_string(), Value::Long(42i64)),
-            ("b".to_string(), Value::String("foo".to_string())),
-            ("c".to_string(), Value::Null),
-        ]).validate(&schema));
+        assert!(
+            !Value::Record(vec![
+                ("a".to_string(), Value::Long(42i64)),
+                ("b".to_string(), Value::String("foo".to_string())),
+                ("c".to_string(), Value::Null),
+            ]).validate(&schema)
+        );
     }
 }

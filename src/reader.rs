@@ -1,7 +1,7 @@
 //! Logic handling reading from Avro format at user level.
 use std::io::{ErrorKind, Read};
-use std::rc::Rc;
 use std::str::{from_utf8, FromStr};
+use std::sync::Arc;
 
 use failure::Error;
 use serde_json::from_slice;
@@ -23,7 +23,7 @@ struct Block<R> {
     message_count: usize,
     marker: [u8; 16],
     codec: Codec,
-    writer_schema: Rc<Schema>,
+    writer_schema: Arc<Schema>,
 }
 
 impl<R: Read> Block<R> {
@@ -31,7 +31,7 @@ impl<R: Read> Block<R> {
         let mut block = Block {
             reader,
             codec: Codec::Null,
-            writer_schema: Rc::new(Schema::Null),
+            writer_schema: Arc::new(Schema::Null),
             buf: vec![],
             buf_idx: 0,
             message_count: 0,
@@ -45,7 +45,7 @@ impl<R: Read> Block<R> {
     /// Try to read the header and to set the writer `Schema`, the `Codec` and the marker based on
     /// its content.
     fn read_header(&mut self) -> Result<(), Error> {
-        let meta_schema = Rc::new(Schema::Map(Rc::new(Schema::Bytes)));
+        let meta_schema = Arc::new(Schema::Map(Arc::new(Schema::Bytes)));
 
         let mut buf = [0u8; 4];
         self.reader.read_exact(&mut buf)?;
@@ -56,7 +56,8 @@ impl<R: Read> Block<R> {
 
         if let Value::Map(meta) = decode(meta_schema, &mut self.reader, &mut SchemaParseContext::new())? {
             // TODO: surface original parse schema errors instead of coalescing them here
-            let schema = meta.get("avro.schema")
+            let schema = meta
+                .get("avro.schema")
                 .and_then(|bytes| {
                     if let Value::Bytes(ref bytes) = *bytes {
                         from_slice(bytes.as_ref()).ok()
@@ -66,12 +67,13 @@ impl<R: Read> Block<R> {
                 })
                 .and_then(|json| Schema::parse(&json).ok());
             if let Some(schema) = schema {
-                self.writer_schema = Rc::new(schema);
+                self.writer_schema = Arc::new(schema);
             } else {
                 return Err(ParseSchemaError::new("unable to parse schema").into())
             }
 
-            if let Some(codec) = meta.get("avro.codec")
+            if let Some(codec) = meta
+                .get("avro.codec")
                 .and_then(|codec| {
                     if let Value::Bytes(ref bytes) = *codec {
                         from_utf8(bytes.as_ref()).ok()
@@ -150,7 +152,7 @@ impl<R: Read> Block<R> {
         self.len() == 0
     }
 
-    fn read_next(&mut self, read_schema: Option<Rc<Schema>>) -> Result<Option<Value>, Error> {
+    fn read_next(&mut self, read_schema: Option<Arc<Schema>>) -> Result<Option<Value>, Error> {
         if self.is_empty() {
             self.read_block_next()?;
             if self.is_empty() {
@@ -184,7 +186,7 @@ impl<R: Read> Block<R> {
 /// ```
 pub struct Reader<R> {
     block: Block<R>,
-    reader_schema: Option<Rc<Schema>>,
+    reader_schema: Option<Arc<Schema>>,
     errored: bool,
     should_resolve_schema: bool,
 }
@@ -213,7 +215,7 @@ impl<R: Read> Reader<R> {
         let block = Block::new(reader)?;
         let mut reader = Reader {
             block,
-            reader_schema: Some(Rc::new(schema.clone())),
+            reader_schema: Some(Arc::new(schema.clone())),
             errored: false,
             should_resolve_schema: false,
         };
@@ -228,7 +230,7 @@ impl<R: Read> Reader<R> {
     }
 
     /// Get a reference to the optional reader `Schema`.
-    pub fn reader_schema(&self) -> Option<Rc<Schema>> {
+    pub fn reader_schema(&self) -> Option<Arc<Schema>> {
         self.reader_schema.clone()
     }
 
@@ -271,9 +273,9 @@ impl<'a, R: Read> Iterator for Reader<R> {
 /// header and consecutive data blocks; use [`Reader`](struct.Reader.html) if you don't know what
 /// you are doing, instead.
 pub fn from_avro_datum<R: Read>(
-    writer_schema: Rc<Schema>,
+    writer_schema: Arc<Schema>,
     reader: &mut R,
-    reader_schema: Option<Rc<Schema>>,
+    reader_schema: Option<Arc<Schema>>,
 ) -> Result<Value, Error> {
     let value = decode(writer_schema, reader, &mut SchemaParseContext::new())?;
     match reader_schema {
@@ -333,19 +335,19 @@ mod tests {
         let expected = record.avro();
 
         assert_eq!(
-            from_avro_datum(Rc::new(schema), &mut encoded, None).unwrap(),
+            from_avro_datum(Arc::new(schema.clone()), &mut encoded, None).unwrap(),
             expected
         );
     }
 
     #[test]
-    fn test_union() {
+    fn test_null_union() {
         let schema = Schema::parse_str(UNION_SCHEMA).unwrap();
         let mut encoded: &'static [u8] = &[2, 0];
 
         assert_eq!(
-            from_avro_datum(Rc::new(schema), &mut encoded, None).unwrap(),
-            Value::Union(Some(Box::new(Value::Long(0))))
+            from_avro_datum(Arc::new(schema), &mut encoded, None).unwrap(),
+            Value::Union(Box::new(Value::Long(0)))
         );
     }
 
@@ -473,9 +475,9 @@ mod tests {
         let value = &values[0];
 
         assert_eq!(*value, Value::Record(vec!(("recurse".to_string(),
-                           Value::Union(Some(Box::new(Value::Record(vec!(("recurse".to_string(),
-                           Value::Union(Some(Box::new(Value::Record(vec!(("recurse".to_string(),
-                           Value::Union(None)))))))))))))))));
+                           Value::Union(Box::new(Value::Record(vec!(("recurse".to_string(),
+                           Value::Union(Box::new(Value::Record(vec!(("recurse".to_string(),
+                           Value::Union(Box::new(Value::Null))))))))))))))));
     }
 
 }
