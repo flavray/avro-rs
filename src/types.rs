@@ -260,7 +260,6 @@ impl Value {
     }
 
     pub(crate) fn validate_inner(&self, schema: &Arc<Schema>, context: &mut SchemaParseContext) -> bool {
-        println!("validate {:?} against {:?}", self, schema);
         match (self, &**schema) {
             (&Value::Null, Schema::Null) => true,
             (&Value::Boolean(_), Schema::Boolean) => true,
@@ -284,9 +283,7 @@ impl Value {
             },
             // (&Value::Union(None), &Schema::Union(_)) => true,
             (&Value::Union(ref value), Schema::Union(ref inner)) => {
-                let found = inner.find_schema(value, context).is_some();
-                println!("union value validateion {:?} found {:?}", value, found);
-                found
+                inner.find_schema(value, context).is_some()
             },
             (&Value::Array(ref items), Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate_inner(inner, context))
@@ -295,11 +292,9 @@ impl Value {
                 items.iter().all(|(_, value)| value.validate_inner(inner, context))
             },
             (&Value::Record(ref record_fields), Schema::Record { ref fields, ref name, .. }) => {
-                println!("asdfasdfasdfasdfadsfadsfasdf {}, {}", fields.len(), record_fields.len());
                 context.register_type(name, schema);
                 fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
                     |(field, &(ref name, ref value))| {
-                        println!("field.name: {:?} name: {:?} schema: {:?} value: {:?}", field.name, name, field.schema, value);
                         field.name == *name && value.validate_inner(&field.schema, context)
                     },
                 )
@@ -486,20 +481,16 @@ impl Value {
     }
 
     fn resolve_union(self, schema: &UnionSchema, context: &mut SchemaParseContext) -> Result<Self, Error> {
-        println!("union");
         let v = match self {
             // Both are unions case.
             Value::Union(v) => *v,
             // Reader is a union, but writer is not.
             v => v,
         };
-        println!("union2");
         // Find the first match in the reader schema.
         let (_, inner) = schema
             .find_schema(&v, context)
             .ok_or_else(|| SchemaResolutionError::new("Could not find matching type in union"))?;
-
-        println!("union3");
 
         v.resolve(&inner, context)
     }
@@ -540,8 +531,6 @@ impl Value {
             )))),
         }?;
 
-        println!("before new fields");
-
         let new_fields = fields
             .iter()
             .map(|field| {
@@ -567,7 +556,6 @@ impl Value {
                     .map(|value| (field.name.clone(), value))
             }).collect::<Result<Vec<_>, _>>()?;
 
-        println!("new fields: {}", new_fields.len());
         Ok(Value::Record(new_fields))
     }
 }

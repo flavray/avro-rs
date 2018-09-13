@@ -147,7 +147,6 @@ impl<W: Write> Writer<W> {
     /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn append_ser<S: Serialize>(&mut self, value: S) -> Result<usize, Error> {
         let avro_value = value.serialize(&mut self.serializer)?;
-        println!("serialized: {:?}", avro_value);
         self.append(avro_value)
     }
 

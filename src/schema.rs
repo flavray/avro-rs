@@ -400,10 +400,7 @@ impl UnionSchema {
                     Schema::Enum { ref name, .. } => name.fullnames(&context.current_namespace),
                     Schema::Fixed { ref name, .. } => name.fullnames(&context.current_namespace),
                     Schema::TypeReference(ref name) => vec!(name.fullname(&context.current_namespace)),
-                    ref x => {
-                        println!("unreachable {:?}", x);
-                        unreachable!()   
-                    }
+                    _ => unreachable!(),
                 };
                 
                 for n in names {
