@@ -256,13 +256,13 @@ impl Value {
     /// See the [Avro specification](https://avro.apache.org/docs/current/spec.html)
     /// for the full set of rules of schema validation.
     pub fn validate(&self, schema: &Schema) -> bool {
-        self.validate_inner(Arc::new(schema.clone()), &mut SchemaParseContext::new())
+        self.validate_inner(&Arc::new(schema.clone()), &mut SchemaParseContext::new())
     }
 
-    pub(crate) fn validate_inner(&self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> bool {
+    pub(crate) fn validate_inner(&self, schema: &Arc<Schema>, context: &mut SchemaParseContext) -> bool {
         println!("validate {:?} against {:?}", self, schema);
-        match (self, &*schema) {
-            (&Value::Null, &Schema::Null) => true,
+        match (self, &**schema) {
+            (&Value::Null, Schema::Null) => true,
             (&Value::Boolean(_), Schema::Boolean) => true,
             (&Value::Int(_), Schema::Int) => true,
             (&Value::Long(_), Schema::Long) => true,
@@ -270,13 +270,13 @@ impl Value {
             (&Value::Double(_), Schema::Double) => true,
             (&Value::Bytes(_), Schema::Bytes) => true,
             (&Value::String(_), Schema::String) => true,
-            (&Value::Fixed(n, _), &Schema::Fixed { size, .. }) => n == size,
+            (&Value::Fixed(n, _), Schema::Fixed { size, .. }) => n == *size,
             (&Value::String(ref s), Schema::Enum { ref symbols, ref name, .. }) => {
-                context.register_type(name.clone(), schema.clone());
+                context.register_type(name, schema);
                 symbols.contains(s)
             },
             (&Value::Enum(i, ref s), Schema::Enum { ref symbols, ref name, .. }) => {
-                context.register_type(name.clone(), schema.clone());
+                context.register_type(name, schema);
                 symbols
                     .get(i as usize)
                     .map(|ref symbol| symbol == &s)
@@ -289,24 +289,24 @@ impl Value {
                 found
             },
             (&Value::Array(ref items), Schema::Array(ref inner)) => {
-                items.iter().all(|item| item.validate_inner(inner.clone(), context))
+                items.iter().all(|item| item.validate_inner(inner, context))
             },
             (&Value::Map(ref items), Schema::Map(ref inner)) => {
-                items.iter().all(|(_, value)| value.validate_inner(inner.clone(), context))
+                items.iter().all(|(_, value)| value.validate_inner(inner, context))
             },
             (&Value::Record(ref record_fields), Schema::Record { ref fields, ref name, .. }) => {
                 println!("asdfasdfasdfasdfadsfadsfasdf {}, {}", fields.len(), record_fields.len());
-                context.register_type(name.clone(), schema.clone());
+                context.register_type(name, schema);
                 fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
                     |(field, &(ref name, ref value))| {
                         println!("field.name: {:?} name: {:?} schema: {:?} value: {:?}", field.name, name, field.schema, value);
-                        field.name == *name && value.validate_inner(field.schema.clone(), context)
+                        field.name == *name && value.validate_inner(&field.schema, context)
                     },
                 )
             },
             (&Value::Record(_), Schema::TypeReference (ref name)) => {
                 match context.lookup_type(name, context) {
-                    Some(s) => self.validate_inner(s.clone(), context),
+                    Some(ref s) => self.validate_inner(s, context),
                     None => false
                 }
             },
@@ -320,10 +320,10 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(mut self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+    pub fn resolve(mut self, schema: &Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
-            && SchemaKind::from(&*schema) != SchemaKind::Union
+            && SchemaKind::from(&**schema) != SchemaKind::Union
         {
             // Pull out the Union, and attempt to resolve against it.
             let v = match self {
@@ -332,7 +332,7 @@ impl Value {
             };
             self = v;
         }
-        match *schema {
+        match **schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
             Schema::Int => self.resolve_int(),
@@ -344,15 +344,15 @@ impl Value {
             Schema::Fixed { size, .. } => self.resolve_fixed(size),
             Schema::Union(ref inner) => self.resolve_union(&inner.clone(), context),
             Schema::Enum { ref symbols, .. } => self.resolve_enum(symbols),
-            Schema::Array(ref inner) => self.resolve_array(inner.clone(), context),
-            Schema::Map(ref inner) => self.resolve_map(inner.clone(), context),
+            Schema::Array(ref inner) => self.resolve_array(inner, context),
+            Schema::Map(ref inner) => self.resolve_map(inner, context),
             Schema::Record { ref fields, ref name, .. } => {
-                context.register_type(name.clone(), schema.clone());
+                context.register_type(name, schema);
                 self.resolve_record(fields, context)
             } ,
             Schema::TypeReference(ref name) => context.lookup_type(name, &context)
                 .map_or_else(|| Err(SchemaResolutionError::new(format!("Couldn't resolve type reference: {:?}", name)).into()),
-                             |s| self.resolve(s, context)),
+                             |s| self.resolve(&s, context)),
 
         }
     }
@@ -501,14 +501,14 @@ impl Value {
 
         println!("union3");
 
-        v.resolve(inner, context)
+        v.resolve(&inner, context)
     }
 
-    fn resolve_array(self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+    fn resolve_array(self, schema: &Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Array(items) => Ok(Value::Array(items
                 .into_iter()
-                .map(|item| item.resolve(schema.clone(), context))
+                .map(|item| item.resolve(schema, context))
                 .collect::<Result<Vec<_>, _>>()?)),
             other => Err(SchemaResolutionError::new(format!(
                 "Array({:?}) expected, got {:?}",
@@ -517,11 +517,11 @@ impl Value {
         }
     }
 
-    fn resolve_map(self, schema: Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
+    fn resolve_map(self, schema: &Arc<Schema>, context: &mut SchemaParseContext) -> Result<Self, Error> {
         match self {
             Value::Map(items) => Ok(Value::Map(items
                 .into_iter()
-                .map(|(key, value)| value.resolve(schema.clone(), context).map(|value| (key, value)))
+                .map(|(key, value)| value.resolve(schema, context).map(|value| (key, value)))
                 .collect::<Result<HashMap<_, _>, _>>()?)),
             other => Err(SchemaResolutionError::new(format!(
                 "Map({:?}) expected, got {:?}",
@@ -563,7 +563,7 @@ impl Value {
                     },
                 };
                 value
-                    .resolve(field.schema.clone(), context)
+                    .resolve(&field.schema, context)
                     .map(|value| (field.name.clone(), value))
             }).collect::<Result<Vec<_>, _>>()?;
 

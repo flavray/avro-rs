@@ -25,8 +25,8 @@ fn decode_len<R: Read>(reader: &mut R) -> Result<usize, Error> {
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode<R: Read>(schema: Arc<Schema>, reader: &mut R, context: &mut SchemaParseContext) -> Result<Value, Error> {
-    match *schema {
+pub fn decode<R: Read>(schema: &Arc<Schema>, reader: &mut R, context: &mut SchemaParseContext) -> Result<Value, Error> {
+    match **schema {
         Schema::Null => Ok(Value::Null),
         Schema::Boolean => {
             let mut buf = [0u8; 1];
@@ -89,7 +89,7 @@ pub fn decode<R: Read>(schema: Arc<Schema>, reader: &mut R, context: &mut Schema
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    items.push(decode(inner.clone(), reader, context)?);
+                    items.push(decode(inner, reader, context)?);
                 }
             }
 
@@ -108,8 +108,8 @@ pub fn decode<R: Read>(schema: Arc<Schema>, reader: &mut R, context: &mut Schema
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    if let Value::String(key) = decode(Arc::new(Schema::String), reader, context)? {
-                        let value = decode(inner.clone(), reader, context)?;
+                    if let Value::String(key) = decode(&Arc::new(Schema::String), reader, context)? {
+                        let value = decode(&inner, reader, context)?;
                         items.insert(key, value);
                     } else {
                         return Err(DecodeError::new("map key is not a string").into())
@@ -123,17 +123,17 @@ pub fn decode<R: Read>(schema: Arc<Schema>, reader: &mut R, context: &mut Schema
             let index = zag_i64(reader)?;
             let variants = inner.variants();
             match variants.get(index as usize) {
-                Some(variant) => decode(variant.clone(), reader, context).map(|x| Value::Union(Box::new(x))),
+                Some(variant) => decode(&variant, reader, context).map(|x| Value::Union(Box::new(x))),
                 None => Err(DecodeError::new("Union index out of bounds").into()),
             }
         },
         Schema::Record { ref fields, ref name, .. } => {
-            context.register_type(name.clone(), schema.clone());
+            context.register_type(name, schema);
             // Benchmarks indicate ~10% improvement using this method.
             let mut items = Vec::new();
             for field in fields {
                 // This clone is also expensive. See if we can do away with it...
-                items.push((field.name.clone(), decode(field.schema.clone(), reader, context)?));
+                items.push((field.name.clone(), decode(&field.schema, reader, context)?));
             }
             Ok(Value::Record(items))
             // fields
@@ -156,6 +156,6 @@ pub fn decode<R: Read>(schema: Arc<Schema>, reader: &mut R, context: &mut Schema
         },
         Schema::TypeReference(ref name) => context.lookup_type(name, &context)
             .map_or_else(|| Err(DecodeError::new("enum symbol not found").into()),
-                         |s| decode(s, reader, context)),
+                         |s| decode(&s, reader, context)),
     }
 }

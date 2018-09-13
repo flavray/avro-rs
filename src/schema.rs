@@ -179,7 +179,7 @@ impl NameRef {
     /// parse a string into a Name, using the given namespace if the
     /// parsed string wasn't fully qualified.
     fn parse_str(name: &str, namespace: &Option<String>) -> Result<Self, Error> {
-        let mut names: Vec<&str> = name.split(".").collect();
+        let mut names: Vec<&str> = name.split('.').collect();
         if names.len() > 1 {
             Ok(NameRef {
                 name: names.pop().unwrap().to_string(),
@@ -237,14 +237,15 @@ impl Name {
         }
 
         let aliases: Option<Vec<NameRef>> = if let Some(aliases) = complex.get("aliases") {
-            let v = aliases.as_array().ok_or(ParseSchemaError::new("aliases must be an array").into())
+            let v = aliases.as_array().ok_or_else(|| ParseSchemaError::new("aliases must be an array"))
             .and_then(|aliases| {
                 aliases
                     .iter()
                     .map(|alias| alias.as_str())
                     .map(|alias| alias
-                         .ok_or(ParseSchemaError::new("couldn't parse type alias").into())
-                         .and_then(|a| NameRef::parse_str(a, &name.namespace))
+                         .ok_or_else(|| ParseSchemaError::new("couldn't parse type alias"))
+                         .and_then(|a| NameRef::parse_str(a, &name.namespace)
+                                   .map_err(|e| ParseSchemaError::new(format!("couldn't parse name: {:?}: {}", name, e))))
                     ).collect::<Result<_,_>>()
             })?;
             Some(v)
@@ -269,7 +270,7 @@ impl Name {
 
         v.push(self.name.fullname(&default_namespace));
         if let Some(ref aliases) = self.aliases {
-            for ref a in aliases {
+            for a in aliases {
                 v.push(a.fullname(&default_namespace));
             }
         }
@@ -342,7 +343,7 @@ impl RecordField {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SchemaParseContext {
     pub current_namespace: Option<String>,
     type_registry: HashMap<String, Arc<Schema>>,
@@ -356,7 +357,7 @@ impl SchemaParseContext {
         }
     }
 
-    pub fn register_type(&mut self, name: Name, schema: Arc<Schema>) {
+    pub fn register_type(&mut self, name: &Name, schema: &Arc<Schema>) {
         for key in name.fullnames(&self.current_namespace) {
             self.type_registry.insert(key, schema.clone());
         }
@@ -414,13 +415,11 @@ impl UnionSchema {
                     seen_names.insert(n);
                     named_index.push(i);
                 }
-            } else {
-                if variant_index.insert(kind, i).is_some() {
-                    Err(ParseSchemaError::new(
-                        "Unions cannot contain duplicate types",
-                    ))?;
+            } else if variant_index.insert(kind, i).is_some() {
+                Err(ParseSchemaError::new(
+                    "Unions cannot contain duplicate types",
+                ))?;
 
-                }
             }
         }
 
@@ -448,8 +447,8 @@ impl UnionSchema {
         let kind = SchemaKind::from(value);
 
         if let SchemaKind::Named = kind {
-            for i in self.named_index.iter() {
-                if value.validate_inner(self.schemas[*i].clone(), &mut context.clone()) {
+            for i in &self.named_index {
+                if value.validate_inner(&self.schemas[*i], &mut context.clone()) {
                     return Some((*i, self.schemas[*i].clone()));
                 }
             }
@@ -565,7 +564,7 @@ impl Schema {
         };
 
         if let Ok(ref schema) = schema {
-            context.register_type(name, schema.clone())
+            context.register_type(&name, schema)
         }
 
         schema

@@ -97,7 +97,7 @@ impl<W: Write> Writer<W> {
         };
 
         let avro = value.avro();
-        write_value_ref(self.schema.clone(), &avro, &mut self.buffer, &mut SchemaParseContext::new())?;
+        write_value_ref(&self.schema, &avro, &mut self.buffer, &mut SchemaParseContext::new())?;
 
         self.num_values += 1;
 
@@ -125,7 +125,7 @@ impl<W: Write> Writer<W> {
             0
         };
 
-        write_value_ref(self.schema.clone(), value, &mut self.buffer, &mut SchemaParseContext::new())?;
+        write_value_ref(&self.schema, value, &mut self.buffer, &mut SchemaParseContext::new())?;
 
         self.num_values += 1;
 
@@ -314,24 +314,24 @@ impl<W: Write> Writer<W> {
 /// This is an internal function which gets the bytes buffer where to write as parameter instead of
 /// creating a new one like `to_avro_datum`.
 fn write_avro_datum<T: ToAvro>(
-    schema: Arc<Schema>,
+    schema: &Arc<Schema>,
     value: T,
     buffer: &mut Vec<u8>,
     context: &mut SchemaParseContext,
 ) -> Result<(), Error> {
     let avro = value.avro();
-    if !avro.validate_inner(schema.clone(), context) {
+    if !avro.validate_inner(&schema, context) {
         return Err(ValidationError::new("value does not match schema").into())
     }
-    encode_inner(&avro, schema, buffer, context);
+    encode_inner(&avro, &schema, buffer, context);
     Ok(())
 }
 
-fn write_value_ref(schema: Arc<Schema>, value: &Value, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) -> Result<(), Error> {
-    if !value.validate_inner(schema.clone(), context) {
+fn write_value_ref(schema: &Arc<Schema>, value: &Value, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) -> Result<(), Error> {
+    if !value.validate_inner(&schema, context) {
         return Err(ValidationError::new("value does not match schema").into())
     }
-    encode_ref_inner(value, schema.clone(), buffer, context);
+    encode_ref_inner(value, &schema, buffer, context);
     Ok(())
 }
 
@@ -343,7 +343,7 @@ fn write_value_ref(schema: Arc<Schema>, value: &Value, buffer: &mut Vec<u8>, con
 /// you are doing, instead.
 pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Error> {
     let mut buffer = Vec::new();
-    write_avro_datum(Arc::new(schema.clone()), value, &mut buffer, &mut SchemaParseContext::new())?;
+    write_avro_datum(&Arc::new(schema.clone()), value, &mut buffer, &mut SchemaParseContext::new())?;
     Ok(buffer)
 }
 

@@ -749,7 +749,7 @@ mod tests {
         // Would allocated 18446744073709551605 bytes
         let illformed: &[u8] = &[0x3e, 0x15, 0xff, 0x1f, 0x15, 0xff];
 
-        let value = from_avro_datum(Arc::new(schema), &mut &illformed[..], None);
+        let value = from_avro_datum(&Arc::new(schema), &mut &illformed[..], &None);
         assert!(value.is_err());
     }
 }

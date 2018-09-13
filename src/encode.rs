@@ -11,10 +11,10 @@ use util::{zig_i32, zig_i64};
 /// be valid with regards to the schema. Schema are needed only to guide the
 /// encoding for complex type values.
 pub fn encode(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
-    encode_ref_inner(&value, Arc::new(schema.clone()), buffer, &mut SchemaParseContext::new())
+    encode_ref_inner(&value, &Arc::new(schema.clone()), buffer, &mut SchemaParseContext::new())
 }
 
-pub(crate) fn encode_inner(value: &Value, schema: Arc<Schema>, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) {
+pub(crate) fn encode_inner(value: &Value, schema: &Arc<Schema>, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) {
     encode_ref_inner(&value, schema, buffer, context)
 }
 
@@ -37,7 +37,7 @@ fn encode_int(i: i32, buffer: &mut Vec<u8>) {
 /// **NOTE** This will not perform schema validation. The value is assumed to
 /// be valid with regards to the schema. Schema are needed only to guide the
 /// encoding for complex type values.
-pub(crate)  fn encode_ref_inner(value: &Value, schema: Arc<Schema>, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) {
+pub(crate)  fn encode_ref_inner(value: &Value, schema: &Arc<Schema>, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) {
     match value {
         Value::Null => (),
         Value::Boolean(b) => buffer.push(if *b { 1u8 } else { 0u8 }),
@@ -46,7 +46,7 @@ pub(crate)  fn encode_ref_inner(value: &Value, schema: Arc<Schema>, buffer: &mut
         Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
         Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
         Value::Bytes(bytes) => encode_bytes(bytes, buffer),
-        Value::String(s) => match *schema {
+        Value::String(s) => match **schema {
             Schema::String => {
                 encode_bytes(s, buffer);
             },
@@ -60,34 +60,34 @@ pub(crate)  fn encode_ref_inner(value: &Value, schema: Arc<Schema>, buffer: &mut
         Value::Fixed(_, bytes) => buffer.extend(bytes),
         Value::Enum(i, _) => encode_int(*i, buffer),
         Value::Union(item) => {
-            if let Schema::Union(ref inner) = *schema {
+            if let Schema::Union(ref inner) = **schema {
                 // Find the schema that is matched here. Due to validation, this should always
                 // return a value.
                 let (idx, inner_schema) = inner
                     .find_schema(item, context)
                     .expect("Invalid Union validation occurred");
                 encode_long(idx as i64, buffer);
-                encode_ref_inner(&*item, inner_schema, buffer, context);
+                encode_ref_inner(&*item, &inner_schema, buffer, context);
             }
         },
         Value::Array(items) => {
-            if let Schema::Array(ref inner) = *schema {
-                if items.len() > 0 {
+            if let Schema::Array(ref inner) = **schema {
+                if !items.is_empty() {
                     encode_long(items.len() as i64, buffer);
                     for item in items.iter() {
-                        encode_ref_inner(item, inner.clone(), buffer, context);
+                        encode_ref_inner(item, &inner, buffer, context);
                     }
                 }
                 buffer.push(0u8);
             }
         },
         Value::Map(items) => {
-            if let Schema::Map(ref inner) = *schema {
-                if items.len() > 0 {
+            if let Schema::Map(ref inner) = **schema {
+                if !items.is_empty() {
                     encode_long(items.len() as i64, buffer);
                     for (key, value) in items {
                         encode_bytes(key, buffer);
-                        encode_ref_inner(value, inner.clone(), buffer, context);
+                        encode_ref_inner(value, inner, buffer, context);
                     }
                 }
                 buffer.push(0u8);
@@ -97,10 +97,10 @@ pub(crate)  fn encode_ref_inner(value: &Value, schema: Arc<Schema>, buffer: &mut
             if let Schema::Record {
                 fields: ref schema_fields,
                 ..
-            } = *schema
+            } = **schema
             {
                 for (i, &(_, ref value)) in fields.iter().enumerate() {
-                    encode_ref_inner(value, schema_fields[i].schema.clone(), buffer, context);
+                    encode_ref_inner(value, &schema_fields[i].schema, buffer, context);
                 }
             }
         },

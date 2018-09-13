@@ -54,7 +54,7 @@ impl<R: Read> Block<R> {
             return Err(DecodeError::new("wrong magic in header").into())
         }
 
-        if let Value::Map(meta) = decode(meta_schema, &mut self.reader, &mut SchemaParseContext::new())? {
+        if let Value::Map(meta) = decode(&meta_schema, &mut self.reader, &mut SchemaParseContext::new())? {
             // TODO: surface original parse schema errors instead of coalescing them here
             let schema = meta
                 .get("avro.schema")
@@ -152,7 +152,7 @@ impl<R: Read> Block<R> {
         self.len() == 0
     }
 
-    fn read_next(&mut self, read_schema: Option<Arc<Schema>>) -> Result<Option<Value>, Error> {
+    fn read_next(&mut self, read_schema: &Option<Arc<Schema>>) -> Result<Option<Value>, Error> {
         if self.is_empty() {
             self.read_block_next()?;
             if self.is_empty() {
@@ -162,7 +162,7 @@ impl<R: Read> Block<R> {
 
         let mut block_bytes = &self.buf[self.buf_idx..];
         let b_original = block_bytes.len();
-        let item = from_avro_datum(self.writer_schema.clone(), &mut block_bytes, read_schema)?;
+        let item = from_avro_datum(&self.writer_schema, &mut block_bytes, &read_schema)?;
         self.buf_idx += b_original - block_bytes.len();
         self.message_count -= 1;
         Ok(Some(item))
@@ -242,7 +242,7 @@ impl<R: Read> Reader<R> {
             None
         };
 
-        self.block.read_next(read_schema)
+        self.block.read_next(&read_schema)
     }
 }
 
@@ -273,13 +273,13 @@ impl<'a, R: Read> Iterator for Reader<R> {
 /// header and consecutive data blocks; use [`Reader`](struct.Reader.html) if you don't know what
 /// you are doing, instead.
 pub fn from_avro_datum<R: Read>(
-    writer_schema: Arc<Schema>,
+    writer_schema: &Arc<Schema>,
     reader: &mut R,
-    reader_schema: Option<Arc<Schema>>,
+    reader_schema: &Option<Arc<Schema>>,
 ) -> Result<Value, Error> {
-    let value = decode(writer_schema, reader, &mut SchemaParseContext::new())?;
+    let value = decode(&writer_schema, reader, &mut SchemaParseContext::new())?;
     match reader_schema {
-        Some(schema) => {
+        Some(ref schema) => {
             let mut context = SchemaParseContext::new();
             value.resolve(schema, &mut context)
         },
@@ -335,7 +335,7 @@ mod tests {
         let expected = record.avro();
 
         assert_eq!(
-            from_avro_datum(Arc::new(schema.clone()), &mut encoded, None).unwrap(),
+            from_avro_datum(&Arc::new(schema.clone()), &mut encoded, &None).unwrap(),
             expected
         );
     }
@@ -346,7 +346,7 @@ mod tests {
         let mut encoded: &'static [u8] = &[2, 0];
 
         assert_eq!(
-            from_avro_datum(Arc::new(schema), &mut encoded, None).unwrap(),
+            from_avro_datum(&Arc::new(schema), &mut encoded, &None).unwrap(),
             Value::Union(Box::new(Value::Long(0)))
         );
     }
