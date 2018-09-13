@@ -8,8 +8,8 @@ use rand::random;
 use serde::Serialize;
 use serde_json;
 
-use encode::{encode, encode_ref, encode_to_vec};
-use schema::Schema;
+use encode::{encode, encode_inner, encode_ref_inner, encode_to_vec};
+use schema::{Schema, SchemaParseContext};
 use ser::Serializer;
 use types::{ToAvro, Value};
 use Codec;
@@ -34,8 +34,8 @@ impl ValidationError {
 }
 
 /// Main interface for writing Avro formatted values.
-pub struct Writer<'a, W> {
-    schema: &'a Schema,
+pub struct Writer<W> {
+    schema: Arc<Schema>,
     serializer: Serializer,
     writer: W,
     buffer: Vec<u8>,
@@ -45,24 +45,24 @@ pub struct Writer<'a, W> {
     has_header: bool,
 }
 
-impl<'a, W: Write> Writer<'a, W> {
+impl<W: Write> Writer<W> {
     /// Creates a `Writer` given a `Schema` and something implementing the `io::Write` trait to write
     /// to.
     /// No compression `Codec` will be used.
-    pub fn new(schema: &'a Schema, writer: W) -> Writer<'a, W> {
+    pub fn new(schema: &Schema, writer: W) -> Writer<W> {
         Self::with_codec(schema, writer, Codec::Null)
     }
 
     /// Creates a `Writer` with a specific `Codec` given a `Schema` and something implementing the
     /// `io::Write` trait to write to.
-    pub fn with_codec(schema: &'a Schema, writer: W, codec: Codec) -> Writer<'a, W> {
+    pub fn with_codec(schema: &Schema, writer: W, codec: Codec) -> Writer<W> {
         let mut marker = Vec::with_capacity(16);
         for _ in 0..16 {
             marker.push(random::<u8>());
         }
 
         Writer {
-            schema,
+            schema: Arc::new(schema.clone()),
             serializer: Serializer::default(),
             writer,
             buffer: Vec::with_capacity(SYNC_INTERVAL),
@@ -74,8 +74,8 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     /// Get a reference to the `Schema` associated to a `Writer`.
-    pub fn schema(&self) -> &'a Schema {
-        self.schema
+    pub fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
     }
 
     /// Append a compatible value (implementing the `ToAvro` trait) to a `Writer`, also performing
@@ -97,7 +97,7 @@ impl<'a, W: Write> Writer<'a, W> {
         };
 
         let avro = value.avro();
-        write_value_ref(self.schema, &avro, &mut self.buffer)?;
+        write_value_ref(self.schema.clone(), &avro, &mut self.buffer, &mut SchemaParseContext::new())?;
 
         self.num_values += 1;
 
@@ -125,7 +125,7 @@ impl<'a, W: Write> Writer<'a, W> {
             0
         };
 
-        write_value_ref(self.schema, value, &mut self.buffer)?;
+        write_value_ref(self.schema.clone(), value, &mut self.buffer, &mut SchemaParseContext::new())?;
 
         self.num_values += 1;
 
@@ -147,6 +147,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// written, then call [`flush`](struct.Writer.html#method.flush).
     pub fn append_ser<S: Serialize>(&mut self, value: S) -> Result<usize, Error> {
         let avro_value = value.serialize(&mut self.serializer)?;
+        println!("serialized: {:?}", avro_value);
         self.append(avro_value)
     }
 
@@ -288,7 +289,7 @@ impl<'a, W: Write> Writer<'a, W> {
 
     /// Create an Avro header based on schema, codec and sync marker.
     fn header(&self) -> Result<Vec<u8>, Error> {
-        let schema_bytes = serde_json::to_string(self.schema)?.into_bytes();
+        let schema_bytes = serde_json::to_string(&*self.schema)?.into_bytes();
 
         let mut metadata = HashMap::with_capacity(2);
         metadata.insert("avro.schema", Value::Bytes(schema_bytes));
@@ -313,23 +314,24 @@ impl<'a, W: Write> Writer<'a, W> {
 /// This is an internal function which gets the bytes buffer where to write as parameter instead of
 /// creating a new one like `to_avro_datum`.
 fn write_avro_datum<T: ToAvro>(
-    schema: &Schema,
+    schema: Arc<Schema>,
     value: T,
     buffer: &mut Vec<u8>,
+    context: &mut SchemaParseContext,
 ) -> Result<(), Error> {
     let avro = value.avro();
-    if !avro.validate(schema) {
+    if !avro.validate_inner(schema.clone(), context) {
         return Err(ValidationError::new("value does not match schema").into())
     }
-    encode(&avro, schema, buffer);
+    encode_inner(&avro, schema, buffer, context);
     Ok(())
 }
 
-fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Result<(), Error> {
-    if !value.validate(schema) {
+fn write_value_ref(schema: Arc<Schema>, value: &Value, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) -> Result<(), Error> {
+    if !value.validate_inner(schema.clone(), context) {
         return Err(ValidationError::new("value does not match schema").into())
     }
-    encode_ref(value, schema, buffer);
+    encode_ref_inner(value, schema.clone(), buffer, context);
     Ok(())
 }
 
@@ -341,13 +343,15 @@ fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Resu
 /// you are doing, instead.
 pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Error> {
     let mut buffer = Vec::new();
-    write_avro_datum(schema, value, &mut buffer)?;
+    write_avro_datum(Arc::new(schema.clone()), value, &mut buffer, &mut SchemaParseContext::new())?;
     Ok(buffer)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::iter::once;
     use super::*;
+    use reader::*;
     use types::Record;
     use util::zig_i64;
 
@@ -601,6 +605,35 @@ mod tests {
                 .collect::<Vec<u8>>(),
             data
         );
+    }
+
+    
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Recursive {
+        recurse: Option<Box<Recursive>>
+    }
+
+    #[test]
+    fn test_recursive_writer() {
+        let schema = Schema::parse_str(r#"
+             {
+               "type": "record",
+               "name": "recurse",
+               "fields": [
+                 {
+                   "name": "recurse",
+                   "type": ["null", "recurse"]
+                 }
+               ]
+             }"#).unwrap();
+
+        let mut writer = Writer::new(&schema, Vec::new());
+        let record = Recursive { recurse: Some(Box::new(Recursive { recurse: None})) };
+
+        writer.extend_ser(once(record)).unwrap();
+        writer.flush().unwrap();
+        let encoded = writer.into_inner();
+        Reader::with_schema(&schema, encoded.as_slice()).unwrap();
     }
 
     #[test]

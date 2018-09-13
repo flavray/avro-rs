@@ -1,6 +1,7 @@
 use std::mem::transmute;
+use std::sync::Arc;
 
-use schema::Schema;
+use schema::{Schema, SchemaParseContext};
 use types::Value;
 use util::{zig_i32, zig_i64};
 
@@ -10,7 +11,11 @@ use util::{zig_i32, zig_i64};
 /// be valid with regards to the schema. Schema are needed only to guide the
 /// encoding for complex type values.
 pub fn encode(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
-    encode_ref(&value, schema, buffer)
+    encode_ref_inner(&value, Arc::new(schema.clone()), buffer, &mut SchemaParseContext::new())
+}
+
+pub(crate) fn encode_inner(value: &Value, schema: Arc<Schema>, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) {
+    encode_ref_inner(&value, schema, buffer, context)
 }
 
 fn encode_bytes<B: AsRef<[u8]> + ?Sized>(s: &B, buffer: &mut Vec<u8>) {
@@ -32,7 +37,7 @@ fn encode_int(i: i32, buffer: &mut Vec<u8>) {
 /// **NOTE** This will not perform schema validation. The value is assumed to
 /// be valid with regards to the schema. Schema are needed only to guide the
 /// encoding for complex type values.
-pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
+pub(crate)  fn encode_ref_inner(value: &Value, schema: Arc<Schema>, buffer: &mut Vec<u8>, context: &mut SchemaParseContext) {
     match value {
         Value::Null => (),
         Value::Boolean(b) => buffer.push(if *b { 1u8 } else { 0u8 }),
@@ -59,10 +64,10 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 // Find the schema that is matched here. Due to validation, this should always
                 // return a value.
                 let (idx, inner_schema) = inner
-                    .find_schema(item)
+                    .find_schema(item, context)
                     .expect("Invalid Union validation occurred");
                 encode_long(idx as i64, buffer);
-                encode_ref(&*item, &inner_schema, buffer);
+                encode_ref_inner(&*item, inner_schema, buffer, context);
             }
         },
         Value::Array(items) => {
@@ -70,7 +75,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 if items.len() > 0 {
                     encode_long(items.len() as i64, buffer);
                     for item in items.iter() {
-                        encode_ref(item, inner, buffer);
+                        encode_ref_inner(item, inner.clone(), buffer, context);
                     }
                 }
                 buffer.push(0u8);
@@ -82,7 +87,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                     encode_long(items.len() as i64, buffer);
                     for (key, value) in items {
                         encode_bytes(key, buffer);
-                        encode_ref(value, inner, buffer);
+                        encode_ref_inner(value, inner.clone(), buffer, context);
                     }
                 }
                 buffer.push(0u8);
@@ -95,7 +100,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
             } = *schema
             {
                 for (i, &(_, ref value)) in fields.iter().enumerate() {
-                    encode_ref(value, &schema_fields[i].schema, buffer);
+                    encode_ref_inner(value, schema_fields[i].schema.clone(), buffer, context);
                 }
             }
         },

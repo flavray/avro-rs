@@ -1,7 +1,7 @@
 //! Logic for parsing and interacting with schemas in Avro format.
 use std::borrow::Cow;
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use failure::Error;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
@@ -86,7 +86,7 @@ pub enum Schema {
 /// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
 /// intermediate type should be especially fast, as the number of enum variants is small, which
 /// _should_ compile into a jump-table for the conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SchemaKind {
     Null,
     Boolean,
@@ -99,10 +99,7 @@ pub(crate) enum SchemaKind {
     Array,
     Map,
     Union,
-    Record,
-    Enum,
-    Fixed,
-    TypeReference,
+    Named,
 }
 
 impl<'a> From<&'a Schema> for SchemaKind {
@@ -121,10 +118,11 @@ impl<'a> From<&'a Schema> for SchemaKind {
             Schema::Array(_) => SchemaKind::Array,
             Schema::Map(_) => SchemaKind::Map,
             Schema::Union(_) => SchemaKind::Union,
-            Schema::Record { .. } => SchemaKind::Record,
-            Schema::Enum { .. } => SchemaKind::Enum,
-            Schema::Fixed { .. } => SchemaKind::Fixed,
-            Schema::TypeReference(_) => SchemaKind::TypeReference,
+            Schema::Record{ .. } => SchemaKind::Named,
+            Schema::TypeReference{ .. } => SchemaKind::Named,
+            Schema::Fixed{ .. } => SchemaKind::Named,
+            Schema::Enum{ .. } => SchemaKind::Named,
+            
         }
     }
 }
@@ -144,9 +142,9 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::Array(_) => SchemaKind::Array,
             types::Value::Map(_) => SchemaKind::Map,
             types::Value::Union(_) => SchemaKind::Union,
-            types::Value::Record(_) => SchemaKind::Record,
-            types::Value::Enum(_, _) => SchemaKind::Enum,
-            types::Value::Fixed(_, _) => SchemaKind::Fixed,
+            types::Value::Record(_) => SchemaKind::Named,
+            types::Value::Enum(_, _) => SchemaKind::Named,
+            types::Value::Fixed(_, _) => SchemaKind::Named,
         }
     }
 }
@@ -161,13 +159,13 @@ impl<'a> From<&'a types::Value> for SchemaKind {
 ///
 /// More information about schema names can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#names)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NameRef {
     pub name: String,
     pub namespace: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name {
     pub name: NameRef,
     pub aliases: Option<Vec<NameRef>>,
@@ -344,6 +342,7 @@ impl RecordField {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SchemaParseContext {
     pub current_namespace: Option<String>,
     type_registry: HashMap<String, Arc<Schema>>,
@@ -370,33 +369,65 @@ impl SchemaParseContext {
 #[derive(Debug, Clone)]
 pub struct UnionSchema {
     schemas: Vec<Arc<Schema>>,
-    // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
-    // schema index given a value.
-    // **NOTE** that this approach does not work for named types, and will have to be modified
-    // to support that. A simple solution is to also keep a mapping of the names used.
+
+    // this will hold the irrefutable schemata such ans Int or Null
     variant_index: HashMap<SchemaKind, usize>,
+
+    // this will hold the indices of the named schemata which must be
+    // tested one by one if the irrefutable schemata don't match
+    named_index: Vec<usize>,
 }
 
 impl UnionSchema {
-    pub(crate) fn new(schemas: Vec<Arc<Schema>>) -> Result<Self, Error> {
-        let mut vindex = HashMap::new();
+    pub(crate) fn new(schemas: Vec<Arc<Schema>>, context: &SchemaParseContext) -> Result<Self, Error> {
+        let mut variant_index = HashMap::new();
+        let mut named_index = Vec::new();
+        let mut seen_names = HashSet::new();
+        
         for (i, schema) in schemas.iter().enumerate() {
             if let Schema::Union(_) = **schema {
                 Err(ParseSchemaError::new(
                     "Unions may not directly contain a union",
                 ))?;
             }
-            let kind = SchemaKind::from(&**schema);
-            if vindex.insert(kind, i).is_some() {
-                Err(ParseSchemaError::new(
-                    "Unions cannot contain duplicate types",
-                ))?;
-            }
 
+            let kind = SchemaKind::from(&**schema);
+
+            if let SchemaKind::Named = kind {
+                let names = match **schema {
+                    Schema::Record { ref name, .. } =>  name.fullnames(&context.current_namespace),
+                    Schema::Enum { ref name, .. } => name.fullnames(&context.current_namespace),
+                    Schema::Fixed { ref name, .. } => name.fullnames(&context.current_namespace),
+                    Schema::TypeReference(ref name) => vec!(name.fullname(&context.current_namespace)),
+                    ref x => {
+                        println!("unreachable {:?}", x);
+                        unreachable!()   
+                    }
+                };
+                
+                for n in names {
+                    if seen_names.contains(&n) {
+                        Err(ParseSchemaError::new(
+                            "Unions cannot contain duplicate named record/enum/fixed members",
+                        ))?;
+                    }
+                    seen_names.insert(n);
+                    named_index.push(i);
+                }
+            } else {
+                if variant_index.insert(kind, i).is_some() {
+                    Err(ParseSchemaError::new(
+                        "Unions cannot contain duplicate types",
+                    ))?;
+
+                }
+            }
         }
+
         Ok(UnionSchema {
             schemas,
-            variant_index: vindex,
+            variant_index,
+            named_index,
         })
     }
 
@@ -408,20 +439,28 @@ impl UnionSchema {
 
     /// Returns true if the first variant of this `UnionSchema` is `Null`.
     pub fn is_nullable(&self) -> bool {
-        !self.schemas.is_empty() && self.schemas[0] == Arc::new(Schema::Null)
+        self.variant_index.contains_key(&SchemaKind::Null)
     }
 
     /// Optionally returns a reference to the schema matched by this value, as well as its position
     /// within this enum.
-    pub fn find_schema(&self, value: &::types::Value) -> Option<(usize, Arc<Schema>)> {
+    pub fn find_schema(&self, value: &::types::Value, context: &mut SchemaParseContext) -> Option<(usize, Arc<Schema>)> {
         let kind = SchemaKind::from(value);
-        self.variant_index
-            .get(&kind)
-            .cloned()
-            .map(|i| (i, self.schemas[i].clone()))
 
+        if let SchemaKind::Named = kind {
+            for i in self.named_index.iter() {
+                if value.validate_inner(self.schemas[*i].clone(), &mut context.clone()) {
+                    return Some((*i, self.schemas[*i].clone()));
+                }
+            }
+            None
+        } else {
+            self.variant_index
+                .get(&kind)
+                .cloned()
+                .map(|i| (i, self.schemas[i].clone()))
+        }
     }
-
 }
 
 // No need to compare variant_index, it is derivative of schemas.
@@ -454,7 +493,7 @@ impl Schema {
         match *value {
             Value::String(ref t) => Schema::parse_type(t.as_str(), context),
             Value::Object(ref data) => Schema::parse_complex(data, context),
-            Value::Array(ref data) => Schema::parse_union(data),
+            Value::Array(ref data) => Schema::parse_union(data, context),
             _ => Err(ParseSchemaError::new("Must be a JSON string, object or array").into()),
         }
     }
@@ -610,12 +649,12 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro union type into a
     /// `Schema`.
-    fn parse_union(items: &[Value]) -> Result<Arc<Self>, Error> {
+    fn parse_union(items: &[Value], context: &SchemaParseContext) -> Result<Arc<Self>, Error> {
         items
             .iter()
             .map(|s| Schema::parse(s).map(Arc::new))
             .collect::<Result<Vec<_>, _>>()
-            .and_then(|schemas| Ok(Arc::new(Schema::Union(UnionSchema::new(schemas)?))))
+            .and_then(|schemas| Ok(Arc::new(Schema::Union(UnionSchema::new(schemas, context)?))))
     }
 
     /// Parse a `serde_json::Value` representing a Avro fixed type into a
@@ -862,7 +901,7 @@ mod tests {
     fn test_union_schema() {
         let schema = Schema::parse_str(r#"["null", "int"]"#).unwrap();
         assert_eq!(
-            Schema::Union(UnionSchema::new(vec![Arc::new(Schema::Null), Arc::new(Schema::Int)]).unwrap()),
+            Schema::Union(UnionSchema::new(vec![Arc::new(Schema::Null), Arc::new(Schema::Int)], &SchemaParseContext::new()).unwrap()),
             schema
         );
     }
@@ -982,7 +1021,7 @@ mod tests {
 
     #[test]
     fn test_parse_recursive_schema() {
-        let schema = Schema::parse_str(r#"
+        let _schema = Schema::parse_str(r#"
                      {
                        "type": "record",
                        "name": "test",
@@ -994,25 +1033,6 @@ mod tests {
                        ]
                      }"#).unwrap();
 
-        let mut lookup = HashMap::new();
-        lookup.insert("recurse".to_owned(), 0);
-
-        let expected = Schema::Record{
-            doc: None,
-            name: Name { name: NameRef::parse_str("test", &None).unwrap(), aliases: None },
-            fields: vec!(
-                RecordField { name: "recurse".to_string(),
-                              doc: None,
-                              default: None,
-                              order: RecordFieldOrder::Ascending,
-                              position: 0,
-                              schema: Arc::new(Schema::Union(UnionSchema::new(vec!(Arc::new(Schema::Null),
-                                                                                   Arc::new(Schema::TypeReference(NameRef::parse_str("test", &None).unwrap())))).unwrap())) }
-            ),
-            lookup
-        };
-
-        assert_eq!(expected, schema);
     }
 
     #[test]
