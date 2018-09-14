@@ -116,24 +116,25 @@ impl<R: Read> Block<R> {
         assert!(self.is_empty(), "Expected self to be empty!");
         match util::read_long(&mut self.reader) {
             Ok(block_len) => {
-                self.message_count = block_len as usize;
-                let block_bytes = util::read_long(&mut self.reader)?;
-                self.fill_buf(block_bytes as usize)?;
-                let mut marker = [0u8; 16];
-                self.reader.read_exact(&mut marker)?;
+                if block_len > 0 {
+                    self.message_count = block_len as usize;
+                    let block_bytes = util::read_long(&mut self.reader)?;
+                    self.fill_buf(block_bytes as usize)?;
+                    let mut marker = [0u8; 16];
+                    self.reader.read_exact(&mut marker)?;
 
-                if marker != self.marker {
-                    return Err(DecodeError::new("block marker does not match header marker").into())
+                    if marker != self.marker {
+                        return Err(DecodeError::new("block marker does not match header marker").into())
+                    }
+
+                    // NOTE (JAB): This doesn't fit this Reader pattern very well.
+                    // `self.buf` is a growable buffer that is reused as the reader is iterated.
+                    // For non `Codec::Null` variants, `decompress` will allocate a new `Vec`
+                    // and replace `buf` with the new one, instead of reusing the same buffer.
+                    // We can address this by using some "limited read" type to decode directly
+                    // into the buffer. But this is fine, for now.
+                    self.codec.decompress(&mut self.buf)?;
                 }
-
-                // NOTE (JAB): This doesn't fit this Reader pattern very well.
-                // `self.buf` is a growable buffer that is reused as the reader is iterated.
-                // For non `Codec::Null` variants, `decompress` will allocate a new `Vec`
-                // and replace `buf` with the new one, instead of reusing the same buffer.
-                // We can address this by using some "limited read" type to decode directly
-                // into the buffer. But this is fine, for now.
-                self.codec.decompress(&mut self.buf)?;
-
                 return Ok(())
             },
             Err(e) => if let ErrorKind::UnexpectedEof = e.downcast::<::std::io::Error>()?.kind() {
@@ -479,5 +480,4 @@ mod tests {
                            Value::Union(Box::new(Value::Record(vec!(("recurse".to_string(),
                            Value::Union(Box::new(Value::Null))))))))))))))));
     }
-
 }
