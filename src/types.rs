@@ -299,6 +299,9 @@ impl Value {
                     },
                 )
             },
+            (r @ Value::Record(..), Schema::Union(ref inner)) => {
+                inner.find_schema(r, context).is_some()
+            },
             (&Value::Record(_), Schema::TypeReference (ref name)) => {
                 match context.lookup_type(name, context) {
                     Some(ref s) => self.validate_inner(s, context),

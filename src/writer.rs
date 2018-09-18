@@ -606,7 +606,7 @@ mod tests {
         );
     }
 
-    
+
     #[derive(Debug, Serialize, Deserialize)]
     struct Recursive {
         recurse: Option<Box<Recursive>>
@@ -628,6 +628,57 @@ mod tests {
 
         let mut writer = Writer::new(&schema, Vec::new());
         let record = Recursive { recurse: Some(Box::new(Recursive { recurse: None})) };
+
+        writer.extend_ser(once(record)).unwrap();
+        writer.flush().unwrap();
+        let encoded = writer.into_inner();
+        Reader::with_schema(&schema, encoded.as_slice()).unwrap();
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    enum AB {
+        A { value: i32 },
+        B { value: String }
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct C {
+        ab: Vec<AB>
+    }
+
+    #[test]
+    fn test_enum_recursive() {
+        let schema = Schema::parse_str(r#"
+            {
+              "name": "C",
+              "type": "record",
+              "fields": [
+                 { "name": "ab",
+                   "type": { "type": "array",
+                             "items": [
+                      { "type": "record",
+                         "name": "A",
+                         "fields": [
+                            { "name": "value",
+                              "type": "int"
+                            }
+                          ]
+                      },
+                      { "type": "record",
+                         "name": "B",
+                         "fields": [
+                            { "name": "value",
+                              "type": "string"
+                            }]
+                      }
+                 ]}
+
+              }]
+            }
+            "#).unwrap();
+
+        let mut writer = Writer::new(&schema, Vec::new());
+        let record = C { ab: vec!(AB::A{ value: 1}, AB::B{ value: "two".to_string()}) };
 
         writer.extend_ser(once(record)).unwrap();
         writer.flush().unwrap();

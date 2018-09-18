@@ -137,9 +137,11 @@ impl<R: Read> Block<R> {
                 }
                 return Ok(())
             },
-            Err(e) => if let ErrorKind::UnexpectedEof = e.downcast::<::std::io::Error>()?.kind() {
+            Err(e) =>{
+                if let ErrorKind::UnexpectedEof = e.downcast::<::std::io::Error>()?.kind() {
                 // to not return any error in case we only finished to read cleanly from the stream
-                return Ok(())
+                    return Ok(())
+                }
             },
         };
         Err(DecodeError::new("unable to read block").into())

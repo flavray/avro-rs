@@ -225,10 +225,10 @@ impl<'b> ser::Serializer for &'b mut Serializer {
 
     fn serialize_tuple_variant(
         self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-        _: usize,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         unimplemented!() // TODO ?
     }
@@ -250,9 +250,9 @@ impl<'b> ser::Serializer for &'b mut Serializer {
         _: &'static str,
         _: u32,
         _: &'static str,
-        _: usize,
+        len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        unimplemented!() // TODO ?
+        Ok(StructSerializer::new(len))
     }
 }
 
@@ -389,15 +389,20 @@ impl ser::SerializeStructVariant for StructSerializer {
     type Ok = Value;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, _: &'static str, _: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(&mut self, name: &'static str, value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
-        unimplemented!()
+        self.fields.push((
+            name.to_owned(),
+            value.serialize(&mut Serializer::default())?,
+        ));
+        Ok(())
+        
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        Ok(Value::Record(self.fields))
     }
 }
 
