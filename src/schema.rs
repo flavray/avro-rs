@@ -193,7 +193,7 @@ impl NameRef {
         }
     }
 
-    fn fullname(&self, default_namespace: &Option<String>) -> String {
+    pub fn fullname(&self, default_namespace: &Option<String>) -> String {
         if self.name.contains('.') {
             self.name.to_string()
         } else {
@@ -345,8 +345,8 @@ impl RecordField {
 
 #[derive(Clone, Debug, Default)]
 pub struct SchemaParseContext {
-    pub current_namespace: Option<String>,
-    type_registry: HashMap<String, Arc<Schema>>,
+    pub(crate) current_namespace: Option<String>,
+    pub(crate) type_registry: HashMap<String, Arc<Schema>>,
 }
 
 impl SchemaParseContext {

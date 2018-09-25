@@ -260,6 +260,7 @@ impl Value {
     }
 
     pub(crate) fn validate_inner(&self, schema: &Arc<Schema>, context: &mut SchemaParseContext) -> bool {
+
         match (self, &**schema) {
             (&Value::Null, Schema::Null) => true,
             (&Value::Boolean(_), Schema::Boolean) => true,
@@ -272,16 +273,17 @@ impl Value {
             (&Value::Fixed(n, _), Schema::Fixed { size, .. }) => n == *size,
             (&Value::String(ref s), Schema::Enum { ref symbols, ref name, .. }) => {
                 context.register_type(name, schema);
+                context.current_namespace = name.name.namespace.clone();
                 symbols.contains(s)
             },
             (&Value::Enum(i, ref s), Schema::Enum { ref symbols, ref name, .. }) => {
+                context.current_namespace = name.name.namespace.clone();
                 context.register_type(name, schema);
                 symbols
                     .get(i as usize)
                     .map(|ref symbol| symbol == &s)
                     .unwrap_or(false)
             },
-            // (&Value::Union(None), &Schema::Union(_)) => true,
             (&Value::Union(ref value), Schema::Union(ref inner)) => {
                 inner.find_schema(value, context).is_some()
             },
@@ -292,6 +294,7 @@ impl Value {
                 items.iter().all(|(_, value)| value.validate_inner(inner, context))
             },
             (&Value::Record(ref record_fields), Schema::Record { ref fields, ref name, .. }) => {
+                context.current_namespace = name.name.namespace.clone();
                 context.register_type(name, schema);
                 fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
                     |(field, &(ref name, ref value))| {
