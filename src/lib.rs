@@ -521,7 +521,7 @@ pub mod schema;
 pub mod types;
 
 pub use codec::Codec;
-pub use de::from_value;
+pub use de::{from_value, Error};
 pub use reader::{from_avro_datum, Reader};
 pub use schema::{ParseSchemaError, Schema};
 pub use ser::to_value;
