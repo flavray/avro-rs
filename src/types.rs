@@ -1,7 +1,6 @@
 //! Logic handling the intermediate representation of Avro values.
 use std::collections::HashMap;
 use std::hash::BuildHasher;
-use std::rc::Rc;
 
 use failure::Error;
 use serde_json::Value as JsonValue;
@@ -173,15 +172,15 @@ impl<S: Serialize> ToAvro for S {
 
 /// Utility interface to build `Value::Record` objects.
 #[derive(Debug, Clone)]
-pub struct Record {
+pub struct Record<'a> {
     /// List of fields contained in the record.
     /// Ordered according to the fields in the schema given to create this
     /// `Record` object. Any unset field defaults to `Value::Null`.
     pub fields: Vec<(String, Value)>,
-    schema_lookup: Rc<HashMap<String, usize>>,
+    schema_lookup: &'a HashMap<String, usize>,
 }
 
-impl Record {
+impl<'a> Record<'a> {
     /// Create a `Record` given a `Schema`.
     ///
     /// If the `Schema` is not a `Schema::Record` variant, `None` will be returned.
@@ -199,9 +198,9 @@ impl Record {
 
                 Some(Record {
                     fields,
-                    schema_lookup: schema_lookup.clone(),
+                    schema_lookup,
                 })
-            },
+            }
             _ => None,
         }
     }
@@ -221,7 +220,7 @@ impl Record {
     }
 }
 
-impl ToAvro for Record {
+impl<'a> ToAvro for Record<'a> {
     fn avro(self) -> Value {
         Value::Record(self.fields)
     }
@@ -238,7 +237,7 @@ impl ToAvro for JsonValue {
             JsonValue::String(s) => Value::String(s),
             JsonValue::Array(items) => {
                 Value::Array(items.into_iter().map(|item| item.avro()).collect::<_>())
-            },
+            }
             JsonValue::Object(items) => Value::Map(
                 items
                     .into_iter()
@@ -273,21 +272,20 @@ impl Value {
             // (&Value::Union(None), &Schema::Union(_)) => true,
             (&Value::Union(ref value), &Schema::Union(ref inner)) => {
                 inner.find_schema(value).is_some()
-            },
+            }
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate(inner))
-            },
+            }
             (&Value::Map(ref items), &Schema::Map(ref inner)) => {
                 items.iter().all(|(_, value)| value.validate(inner))
-            },
+            }
             (&Value::Record(ref record_fields), &Schema::Record { ref fields, .. }) => {
-                fields.len() == record_fields.len()
-                    && fields.iter().zip(record_fields.iter()).all(
-                        |(field, &(ref name, ref value))| {
-                            field.name == *name && value.validate(&field.schema)
-                        },
-                    )
-            },
+                fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
+                    |(field, &(ref name, ref value))| {
+                        field.name == *name && value.validate(&field.schema)
+                    },
+                )
+            }
             _ => false,
         }
     }
@@ -333,7 +331,7 @@ impl Value {
             Value::Null => Ok(Value::Null),
             other => {
                 Err(SchemaResolutionError::new(format!("Null expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -342,7 +340,7 @@ impl Value {
             Value::Boolean(b) => Ok(Value::Boolean(b)),
             other => {
                 Err(SchemaResolutionError::new(format!("Boolean expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -352,7 +350,7 @@ impl Value {
             Value::Long(n) => Ok(Value::Int(n as i32)),
             other => {
                 Err(SchemaResolutionError::new(format!("Int expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -362,7 +360,7 @@ impl Value {
             Value::Long(n) => Ok(Value::Long(n)),
             other => {
                 Err(SchemaResolutionError::new(format!("Long expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -374,7 +372,7 @@ impl Value {
             Value::Double(x) => Ok(Value::Float(x as f32)),
             other => {
                 Err(SchemaResolutionError::new(format!("Float expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -386,7 +384,7 @@ impl Value {
             Value::Double(x) => Ok(Value::Double(x)),
             other => {
                 Err(SchemaResolutionError::new(format!("Double expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -396,7 +394,7 @@ impl Value {
             Value::String(s) => Ok(Value::Bytes(s.into_bytes())),
             other => {
                 Err(SchemaResolutionError::new(format!("Bytes expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -406,7 +404,7 @@ impl Value {
             Value::Bytes(bytes) => Ok(Value::String(String::from_utf8(bytes)?)),
             other => {
                 Err(SchemaResolutionError::new(format!("String expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -422,7 +420,7 @@ impl Value {
             },
             other => {
                 Err(SchemaResolutionError::new(format!("String expected, got {:?}", other)).into())
-            },
+            }
         }
     }
 
@@ -519,7 +517,7 @@ impl Value {
                         Some(ref value) => match field.schema {
                             Schema::Enum { ref symbols, .. } => {
                                 value.clone().avro().resolve_enum(symbols)?
-                            },
+                            }
                             _ => value.clone().avro(),
                         },
                         _ => {
@@ -527,14 +525,13 @@ impl Value {
                                 "missing field {} in record",
                                 field.name
                             )).into())
-                        },
+                        }
                     },
                 };
                 value
                     .resolve(&field.schema)
                     .map(|value| (field.name.clone(), value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            }).collect::<Result<Vec<_>, _>>()?;
 
         Ok(Value::Record(new_fields))
     }
@@ -543,9 +540,6 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use std::rc::Rc;
-
     use schema::{Name, RecordField, RecordFieldOrder, UnionSchema};
 
     #[test]
@@ -582,12 +576,12 @@ mod tests {
             ),
             (
                 Value::Array(vec![Value::Long(42i64)]),
-                Schema::Array(Rc::new(Schema::Long)),
+                Schema::Array(Box::new(Schema::Long)),
                 true,
             ),
             (
                 Value::Array(vec![Value::Boolean(true)]),
-                Schema::Array(Rc::new(Schema::Long)),
+                Schema::Array(Box::new(Schema::Long)),
                 false,
             ),
             (Value::Record(vec![]), Schema::Null, false),
@@ -672,7 +666,7 @@ mod tests {
                     position: 1,
                 },
             ],
-            lookup: Rc::new(HashMap::new()),
+            lookup: HashMap::new(),
         };
 
         assert!(
