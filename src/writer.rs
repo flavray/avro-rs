@@ -101,7 +101,7 @@ impl<'a, W: Write> Writer<'a, W> {
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush().map(|b| b + n)
+            return self.flush().map(|b| b + n);
         }
 
         Ok(n)
@@ -129,7 +129,7 @@ impl<'a, W: Write> Writer<'a, W> {
         self.num_values += 1;
 
         if self.buffer.len() >= SYNC_INTERVAL {
-            return self.flush().map(|b| b + n)
+            return self.flush().map(|b| b + n);
         }
 
         Ok(n)
@@ -241,7 +241,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// Return the number of bytes written.
     pub fn flush(&mut self) -> Result<usize, Error> {
         if self.num_values == 0 {
-            return Ok(0)
+            return Ok(0);
         }
 
         self.codec.compress(&mut self.buffer)?;
@@ -318,7 +318,7 @@ fn write_avro_datum<T: ToAvro>(
 ) -> Result<(), Error> {
     let avro = value.avro();
     if !avro.validate(schema) {
-        return Err(ValidationError::new("value does not match schema").into())
+        return Err(ValidationError::new("value does not match schema").into());
     }
     encode(&avro, schema, buffer);
     Ok(())
@@ -326,7 +326,7 @@ fn write_avro_datum<T: ToAvro>(
 
 fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Result<(), Error> {
     if !value.validate(schema) {
-        return Err(ValidationError::new("value does not match schema").into())
+        return Err(ValidationError::new("value does not match schema").into());
     }
     encode_ref(value, schema, buffer);
     Ok(())
@@ -347,7 +347,7 @@ pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Er
 #[cfg(test)]
 mod tests {
     use super::*;
-    use types::Record;
+    use types::{Record, Value};
     use util::zig_i64;
 
     static SCHEMA: &'static str = r#"
@@ -363,6 +363,9 @@ mod tests {
     static UNION_SCHEMA: &'static str = r#"
             ["null", "long"]
         "#;
+
+    static LOGICAL_TYPE_SCHEMA: &'static str =
+        r#"{"type": "long", "logicalType": "timestamp-millis"}"#;
 
     #[test]
     fn test_to_avro_datum() {
@@ -389,6 +392,20 @@ mod tests {
         zig_i64(3, &mut expected);
 
         assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_logical_type() {
+        let schema = Schema::parse_str(LOGICAL_TYPE_SCHEMA).unwrap();
+        // The serialized format should be the same as the schema that is just "long".
+        let l_schema = Schema::Long;
+        let ser = to_avro_datum(&schema, 1i64).unwrap();
+        let l_ser = to_avro_datum(&l_schema, 1i64).unwrap();
+        assert_eq!(ser, l_ser);
+        // Should deserialize from the schema into the logical type.
+        let mut r = ser.as_slice();
+        let de = ::reader::from_avro_datum(&schema, &mut r, None).unwrap();
+        assert_eq!(de, Value::TimestampMillis(1));
     }
 
     #[test]

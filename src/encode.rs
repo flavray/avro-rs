@@ -36,20 +36,24 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
     match value {
         Value::Null => (),
         Value::Boolean(b) => buffer.push(if *b { 1u8 } else { 0u8 }),
-        Value::Int(i) => encode_int(*i, buffer),
-        Value::Long(i) => encode_long(*i, buffer),
+        // Pattern | Pattern here to signify that these _must_ have the same encoding.
+        Value::Int(i) | Value::Date(i) | Value::TimeMillis(i) => encode_int(*i, buffer),
+        Value::Long(i)
+        | Value::TimestampMillis(i)
+        | Value::TimestampMicros(i)
+        | Value::TimeMicros(i) => encode_long(*i, buffer),
         Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
         Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
         Value::Bytes(bytes) => encode_bytes(bytes, buffer),
         Value::String(s) => match *schema {
             Schema::String => {
                 encode_bytes(s, buffer);
-            },
+            }
             Schema::Enum { ref symbols, .. } => {
                 if let Some(index) = symbols.iter().position(|item| item == s) {
                     encode_int(index as i32, buffer);
                 }
-            },
+            }
             _ => (),
         },
         Value::Fixed(_, bytes) => buffer.extend(bytes),
@@ -64,7 +68,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 encode_long(idx as i64, buffer);
                 encode_ref(&*item, inner_schema, buffer);
             }
-        },
+        }
         Value::Array(items) => {
             if let Schema::Array(ref inner) = *schema {
                 if items.len() > 0 {
@@ -75,7 +79,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 }
                 buffer.push(0u8);
             }
-        },
+        }
         Value::Map(items) => {
             if let Schema::Map(ref inner) = *schema {
                 if items.len() > 0 {
@@ -87,7 +91,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                 }
                 buffer.push(0u8);
             }
-        },
+        }
         Value::Record(fields) => {
             if let Schema::Record {
                 fields: ref schema_fields,
@@ -98,7 +102,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                     encode_ref(value, &schema_fields[i].schema, buffer);
                 }
             }
-        },
+        }
     }
 }
 

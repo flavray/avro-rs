@@ -72,7 +72,26 @@ pub enum Schema {
         symbols: Vec<String>,
     },
     /// A `fixed` Avro schema.
-    Fixed { name: Name, size: usize },
+    Fixed {
+        name: Name,
+        size: usize,
+    },
+    // TODO (JAB): Implement eventually
+    // /// Logical type which represents `Decimal` values. The underlying type is serialized and
+    // /// deserialized as `Schema::Bytes` or `Schema::Fixed`. `scale` defaults to 0 and `precision`
+    // /// ...
+    // Decimal {
+    //     scale: usize,
+    //     precision: usize,
+    // },
+    /// Logical type which represents the number of days since the unix epoch.
+    /// Serialization format is `Schema::Int`.
+    Date,
+    TimeMillis,
+    TimeMicros,
+    TimestampMillis,
+    TimestampMicros,
+    // Duration,
 }
 
 /// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
@@ -99,6 +118,12 @@ pub(crate) enum SchemaKind {
     Record,
     Enum,
     Fixed,
+    // Decimal,
+    Date,
+    TimeMillis,
+    TimeMicros,
+    TimestampMillis,
+    TimestampMicros,
 }
 
 impl<'a> From<&'a Schema> for SchemaKind {
@@ -120,6 +145,11 @@ impl<'a> From<&'a Schema> for SchemaKind {
             Schema::Record { .. } => SchemaKind::Record,
             Schema::Enum { .. } => SchemaKind::Enum,
             Schema::Fixed { .. } => SchemaKind::Fixed,
+            Schema::Date => SchemaKind::Date,
+            Schema::TimeMillis => SchemaKind::TimeMillis,
+            Schema::TimeMicros => SchemaKind::TimeMicros,
+            Schema::TimestampMillis => SchemaKind::TimestampMillis,
+            Schema::TimestampMicros => SchemaKind::TimestampMicros,
         }
     }
 }
@@ -127,21 +157,27 @@ impl<'a> From<&'a Schema> for SchemaKind {
 impl<'a> From<&'a types::Value> for SchemaKind {
     #[inline(always)]
     fn from(value: &'a types::Value) -> SchemaKind {
+        use self::types::Value;
         match value {
-            types::Value::Null => SchemaKind::Null,
-            types::Value::Boolean(_) => SchemaKind::Boolean,
-            types::Value::Int(_) => SchemaKind::Int,
-            types::Value::Long(_) => SchemaKind::Long,
-            types::Value::Float(_) => SchemaKind::Float,
-            types::Value::Double(_) => SchemaKind::Double,
-            types::Value::Bytes(_) => SchemaKind::Bytes,
-            types::Value::String(_) => SchemaKind::String,
-            types::Value::Array(_) => SchemaKind::Array,
-            types::Value::Map(_) => SchemaKind::Map,
-            types::Value::Union(_) => SchemaKind::Union,
-            types::Value::Record(_) => SchemaKind::Record,
-            types::Value::Enum(_, _) => SchemaKind::Enum,
-            types::Value::Fixed(_, _) => SchemaKind::Fixed,
+            Value::Null => SchemaKind::Null,
+            Value::Boolean(_) => SchemaKind::Boolean,
+            Value::Int(_) => SchemaKind::Int,
+            Value::Long(_) => SchemaKind::Long,
+            Value::Float(_) => SchemaKind::Float,
+            Value::Double(_) => SchemaKind::Double,
+            Value::Bytes(_) => SchemaKind::Bytes,
+            Value::String(_) => SchemaKind::String,
+            Value::Array(_) => SchemaKind::Array,
+            Value::Map(_) => SchemaKind::Map,
+            Value::Union(_) => SchemaKind::Union,
+            Value::Record(_) => SchemaKind::Record,
+            Value::Enum(_, _) => SchemaKind::Enum,
+            Value::Fixed(_, _) => SchemaKind::Fixed,
+            Value::Date(_) => SchemaKind::Date,
+            Value::TimeMillis(_) => SchemaKind::TimeMillis,
+            Value::TimeMicros(_) => SchemaKind::TimeMicros,
+            Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
+            Value::TimestampMicros(_) => SchemaKind::TimestampMicros,
         }
     }
 }
@@ -277,8 +313,7 @@ impl RecordField {
                 "descending" => Some(RecordFieldOrder::Descending),
                 "ignore" => Some(RecordFieldOrder::Ignore),
                 _ => None,
-            })
-            .unwrap_or_else(|| RecordFieldOrder::Ascending);
+            }).unwrap_or_else(|| RecordFieldOrder::Ascending);
 
         Ok(RecordField {
             name,
@@ -400,6 +435,51 @@ impl Schema {
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
     fn parse_complex(complex: &Map<String, Value>) -> Result<Self, Error> {
+        fn logical_verify_type(complex: &Map<String, Value>, t: &str) -> Result<(), Error> {
+            match complex.get("type") {
+                Some(&Value::String(ref a)) if a == t => Ok(()),
+                Some(&Value::String(ref a)) => Err(ParseSchemaError::new(format!(
+                    "Unexpected `type` ({}) variant for logicalType",
+                    a
+                )))?,
+                _ => Err(ParseSchemaError::new(
+                    "Unexpected type variant for logicalType",
+                ))?,
+            }
+        }
+        match complex.get("logicalType") {
+            Some(&Value::String(ref t)) => match t.as_str() {
+                "decimal" => unimplemented!("TODO - XXX `decimal` logicalType"),
+                "date" => {
+                    logical_verify_type(complex, "int")?;
+                    return Ok(Schema::Date);
+                }
+                "time-millis" => {
+                    logical_verify_type(complex, "int")?;
+                    return Ok(Schema::TimeMillis);
+                }
+                "time-micros" => {
+                    logical_verify_type(complex, "long")?;
+                    return Ok(Schema::TimeMicros);
+                }
+                "timestamp-millis" => {
+                    logical_verify_type(complex, "long")?;
+                    return Ok(Schema::TimestampMillis);
+                }
+                "timestamp-micros" => {
+                    logical_verify_type(complex, "long")?;
+                    return Ok(Schema::TimestampMicros);
+                }
+                // In this case, of an unknown logical type, we just pass through to the underlying
+                // type.
+                _ => {}
+            },
+            // The spec says to ignore invalid logical types and just continue through to the
+            // underlying type - It is unclear whether that applies to this case or not, where the
+            // `logicalType` is not a string.
+            Some(_) => Err(ParseSchemaError::new("logicalType must be a string"))?,
+            _ => {}
+        }
         match complex.get("type") {
             Some(&Value::String(ref t)) => match t.as_str() {
                 "record" => Schema::parse_record(complex),
@@ -593,6 +673,36 @@ impl Serialize for Schema {
                 map.serialize_entry("type", "fixed")?;
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("size", size)?;
+                map.end()
+            }
+            Schema::Date => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "int")?;
+                map.serialize_entry("logicalType", "date")?;
+                map.end()
+            }
+            Schema::TimeMillis => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "int")?;
+                map.serialize_entry("logicalType", "time-millis")?;
+                map.end()
+            }
+            Schema::TimeMicros => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "long")?;
+                map.serialize_entry("logicalType", "time-micros")?;
+                map.end()
+            }
+            Schema::TimestampMillis => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "long")?;
+                map.serialize_entry("logicalType", "timestamp-millis")?;
+                map.end()
+            }
+            Schema::TimestampMicros => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "long")?;
+                map.serialize_entry("logicalType", "timestamp-micros")?;
                 map.end()
             }
         }
@@ -868,9 +978,9 @@ mod tests {
 
     #[test]
     fn test_no_documentation() {
-        let schema = Schema::parse_str(
-            r#"{"type": "enum", "name": "Coin", "symbols": ["heads", "tails"]}"#,
-        ).unwrap();
+        let schema =
+            Schema::parse_str(r#"{"type": "enum", "name": "Coin", "symbols": ["heads", "tails"]}"#)
+                .unwrap();
 
         let doc = match schema {
             Schema::Enum { doc, .. } => doc,
@@ -911,5 +1021,11 @@ mod tests {
         let schema = Schema::Null;
         sync(&schema);
         sync(schema);
+    }
+
+    #[test]
+    fn test_logical_types() {
+        let schema = Schema::parse_str(r#"{"type": "int", "logicalType": "date"}"#).unwrap();
+        assert_eq!(schema, Schema::Date);
     }
 }

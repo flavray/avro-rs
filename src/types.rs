@@ -65,6 +65,13 @@ pub enum Value {
     ///
     /// See [Record](types.Record) for a more user-friendly support.
     Record(Vec<(String, Value)>),
+    /// Logical type, serialized and deserialized as i32 directly. Can only be deserialized
+    /// properly with a schema.
+    Date(i32),
+    TimeMillis(i32),
+    TimeMicros(i64),
+    TimestampMillis(i64),
+    TimestampMicros(i64),
 }
 
 /// Any structure implementing the [ToAvro](trait.ToAvro.html) trait will be usable
@@ -258,7 +265,17 @@ impl Value {
             (&Value::Null, &Schema::Null) => true,
             (&Value::Boolean(_), &Schema::Boolean) => true,
             (&Value::Int(_), &Schema::Int) => true,
+            (&Value::Int(_), &Schema::Date) => true,
+            (&Value::Int(_), &Schema::TimeMillis) => true,
             (&Value::Long(_), &Schema::Long) => true,
+            (&Value::Long(_), &Schema::TimeMicros) => true,
+            (&Value::Long(_), &Schema::TimestampMillis) => true,
+            (&Value::Long(_), &Schema::TimestampMicros) => true,
+            (&Value::TimestampMicros(_), &Schema::TimestampMicros) => true,
+            (&Value::TimestampMillis(_), &Schema::TimestampMillis) => true,
+            (&Value::TimeMicros(_), &Schema::TimeMicros) => true,
+            (&Value::TimeMillis(_), &Schema::TimeMillis) => true,
+            (&Value::Date(_), &Schema::Date) => true,
             (&Value::Float(_), &Schema::Float) => true,
             (&Value::Double(_), &Schema::Double) => true,
             (&Value::Bytes(_), &Schema::Bytes) => true,
@@ -308,6 +325,7 @@ impl Value {
             };
             self = v;
         }
+        // TODO (JAB): XXX
         match *schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
@@ -323,6 +341,7 @@ impl Value {
             Schema::Array(ref inner) => self.resolve_array(inner),
             Schema::Map(ref inner) => self.resolve_map(inner),
             Schema::Record { ref fields, .. } => self.resolve_record(fields),
+            _ => unimplemented!("TODO"),
         }
     }
 
