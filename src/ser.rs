@@ -198,13 +198,17 @@ impl<'b> ser::Serializer for &'b mut Serializer {
         self,
         _: &'static str,
         _: u32,
-        _: &'static str,
+        field: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
-        value.serialize(self)
+        let final_value = Value::Record(vec![
+            ("name".into(), Value::String(field.to_owned())),
+            ("value".into(), Value::Union(Box::new(value.serialize(self)?)))
+            ]);
+        Ok(final_value)
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {

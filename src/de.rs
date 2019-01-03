@@ -52,6 +52,11 @@ struct StructDeserializer<'de> {
     value: Option<&'de Value>,
 }
 
+pub struct EnumDeserializer<'de> {
+    name: &'de Value,
+    value: &'de Value,
+}
+
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de Value) -> Self {
         Deserializer { input }
@@ -86,7 +91,63 @@ impl<'de> StructDeserializer<'de> {
     }
 }
 
-impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> EnumDeserializer<'de> {
+    pub fn new(name: &'de Value, value: &'de Value) -> Self {
+        EnumDeserializer {
+            name: name,
+            value: value,
+        }
+    }
+}
+
+impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
+    type Error = Error;
+    type Variant = Self;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: DeserializeSeed<'de>,
+    {
+        Ok((seed.deserialize(&Deserializer::new(self.name))?, self))
+    }
+}
+
+impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<(), Error> {
+        Err(Error::custom("Expected String"))
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Error>
+    where
+        T: DeserializeSeed<'de>,
+    {
+        seed.deserialize(& Deserializer::new(self.value))
+    }
+
+    fn tuple_variant<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        unimplemented!("TUPLE");
+        // de::Deserializer::deserialize_seq(self.input, visitor)
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        unimplemented!("Struct");
+        // de::Deserializer::deserialize_map(self.input, visitor)
+    }
+}
+
+impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -100,6 +161,15 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             Value::Long(i) => visitor.visit_i64(i),
             Value::Float(x) => visitor.visit_f32(x),
             Value::Double(x) => visitor.visit_f64(x),
+            Value::Union(ref x) => match **x {
+                Value::Null => visitor.visit_unit(),
+                Value::Boolean(b) => visitor.visit_bool(b),
+                Value::Int(i) => visitor.visit_i32(i),
+                Value::Long(i) => visitor.visit_i64(i),
+                Value::Float(f) => visitor.visit_f32(f),
+                Value::Double(f) => visitor.visit_f64(f),
+                _ => Err(Error::custom("Unsupported union")),
+            },
             _ => Err(Error::custom("incorrect value")),
         }
     }
@@ -139,6 +209,10 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                     .map_err(|e| Error::custom(e.description()))
                     .and_then(|s| visitor.visit_string(s))
             },
+            Value::Union(ref x) => match **x {
+                Value::String(ref s) => visitor.visit_string(s.to_owned()),
+                _ => Err(Error::custom("not a string|bytes|fixed")),
+            }
             _ => Err(Error::custom("not a string|bytes|fixed")),
         }
     }
@@ -173,7 +247,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         match *self.input {
             Value::Union(ref inner) if inner.as_ref() == &Value::Null => visitor.visit_none(),
-            Value::Union(ref inner) => visitor.visit_some(&mut Deserializer::new(inner)),
+            Value::Union(ref inner) => visitor.visit_some(& Deserializer::new(inner)),
             _ => Err(Error::custom("not a union")),
         }
     }
@@ -268,13 +342,18 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self,
         _: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
         match *self.input {
-            // &Value::Enum(i) => ,  TODO
+            Value::Record(ref fields) => {
+                if fields.len() != 2 {
+                    return Err(Error::custom("Enum should be a record with 2 fields"));
+                }
+                visitor.visit_enum(EnumDeserializer::new(&fields[0].1, &fields[1].1))
+            },
             _ => Err(Error::custom("not an enum")),
         }
     }
@@ -302,7 +381,7 @@ impl<'de> de::SeqAccess<'de> for SeqDeserializer<'de> {
         T: DeserializeSeed<'de>,
     {
         match self.input.next() {
-            Some(item) => seed.deserialize(&mut Deserializer::new(&item)).map(Some),
+            Some(item) => seed.deserialize(& Deserializer::new(&item)).map(Some),
             None => Ok(None),
         }
     }
@@ -329,7 +408,7 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
         V: DeserializeSeed<'de>,
     {
         match self.input_values.next() {
-            Some(ref value) => seed.deserialize(&mut Deserializer::new(value)),
+            Some(ref value) => seed.deserialize(& Deserializer::new(value)),
             None => Err(Error::custom("should not happen - too many values")),
         }
     }
@@ -359,12 +438,13 @@ impl<'de> de::MapAccess<'de> for StructDeserializer<'de> {
         V: DeserializeSeed<'de>,
     {
         match self.value.take() {
-            Some(value) => seed.deserialize(&mut Deserializer::new(value)),
+            Some(value) => seed.deserialize(& Deserializer::new(value)),
             None => Err(Error::custom("should not happen - too many values")),
         }
     }
 }
 
+#[derive(Clone)]
 struct StringDeserializer {
     input: String,
 }
@@ -391,6 +471,6 @@ impl<'de> de::Deserializer<'de> for StringDeserializer {
 /// This conversion can fail if the structure of the `Value` does not match the
 /// structure expected by `D`.
 pub fn from_value<'de, D: Deserialize<'de>>(value: &'de Value) -> Result<D, Error> {
-    let mut de = Deserializer::new(value);
-    D::deserialize(&mut de)
+    let de = Deserializer::new(value);
+    D::deserialize(& de)
 }
