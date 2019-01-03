@@ -725,16 +725,14 @@ mod tests {
             ]))
         ]);
 
-        assert_eq!(to_value(test).unwrap(), expected, "Error serializing unit internal enum");
+        assert_eq!(to_value(test).unwrap(), expected, "Error serializing unit adjacent enum");
 
         let test = TestUnitUntaggedEnum {
             a: UnitUntaggedEnum::Val1,
         };
 
         let expected = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("t".to_owned(), Value::String("Val1".to_owned())),
-            ]))
+            ("a".to_owned(), Value::Null),
         ]);
 
         assert_eq!(to_value(test).unwrap(), expected, "Error serializing unit untagged enum");
