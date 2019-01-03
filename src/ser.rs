@@ -418,12 +418,40 @@ pub fn to_value<S: Serialize>(value: S) -> Result<Value, Error> {
 mod tests {
     use super::*;
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, Deserialize, Serialize, Clone)]
     struct Test {
         a: i64,
         b: String,
     }
 
+    #[derive(Debug, Deserialize, Serialize)]
+    struct TestInner {
+        a: Test,
+        b: i32,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct TestEnum {
+        a: NormalEnum,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    enum NormalEnum {
+        Double(f64),
+        String(String),
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct TestEnum2 {
+        a: AdjacentEnum,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum AdjacentEnum {
+        Float(f32),
+        Bool(bool),
+    }
     #[test]
     fn test_to_value() {
         let test = Test {
@@ -435,6 +463,45 @@ mod tests {
             ("b".to_owned(), Value::String("foo".to_owned())),
         ]);
 
-        assert_eq!(to_value(test).unwrap(), expected);
+        assert_eq!(to_value(test.clone()).unwrap(), expected);
+
+        let test_inner = TestInner {
+            a: test.clone(),
+            b: 35,
+        };
+
+        let expected_inner = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("a".to_owned(), Value::Long(27)),
+                ("b".to_owned(), Value::String("foo".to_owned()))
+            ])),
+            ("b".to_owned(), Value::Int(35))
+        ]);
+
+        assert_eq!(to_value(test_inner).unwrap(), expected_inner);
+
+
+        let test_normal_enum = TestEnum {
+            a: NormalEnum::Double(64.0)
+        };
+
+        let expected_normal_enum = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("name".to_owned(), Value::String("Double".to_owned())),
+                ("value".to_owned(), Value::Union(Box::new(Value::Double(64.0))))
+            ]))
+        ]);
+
+        assert_eq!(to_value(test_normal_enum).unwrap(), expected_normal_enum, "Error serializing normal enum");
+
+        let test_untagged_enum = TestEnum2 {
+            a: AdjacentEnum::Bool(false)
+        };
+
+        let expected_untagged_enum = Value::Record(vec![
+            ("a".to_owned(), Value::Boolean(false))
+        ]);
+
+        assert_eq!(to_value(test_untagged_enum).unwrap(), expected_untagged_enum);
     }
 }
