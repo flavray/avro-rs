@@ -360,7 +360,7 @@ impl ser::SerializeTupleVariant for SeqVariantSerializer {
     where
         T: Serialize,
     {
-            ser::SerializeSeq::serialize_element(self, value)
+        ser::SerializeSeq::serialize_element(self, value)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {

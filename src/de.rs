@@ -164,7 +164,7 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
         self.input
             .first()
             .map_or(
-                Err(Error::custom("Should not get here")),
+                Err(Error::custom("A record must have a least one field")),
                 |item| Ok((seed.deserialize(StringDeserializer {input: item.0.clone()})?, self))
             )
     }
@@ -184,7 +184,7 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
         self.input
             .first()
             .map_or(
-                Err(Error::custom("Expected a newtype variant, got nothing instead")),
+                Err(Error::custom("Expected a newtype variant, got nothing instead.")),
                 |item| seed.deserialize(&Deserializer::new(&item.1)))
     }
 
@@ -195,7 +195,7 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
         self.input
             .first()
             .map_or(
-                Err(Error::custom("Should not get here")),        
+                Err(Error::custom("Expected a tuple variant, got nothing instead.")),        
                 |item| de::Deserializer::deserialize_seq(&Deserializer::new(&item.1), visitor)
             )
     }
@@ -211,7 +211,7 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
         self.input
             .first()
             .map_or(
-                Err(Error::custom("Unexpected struct variant")),
+                Err(Error::custom("Expected a struct variant, got nothing instead.")),
                 |item| de::Deserializer::deserialize_struct(&Deserializer::new(&item.1), "", fields, visitor)
             )
     }
