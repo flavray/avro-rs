@@ -885,27 +885,27 @@ mod tests {
 
         assert_eq!(to_value(test).unwrap(), expected, "error serializing tuple external enum");
 
-        // let test = TestTupleAdjacentEnum {
-        //     a: TupleAdjacentEnum::Val1(1.0, 2.0),
-        // };
+        let test = TestTupleAdjacentEnum {
+            a: TupleAdjacentEnum::Val1(1.0, 2.0),
+        };
 
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Record(vec![
-        //         ("t".to_owned(), Value::String("Val1".to_owned())),
-        //         ("v".to_owned(), Value::Union(Box::new(Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))))
-        //     ]))
-        // ]);
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("t".to_owned(), Value::String("Val1".to_owned())),
+                ("v".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
+            ]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "error serializing tuple adjacent enum");
+        assert_eq!(to_value(test).unwrap(), expected, "error serializing tuple adjacent enum");
 
-        // let test = TestTupleUntaggedEnum {
-        //     a: TupleUntaggedEnum::Val1(1.0, 2.0),
-        // };
+        let test = TestTupleUntaggedEnum {
+            a: TupleUntaggedEnum::Val1(1.0, 2.0),
+        };
 
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Union(Box::new(Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))))
-        // ]);
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "error serializing tuple untagged enum");
+        assert_eq!(to_value(test).unwrap(), expected, "error serializing tuple untagged enum");
     }
 }

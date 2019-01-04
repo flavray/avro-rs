@@ -632,41 +632,6 @@ mod tests {
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestSingleValueInternalEnum {
-        a: SingleValueInternalEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(tag = "t")]
-    enum SingleValueInternalEnum {
-        Double(f64),
-        String(String),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestSingleValueAdjacentEnum {
-        a: SingleValueAdjacentEnum,
-    }
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(tag = "t", content = "v")]
-    enum SingleValueAdjacentEnum {
-        Double(f64),
-        String(String),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestSingleValueUntaggedEnum {
-        a: SingleValueUntaggedEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(untagged)]
-    enum SingleValueUntaggedEnum {
-        Double(f64),
-        String(String),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
     struct TestStructExternalEnum {
         a: StructExternalEnum,
     }
@@ -678,74 +643,12 @@ mod tests {
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestStructInternalEnum {
-        a: StructInternalEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(tag = "type")]
-    enum StructInternalEnum {
-        Val1 { x: f32, y: f32 },
-        Val2 { x: f32, y: f32 },
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestStructAdjacentEnum {
-        a: StructAdjacentEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(tag = "t", content = "v")]
-    enum StructAdjacentEnum {
-        Val1 { x: f32, y: f32 },
-        Val2 { x: f32, y: f32 },
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestStructUntaggedEnum {
-        a: StructUntaggedEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(untagged)]
-    enum StructUntaggedEnum {
-        Val1 { x: f32, y: f32 },
-        Val2 { x: f32, y: f32, z: f32 },
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
     struct TestTupleExternalEnum {
         a: TupleExternalEnum,
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
     enum TupleExternalEnum {
-        Val1(f32, f32),
-        Val2(f32, f32, f32),
-    }
-
-    // Tuple Internal Enum cannot be instantiated
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestTupleAdjacentEnum {
-        a: TupleAdjacentEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(tag = "t", content = "v")]
-    enum TupleAdjacentEnum {
-        Val1(f32, f32),
-        Val2(f32, f32, f32),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestTupleUntaggedEnum {
-        a: TupleUntaggedEnum,
-    }
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(untagged)]
-    enum TupleUntaggedEnum {
         Val1(f32, f32),
         Val2(f32, f32, f32),
     }
