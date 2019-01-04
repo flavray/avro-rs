@@ -52,9 +52,12 @@ struct StructDeserializer<'de> {
     value: Option<&'de Value>,
 }
 
+pub struct UnitEnumDeserializer<'a> {
+    input: &'a str,
+}
+
 pub struct EnumDeserializer<'de> {
-    name: &'de Value,
-    value: &'de Value,
+    input: &'de Vec<(String, Value)>,
 }
 
 impl<'de> Deserializer<'de> {
@@ -92,8 +95,61 @@ impl<'de> StructDeserializer<'de> {
 }
 
 impl<'de> EnumDeserializer<'de> {
-    pub fn new(name: &'de Value, value: &'de Value) -> Self {
-        EnumDeserializer { name, value }
+    pub fn new(input: &'de Vec<(String, Value)>) -> Self {
+        EnumDeserializer {
+            input: input,
+        }
+    }
+}
+
+impl<'a> UnitEnumDeserializer<'a> {
+    pub fn new(input: &'a str) -> Self {
+        UnitEnumDeserializer { input }
+    }
+}
+
+impl<'de> de::EnumAccess<'de> for UnitEnumDeserializer<'de> {
+    type Error = Error;
+    type Variant = Self;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: DeserializeSeed<'de>,
+    {
+        Ok((seed.deserialize(StringDeserializer { input: self.input.to_owned() })?, self))
+    }
+}
+
+impl<'de> de::VariantAccess<'de> for UnitEnumDeserializer<'de> {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn newtype_variant_seed<T>(self, _seed: T) -> Result<T::Value, Error>
+    where
+        T: DeserializeSeed<'de>,
+    {
+        Err(Error::custom("Unexpected Newtype variant"))
+    }
+
+    fn tuple_variant<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        Err(Error::custom("Unexpected tuple variant"))
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        Err(Error::custom("Unexpected struct variant"))
     }
 }
 
@@ -105,7 +161,10 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        Ok((seed.deserialize(&Deserializer::new(self.name))?, self))
+        for item in self.input {
+            return Ok((seed.deserialize(StringDeserializer {input: item.0.clone()})?, self))
+        }
+        Err(Error::custom("Should not get here"))
     }
 }
 
@@ -113,34 +172,41 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Error> {
-        Err(Error::custom("Expected String"))
+        Ok(())
     }
 
     fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Error>
     where
         T: DeserializeSeed<'de>,
     {
-        seed.deserialize(&Deserializer::new(self.value))
+        for item in self.input {
+            return seed.deserialize(&Deserializer::new(&item.1));
+        }
+        Err(Error::custom("Should not get here"))
     }
 
-    fn tuple_variant<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Error>
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Error>
     where
         V: Visitor<'de>,
     {
-        unimplemented!("TUPLE");
-        // de::Deserializer::deserialize_seq(self.input, visitor)
+        for item in self.input {
+            return de::Deserializer::deserialize_seq(&Deserializer::new(&item.1), visitor)
+        }
+        Err(Error::custom("Should not get here"))
     }
 
     fn struct_variant<V>(
         self,
-        _fields: &'static [&'static str],
-        _visitor: V,
+        fields: &'static [&'static str],
+        visitor: V,
     ) -> Result<V::Value, Error>
     where
         V: Visitor<'de>,
     {
-        unimplemented!("Struct");
-        // de::Deserializer::deserialize_map(self.input, visitor)
+        for item in self.input {
+            return de::Deserializer::deserialize_struct(&Deserializer::new(&item.1), "", fields, visitor)
+        }
+        Err(Error::custom("Unexpected struct variant"))
     }
 }
 
@@ -167,6 +233,8 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
                 Value::Double(f) => visitor.visit_f64(f),
                 _ => Err(Error::custom("Unsupported union")),
             },
+            Value::Record(ref fields) => visitor.visit_map(StructDeserializer::new(fields)),
+            Value::Array(ref fields) => visitor.visit_seq(SeqDeserializer::new(fields)),
             _ => Err(Error::custom("incorrect value")),
         }
     }
@@ -345,12 +413,10 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
         V: Visitor<'de>,
     {
         match *self.input {
-            Value::Record(ref fields) => {
-                if fields.len() != 2 {
-                    return Err(Error::custom("Enum should be a record with 2 fields"))
-                }
-                visitor.visit_enum(EnumDeserializer::new(&fields[0].1, &fields[1].1))
-            },
+            // This branch can be anything...
+            Value::Record(ref fields) => visitor.visit_enum(EnumDeserializer::new(&fields)),
+            // This has to be a unit Enum
+            Value::Enum(_index, ref field) => visitor.visit_enum(UnitEnumDeserializer::new(&field)),
             _ => Err(Error::custom("not an enum")),
         }
     }
@@ -471,7 +537,7 @@ impl<'de> de::Deserializer<'de> for StringDeserializer {
 /// structure expected by `D`.
 pub fn from_value<'de, D: Deserialize<'de>>(value: &'de Value) -> Result<D, Error> {
     let de = Deserializer::new(value);
-    D::deserialize(&de)
+    D::deserialize(& de)
 }
 
 #[cfg(test)]
@@ -718,7 +784,6 @@ mod tests {
         ]);
         let final_value: TestUnitInternalEnum = from_value(&test).unwrap();
         assert_eq!(final_value, expected, "Error deserializing unit internal enum");
-
         let expected = TestUnitAdjacentEnum {
             a: UnitAdjacentEnum::Val1,
         };
@@ -730,7 +795,6 @@ mod tests {
         ]);
         let final_value: TestUnitAdjacentEnum = from_value(&test).unwrap();
         assert_eq!(final_value, expected, "Error deserializing unit adjacent enum");
-
         let expected = TestUnitUntaggedEnum {
             a: UnitUntaggedEnum::Val1,
         };
@@ -839,8 +903,10 @@ mod tests {
         let final_value: TestStructUntaggedEnum = from_value(&test).unwrap();
         assert_eq!(final_value, expected, "error deserializing struct untagged enum");
 
+        // There is an issue in serde when deserializing untagged struct enum where it will choose
+        // The first one that fits, before finishing processing the full record.
         let expected = TestStructUntaggedEnum {
-            a: StructUntaggedEnum::Val2 {x: 1.0, y: 2.0, z: 3.0}
+            a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
         };
         let test = Value::Record(vec![
             ("a".to_owned(), Value::Record(vec![
