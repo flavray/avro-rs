@@ -161,10 +161,12 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        for item in self.input {
-            return Ok((seed.deserialize(StringDeserializer {input: item.0.clone()})?, self))
-        }
-        Err(Error::custom("Should not get here"))
+        self.input
+            .first()
+            .map_or(
+                Err(Error::custom("Should not get here")),
+                |item| Ok((seed.deserialize(StringDeserializer {input: item.0.clone()})?, self))
+            )
     }
 }
 
@@ -179,20 +181,23 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
     where
         T: DeserializeSeed<'de>,
     {
-        for item in self.input {
-            return seed.deserialize(&Deserializer::new(&item.1));
-        }
-        Err(Error::custom("Should not get here"))
+        self.input
+            .first()
+            .map_or(
+                Err(Error::custom("Expected a newtype variant, got nothing instead")),
+                |item| seed.deserialize(&Deserializer::new(&item.1)))
     }
 
     fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Error>
     where
         V: Visitor<'de>,
     {
-        for item in self.input {
-            return de::Deserializer::deserialize_seq(&Deserializer::new(&item.1), visitor)
-        }
-        Err(Error::custom("Should not get here"))
+        self.input
+            .first()
+            .map_or(
+                Err(Error::custom("Should not get here")),        
+                |item| de::Deserializer::deserialize_seq(&Deserializer::new(&item.1), visitor)
+            )
     }
 
     fn struct_variant<V>(
@@ -203,10 +208,12 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        for item in self.input {
-            return de::Deserializer::deserialize_struct(&Deserializer::new(&item.1), "", fields, visitor)
-        }
-        Err(Error::custom("Unexpected struct variant"))
+        self.input
+            .first()
+            .map_or(
+                Err(Error::custom("Unexpected struct variant")),
+                |item| de::Deserializer::deserialize_struct(&Deserializer::new(&item.1), "", fields, visitor)
+            )
     }
 }
 
