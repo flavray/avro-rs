@@ -15,7 +15,9 @@ pub struct SeqSerializer {
     items: Vec<Value>,
 }
 
-pub struct SeqVariantSerializer {
+pub struct SeqVariantSerializer<'a> {
+    index: u32,
+    variant: &'a str,
     items: Vec<Value>
 }
 
@@ -28,7 +30,9 @@ pub struct StructSerializer {
     fields: Vec<(String, Value)>,
 }
 
-pub struct StructVariantSerializer {
+pub struct StructVariantSerializer<'a> {
+    index: u32,
+    variant: &'a str,
     fields: Vec<(String, Value)>,
 }
 
@@ -68,13 +72,15 @@ impl SeqSerializer {
     }
 }
 
-impl SeqVariantSerializer {
-    pub fn new(len: Option<usize>) -> SeqVariantSerializer {
+impl<'a> SeqVariantSerializer<'a> {
+    pub fn new(index: u32, variant: &'a str, len: Option<usize>) -> SeqVariantSerializer {
         let items = match len {
             Some(len) => Vec::with_capacity(len),
             None => Vec::new(),
         };
         SeqVariantSerializer {
+            index,
+            variant,
             items
         }
     }
@@ -99,10 +105,13 @@ impl StructSerializer {
     }
 }
 
-impl StructVariantSerializer {
-    pub fn new(len: usize) -> StructVariantSerializer {
+impl<'a> StructVariantSerializer<'a> {
+    pub fn new(index: u32, variant: &'a str, len: usize) -> StructVariantSerializer {
         StructVariantSerializer {
+            index,
+            variant,
             fields: Vec::with_capacity(len),
+
         }
     }
 }
@@ -113,10 +122,10 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     type SerializeSeq = SeqSerializer;
     type SerializeTuple = SeqSerializer;
     type SerializeTupleStruct = SeqSerializer;
-    type SerializeTupleVariant = SeqVariantSerializer;
+    type SerializeTupleVariant = SeqVariantSerializer<'b>;
     type SerializeMap = MapSerializer;
     type SerializeStruct = StructSerializer;
-    type SerializeStructVariant = StructVariantSerializer;
+    type SerializeStructVariant = StructVariantSerializer<'b>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Boolean(v))
@@ -225,14 +234,17 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     fn serialize_newtype_variant<T: ?Sized>(
         self,
         _: &'static str,
-        _: u32,
-        _variant: &'static str,
+        index: u32,
+        variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
-        Ok(Value::Union(Box::new(value.serialize(self)?)))
+        Ok(Value::Record(vec![
+            ("type".to_owned(), Value::Enum(index as i32, variant.to_owned())),
+            ("value".to_owned(), Value::Union(Box::new(value.serialize(self)?)))
+        ]))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
@@ -254,11 +266,11 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     fn serialize_tuple_variant(
         self,
         _: &'static str,
-        _: u32,
-        _variant: &'static str,
+        index: u32,
+        variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Ok(SeqVariantSerializer::new(Some(len)))
+        Ok(SeqVariantSerializer::new(index, variant, Some(len)))
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
@@ -276,11 +288,11 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     fn serialize_struct_variant(
         self,
         _: &'static str,
-        _: u32,
-        _variant: &'static str,
+        index: u32,
+        variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Ok(StructVariantSerializer::new(len))
+        Ok(StructVariantSerializer::new(index, variant, len))
     }
 }
 
@@ -334,7 +346,7 @@ impl ser::SerializeTupleStruct for SeqSerializer {
     }
 }
 
-impl ser::SerializeSeq for SeqVariantSerializer {
+impl<'a> ser::SerializeSeq for SeqVariantSerializer<'a> {
     type Ok = Value;
     type Error = Error;
 
@@ -348,11 +360,14 @@ impl ser::SerializeSeq for SeqVariantSerializer {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Array(self.items))
+        Ok(Value::Record(vec![
+            ("type".to_owned(), Value::Enum(self.index as i32, self.variant.to_owned())),
+            ("value".to_owned(), Value::Array(self.items))
+        ]))
     }
 }
 
-impl ser::SerializeTupleVariant for SeqVariantSerializer {
+impl<'a> ser::SerializeTupleVariant for SeqVariantSerializer<'a> {
     type Ok = Value;
     type Error = Error;
 
@@ -431,7 +446,7 @@ impl ser::SerializeStruct for StructSerializer {
     }
 }
 
-impl ser::SerializeStructVariant for StructVariantSerializer {
+impl<'a> ser::SerializeStructVariant for StructVariantSerializer<'a> {
     type Ok = Value;
     type Error = Error;
 
@@ -446,7 +461,10 @@ impl ser::SerializeStructVariant for StructVariantSerializer {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Union(Box::new(Value::Record(self.fields))))
+        Ok(Value::Record(vec![
+            ("type".to_owned(), Value::Enum(self.index as i32, self.variant.to_owned())),
+            ("value".to_owned(), Value::Union(Box::new(Value::Record(self.fields))))
+        ]))
     }
 }
 
@@ -735,7 +753,10 @@ mod tests {
         };
 
         let expected = Value::Record(vec![
-            ("a".to_owned(), Value::Union(Box::new(Value::Double(64.0))))
+            ("a".to_owned(), Value::Record(vec![
+                ("type".to_owned(), Value::Enum(0, "Double".to_owned())),
+                ("value".to_owned(), Value::Union(Box::new(Value::Double(64.0))))
+            ]))
         ]);
 
         assert_eq!(to_value(test).unwrap(), expected, "Error serializing single value external enum");
@@ -777,11 +798,13 @@ mod tests {
             a: StructExternalEnum::Val1 {x: 1.0, y: 2.0}
         };
         let expected = Value::Record(vec![
-            ("a".to_owned(), Value::Union(Box::new(Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("type".to_owned(), Value::Enum(0, "Val1".to_owned())),
+                ("value".to_owned(), Value::Union(Box::new(Value::Record(vec![
                     ("x".to_owned(), Value::Float(1.0)),
                     ("y".to_owned(), Value::Float(2.0)),
-                ])))
-            )
+                ]))))
+            ]))
         ]);
 
         assert_eq!(to_value(test).unwrap(), expected, "error serializing struct external enum");
@@ -845,16 +868,19 @@ mod tests {
     #[test]
     fn test_to_value_tuple_enum() {
         let test = TestTupleExternalEnum {
-            a: TupleExternalEnum::Val1(1.0, 2.0),
+            a: TupleExternalEnum::Val2(1.0, 2.0, 3.0),
         };
 
         let expected = Value::Record(vec![
-            ("a".to_owned(), Value::Array(
+            ("a".to_owned(), Value::Record(vec![
+                ("type".to_owned(), Value::Enum(1, "Val2".to_owned())),
+                ("value".to_owned(), Value::Array(
                 vec![
                     Value::Union(Box::new(Value::Float(1.0))), 
-                    Value::Union(Box::new(Value::Float(2.0)))
-                ]
-            ))
+                    Value::Union(Box::new(Value::Float(2.0))),
+                    Value::Union(Box::new(Value::Float(3.0))),
+                ]))])
+            )
         ]);
 
         assert_eq!(to_value(test).unwrap(), expected, "error serializing tuple external enum");

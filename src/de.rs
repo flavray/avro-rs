@@ -52,7 +52,7 @@ struct StructDeserializer<'de> {
     value: Option<&'de Value>,
 }
 
-pub struct UnitEnumDeserializer<'a> {
+pub struct EnumUnitDeserializer<'a> {
     input: &'a str,
 }
 
@@ -94,21 +94,19 @@ impl<'de> StructDeserializer<'de> {
     }
 }
 
+impl<'a> EnumUnitDeserializer<'a> {
+    pub fn new(input: &'a str) -> Self {
+        EnumUnitDeserializer { input }
+    }
+}
+
 impl<'de> EnumDeserializer<'de> {
     pub fn new(input: &'de Vec<(String, Value)>) -> Self {
-        EnumDeserializer {
-            input: input,
-        }
+        EnumDeserializer { input }
     }
 }
 
-impl<'a> UnitEnumDeserializer<'a> {
-    pub fn new(input: &'a str) -> Self {
-        UnitEnumDeserializer { input }
-    }
-}
-
-impl<'de> de::EnumAccess<'de> for UnitEnumDeserializer<'de> {
+impl<'de> de::EnumAccess<'de> for EnumUnitDeserializer<'de> {
     type Error = Error;
     type Variant = Self;
 
@@ -120,7 +118,7 @@ impl<'de> de::EnumAccess<'de> for UnitEnumDeserializer<'de> {
     }
 }
 
-impl<'de> de::VariantAccess<'de> for UnitEnumDeserializer<'de> {
+impl<'de> de::VariantAccess<'de> for EnumUnitDeserializer<'de> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Error> {
@@ -165,7 +163,11 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
             .first()
             .map_or(
                 Err(Error::custom("A record must have a least one field")),
-                |item| Ok((seed.deserialize(StringDeserializer {input: item.0.clone()})?, self))
+                |item| match (item.0.as_ref(), &item.1) {
+                    ("type", Value::String(x)) => Ok((seed.deserialize(StringDeserializer {input: x.to_owned()})?, self)),
+                    (field, Value::String(_)) => Err(Error::custom(format!("Expected first field named 'type': got '{}' instead", field))),
+                    (_, _) => Err(Error::custom(format!("Expected first field of type String for the type name"))),
+                }
             )
     }
 }
@@ -182,7 +184,7 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
         T: DeserializeSeed<'de>,
     {
         self.input
-            .first()
+            .get(1)
             .map_or(
                 Err(Error::custom("Expected a newtype variant, got nothing instead.")),
                 |item| seed.deserialize(&Deserializer::new(&item.1)))
@@ -193,7 +195,7 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
         V: Visitor<'de>,
     {
         self.input
-            .first()
+            .get(1)
             .map_or(
                 Err(Error::custom("Expected a tuple variant, got nothing instead.")),        
                 |item| de::Deserializer::deserialize_seq(&Deserializer::new(&item.1), visitor)
@@ -209,9 +211,9 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'de> {
         V: Visitor<'de>,
     {
         self.input
-            .first()
+            .get(1)
             .map_or(
-                Err(Error::custom("Expected a struct variant, got nothing instead.")),
+                Err(Error::custom("Expected a struct variant, got nothing")),
                 |item| de::Deserializer::deserialize_struct(&Deserializer::new(&item.1), "", fields, visitor)
             )
     }
@@ -362,6 +364,10 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
     {
         match *self.input {
             Value::Array(ref items) => visitor.visit_seq(SeqDeserializer::new(items)),
+            Value::Union(ref inner) => { match **inner {
+                Value::Array(ref items) => visitor.visit_seq(SeqDeserializer::new(items)),
+                _ => Err(Error::custom("not an array"))
+            }}
             _ => Err(Error::custom("not an array")),
         }
     }
@@ -406,6 +412,10 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
     {
         match *self.input {
             Value::Record(ref fields) => visitor.visit_map(StructDeserializer::new(fields)),
+            Value::Union(ref inner) => { match **inner {
+                Value::Record(ref fields) => visitor.visit_map(StructDeserializer::new(fields)),
+                _ => Err(Error::custom("not a record"))
+            }}
             _ => Err(Error::custom("not a record")),
         }
     }
@@ -423,7 +433,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
             // This branch can be anything...
             Value::Record(ref fields) => visitor.visit_enum(EnumDeserializer::new(&fields)),
             // This has to be a unit Enum
-            Value::Enum(_index, ref field) => visitor.visit_enum(UnitEnumDeserializer::new(&field)),
+            Value::Enum(_index, ref field) => visitor.visit_enum(EnumUnitDeserializer::new(&field)),
             _ => Err(Error::custom("not an enum")),
         }
     }
@@ -819,39 +829,46 @@ mod tests {
             a: SingleValueExternalEnum::Double(64.0)
         };
 
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("Double".to_owned(), Value::Double(64.0))
+        //     ]))
+        // ]);
+        // let final_value: TestSingleValueExternalEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "Error deserializing single value external enum");
         let test = Value::Record(vec![
             ("a".to_owned(), Value::Record(vec![
-                ("Double".to_owned(), Value::Double(64.0))
+                ("type".to_owned(), Value::String("Double".to_owned())),
+                ("value".to_owned(), Value::Union(Box::new(Value::Double(64.0))))
             ]))
         ]);
         let final_value: TestSingleValueExternalEnum = from_value(&test).unwrap();
-
-        assert_eq!(final_value, expected, "Error deserializing single value external enum");
+        assert_eq!(final_value, expected, "Error deserializing single value external enum(union)");
 
         // It is not possible to serialize an internal Single Value enum...
 
-        let expected = TestSingleValueAdjacentEnum {
-            a: SingleValueAdjacentEnum::Double(64.0)
-        };
+        // let expected = TestSingleValueAdjacentEnum {
+        //     a: SingleValueAdjacentEnum::Double(64.0)
+        // };
 
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("t".to_owned(), Value::String("Double".to_owned())),
-                ("v".to_owned(), Value::Double(64.0))
-            ]))
-        ]);
-        let final_value: TestSingleValueAdjacentEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "Error deserializing single value adjacent enum");
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("t".to_owned(), Value::String("Double".to_owned())),
+        //         ("v".to_owned(), Value::Double(64.0))
+        //     ]))
+        // ]);
+        // let final_value: TestSingleValueAdjacentEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "Error deserializing single value adjacent enum");
 
-        let expected = TestSingleValueUntaggedEnum {
-            a: SingleValueUntaggedEnum::Double(64.0)
-        };
+        // let expected = TestSingleValueUntaggedEnum {
+        //     a: SingleValueUntaggedEnum::Double(64.0)
+        // };
 
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Double(64.0))
-        ]);
-        let final_value: TestSingleValueUntaggedEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "Error deserializing single value untagged enum");
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Double(64.0))
+        // ]);
+        // let final_value: TestSingleValueUntaggedEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "Error deserializing single value untagged enum");
     }
 
     #[test]
@@ -859,71 +876,84 @@ mod tests {
         let expected = TestStructExternalEnum {
             a: StructExternalEnum::Val1 {x: 1.0, y: 2.0}
         };
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("Val1".to_owned(), Value::Record(vec![
-                    ("x".to_owned(), Value::Float(1.0)),
-                    ("y".to_owned(), Value::Float(2.0)),
-                ]))
-            ]))
-        ]);
-        let final_value: TestStructExternalEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error deserializing struct external enum");
 
-        let expected = TestStructInternalEnum {
-            a: StructInternalEnum::Val1 {x: 1.0, y: 2.0}
-        };
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("Val1".to_owned(), Value::Record(vec![
+        //             ("x".to_owned(), Value::Float(1.0)),
+        //             ("y".to_owned(), Value::Float(2.0)),
+        //         ]))
+        //     ]))
+        // ]);
+        // let final_value: TestStructExternalEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error deserializing struct external enum");
+
         let test = Value::Record(vec![
             ("a".to_owned(), Value::Record(vec![
                 ("type".to_owned(), Value::String("Val1".to_owned())),
-                ("x".to_owned(), Value::Float(1.0)),
-                ("y".to_owned(), Value::Float(2.0)),
-            ]))
-        ]);
-        let final_value: TestStructInternalEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error deserializing struct internal enum");
-
-        let expected = TestStructAdjacentEnum {
-            a: StructAdjacentEnum::Val1 {x: 1.0, y: 2.0}
-        };
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("t".to_owned(), Value::String("Val1".to_owned())),
-                ("v".to_owned(), Value::Record(vec![
+                ("value".to_owned(),Value::Union(Box::new(Value::Record(vec![
                     ("x".to_owned(), Value::Float(1.0)),
                     ("y".to_owned(), Value::Float(2.0)),
-                ]))
+                ]))))
             ]))
         ]);
-        let final_value: TestStructAdjacentEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error deserializing struct adjacent enum");
+        let final_value: TestStructExternalEnum = from_value(&test).unwrap();
+        assert_eq!(final_value, expected, "error deserializing struct external enum(union)");
 
-        let expected = TestStructUntaggedEnum {
-            a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
-        };
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("x".to_owned(), Value::Float(1.0)),
-                ("y".to_owned(), Value::Float(2.0)),
-            ]))
-        ]);
-        let final_value: TestStructUntaggedEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error deserializing struct untagged enum");
+        // let expected = TestStructInternalEnum {
+        //     a: StructInternalEnum::Val1 {x: 1.0, y: 2.0}
+        // };
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("type".to_owned(), Value::String("Val1".to_owned())),
+        //         ("x".to_owned(), Value::Float(1.0)),
+        //         ("y".to_owned(), Value::Float(2.0)),
+        //     ]))
+        // ]);
+        // let final_value: TestStructInternalEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error deserializing struct internal enum");
+
+        // let expected = TestStructAdjacentEnum {
+        //     a: StructAdjacentEnum::Val1 {x: 1.0, y: 2.0}
+        // };
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("t".to_owned(), Value::String("Val1".to_owned())),
+        //         ("v".to_owned(), Value::Record(vec![
+        //             ("x".to_owned(), Value::Float(1.0)),
+        //             ("y".to_owned(), Value::Float(2.0)),
+        //         ]))
+        //     ]))
+        // ]);
+        // let final_value: TestStructAdjacentEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error deserializing struct adjacent enum");
+
+        // let expected = TestStructUntaggedEnum {
+        //     a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
+        // };
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("x".to_owned(), Value::Float(1.0)),
+        //         ("y".to_owned(), Value::Float(2.0)),
+        //     ]))
+        // ]);
+        // let final_value: TestStructUntaggedEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error deserializing struct untagged enum");
 
         // There is an issue in serde when deserializing untagged struct enum where it will choose
         // The first one that fits, before finishing processing the full record.
-        let expected = TestStructUntaggedEnum {
-            a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
-        };
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("x".to_owned(), Value::Float(1.0)),
-                ("y".to_owned(), Value::Float(2.0)),
-                ("z".to_owned(), Value::Float(3.0)),
-            ]))
-        ]);
-        let final_value: TestStructUntaggedEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error deserializing struct untagged enum variant");
+        // let expected = TestStructUntaggedEnum {
+        //     a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
+        // };
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("x".to_owned(), Value::Float(1.0)),
+        //         ("y".to_owned(), Value::Float(2.0)),
+        //         ("z".to_owned(), Value::Float(3.0)),
+        //     ]))
+        // ]);
+        // let final_value: TestStructUntaggedEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error deserializing struct untagged enum variant");
     }
 
     #[test]
@@ -932,35 +962,44 @@ mod tests {
             a: TupleExternalEnum::Val1(1.0, 2.0),
         };
 
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("Val1".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
+        //     ]))
+        // ]);
+        // let final_value: TestTupleExternalEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error serializing tuple external enum");
+
         let test = Value::Record(vec![
             ("a".to_owned(), Value::Record(vec![
-                ("Val1".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
+                ("type".to_owned(), Value::String("Val1".to_owned())),
+                ("value".to_owned(), Value::Union(Box::new(Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))))
             ]))
         ]);
         let final_value: TestTupleExternalEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error serializing tuple external enum");
+        assert_eq!(final_value, expected, "error serializing tuple external enum(union)");
 
-        let expected = TestTupleAdjacentEnum {
-            a: TupleAdjacentEnum::Val1(1.0, 2.0),
-        };
+        // let expected = TestTupleAdjacentEnum {
+        //     a: TupleAdjacentEnum::Val1(1.0, 2.0),
+        // };
 
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Record(vec![
-                ("t".to_owned(), Value::String("Val1".to_owned())),
-                ("v".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
-            ]))
-        ]);
-        let final_value: TestTupleAdjacentEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error serializing tuple adjacent enum");
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Record(vec![
+        //         ("t".to_owned(), Value::String("Val1".to_owned())),
+        //         ("v".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
+        //     ]))
+        // ]);
+        // let final_value: TestTupleAdjacentEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error serializing tuple adjacent enum");
 
-        let expected = TestTupleUntaggedEnum {
-            a: TupleUntaggedEnum::Val1(1.0, 2.0),
-        };
+        // let expected = TestTupleUntaggedEnum {
+        //     a: TupleUntaggedEnum::Val1(1.0, 2.0),
+        // };
 
-        let test = Value::Record(vec![
-            ("a".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
-        ]);
-        let final_value: TestTupleUntaggedEnum = from_value(&test).unwrap();
-        assert_eq!(final_value, expected, "error serializing tuple untagged enum");
+        // let test = Value::Record(vec![
+        //     ("a".to_owned(), Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]))
+        // ]);
+        // let final_value: TestTupleUntaggedEnum = from_value(&test).unwrap();
+        // assert_eq!(final_value, expected, "error serializing tuple untagged enum");
     }
 }
