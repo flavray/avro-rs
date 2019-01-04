@@ -768,28 +768,28 @@ mod tests {
 
         assert_eq!(to_value(test).is_err(), true);
 
-        // let test = TestSingleValueAdjacentEnum {
-        //     a: SingleValueAdjacentEnum::Double(64.0)
-        // };
+        let test = TestSingleValueAdjacentEnum {
+            a: SingleValueAdjacentEnum::Double(64.0)
+        };
 
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Record(vec![
-        //         ("t".to_owned(), Value::String("Double".to_owned())),
-        //         ("v".to_owned(), Value::Union(Box::new(Value::Double(64.0)))),
-        //     ]))
-        // ]);
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("t".to_owned(), Value::String("Double".to_owned())),
+                ("v".to_owned(), Value::Double(64.0)),
+            ]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "Error serializing single value adjacent enum");
+        assert_eq!(to_value(test).unwrap(), expected, "Error serializing single value adjacent enum");
 
-        // let test = TestSingleValueUntaggedEnum {
-        //     a: SingleValueUntaggedEnum::Double(64.0)
-        // };
+        let test = TestSingleValueUntaggedEnum {
+            a: SingleValueUntaggedEnum::Double(64.0)
+        };
 
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Union(Box::new(Value::Double(64.0))))
-        // ]);
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Double(64.0))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "Error serializing single value untagged enum");
+        assert_eq!(to_value(test).unwrap(), expected, "Error serializing single value untagged enum");
     }
 
     #[test]
@@ -811,58 +811,58 @@ mod tests {
 
         // I don't think that this is feasible in avro
 
-        // let test = TestStructInternalEnum {
-        //     a: StructInternalEnum::Val1 {x: 1.0, y: 2.0}
-        // };
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Record(vec![
-        //         ("type".to_owned(), Value::String("Val1".to_owned())),
-        //         ("x".to_owned(), Value::Float(1.0)),
-        //         ("y".to_owned(), Value::Float(2.0)),
-        //     ]))
-        // ]);
+        let test = TestStructInternalEnum {
+            a: StructInternalEnum::Val1 {x: 1.0, y: 2.0}
+        };
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("type".to_owned(), Value::String("Val1".to_owned())),
+                ("x".to_owned(), Value::Float(1.0)),
+                ("y".to_owned(), Value::Float(2.0)),
+            ]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "error serializing struct internal enum");
+        assert_eq!(to_value(test).unwrap(), expected, "error serializing struct internal enum");
 
-        // let test = TestStructAdjacentEnum {
-        //     a: StructAdjacentEnum::Val1 {x: 1.0, y: 2.0}
-        // };
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Record(vec![
-        //         ("t".to_owned(), Value::String("Val1".to_owned())),
-        //         ("v".to_owned(), Value::Union(Box::new(Value::Record(vec![
-        //             ("x".to_owned(), Value::Float(1.0)),
-        //             ("y".to_owned(), Value::Float(2.0)),
-        //         ]))))
-        //     ]))
-        // ]);
+        let test = TestStructAdjacentEnum {
+            a: StructAdjacentEnum::Val1 {x: 1.0, y: 2.0}
+        };
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("t".to_owned(), Value::String("Val1".to_owned())),
+                ("v".to_owned(), Value::Record(vec![
+                    ("x".to_owned(), Value::Float(1.0)),
+                    ("y".to_owned(), Value::Float(2.0)),
+                ]))
+            ]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "error serializing struct adjacent enum");
+        assert_eq!(to_value(test).unwrap(), expected, "error serializing struct adjacent enum");
 
-        // let test = TestStructUntaggedEnum {
-        //     a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
-        // };
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Union(Box::new(Value::Record(vec![
-        //         ("x".to_owned(), Value::Float(1.0)),
-        //         ("y".to_owned(), Value::Float(2.0)),
-        //     ]))))
-        // ]);
+        let test = TestStructUntaggedEnum {
+            a: StructUntaggedEnum::Val1 {x: 1.0, y: 2.0}
+        };
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("x".to_owned(), Value::Float(1.0)),
+                ("y".to_owned(), Value::Float(2.0)),
+            ]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "error serializing struct untagged enum");
+        assert_eq!(to_value(test).unwrap(), expected, "error serializing struct untagged enum");
 
-        // let test = TestStructUntaggedEnum {
-        //     a: StructUntaggedEnum::Val2 {x: 1.0, y: 2.0, z: 3.0}
-        // };
-        // let expected = Value::Record(vec![
-        //     ("a".to_owned(), Value::Union(Box::new(Value::Record(vec![
-        //         ("x".to_owned(), Value::Float(1.0)),
-        //         ("y".to_owned(), Value::Float(2.0)),
-        //         ("z".to_owned(), Value::Float(3.0)),
-        //     ]))))
-        // ]);
+        let test = TestStructUntaggedEnum {
+            a: StructUntaggedEnum::Val2 {x: 1.0, y: 2.0, z: 3.0}
+        };
+        let expected = Value::Record(vec![
+            ("a".to_owned(), Value::Record(vec![
+                ("x".to_owned(), Value::Float(1.0)),
+                ("y".to_owned(), Value::Float(2.0)),
+                ("z".to_owned(), Value::Float(3.0)),
+            ]))
+        ]);
 
-        // assert_eq!(to_value(test).unwrap(), expected, "error serializing struct untagged enum variant");
+        assert_eq!(to_value(test).unwrap(), expected, "error serializing struct untagged enum variant");
     }
 
     #[test]
