@@ -290,6 +290,7 @@ mod tests {
     use std::io::Cursor;
     use crate::types::{Record, ToAvro};
     use crate::Reader;
+    use crate::schema::{SchemaKind, UnionRef};
 
     static SCHEMA: &'static str = r#"
             {
@@ -344,7 +345,7 @@ mod tests {
 
         assert_eq!(
             from_avro_datum(&schema, &mut encoded, None).unwrap(),
-            Value::Union(Box::new(Value::Long(0)))
+            Value::Union(UnionRef::primitive(SchemaKind::Long), Box::new(Value::Long(0)))
         );
     }
 

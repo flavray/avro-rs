@@ -349,6 +349,7 @@ mod tests {
     use super::*;
     use crate::types::Record;
     use crate::util::zig_i64;
+    use crate::schema::{SchemaKind, UnionRef};
 
     static SCHEMA: &'static str = r#"
             {
@@ -382,7 +383,10 @@ mod tests {
     #[test]
     fn test_union() {
         let schema = Schema::parse_str(UNION_SCHEMA).unwrap();
-        let union = Value::Union(Box::new(Value::Long(3)));
+        let union = Value::Union(
+            UnionRef::primitive(SchemaKind::Long),
+            Box::new(Value::Long(3))
+        );
 
         let mut expected = Vec::new();
         zig_i64(1, &mut expected);

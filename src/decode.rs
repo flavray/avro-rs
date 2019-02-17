@@ -4,7 +4,7 @@ use std::mem::transmute;
 
 use failure::Error;
 
-use crate::schema::Schema;
+use crate::schema::{Schema, UnionRef};
 use crate::types::Value;
 use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
 
@@ -122,7 +122,10 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let index = zag_i64(reader)?;
             let variants = inner.variants();
             match variants.get(index as usize) {
-                Some(variant) => decode(variant, reader).map(|x| Value::Union(Box::new(x))),
+                Some(variant) => {
+                    let union_ref = UnionRef::from_schema(variant);
+                    decode(variant, reader).map(|x| Value::Union(union_ref, Box::new(x)))
+                }
                 None => Err(DecodeError::new("Union index out of bounds").into()),
             }
         },

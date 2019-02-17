@@ -9,6 +9,7 @@ use byteorder;
 #[cfg(feature = "snappy")]
 use crc;
 
+use crate::schema::{SchemaKind, UnionRef};
 use crate::types::{ToAvro, Value};
 use crate::util::DecodeError;
 
@@ -39,6 +40,10 @@ impl ToAvro for Codec {
             }.to_owned()
                 .into_bytes(),
         )
+    }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::Bytes)
     }
 }
 

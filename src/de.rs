@@ -172,8 +172,8 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         match *self.input {
-            Value::Union(ref inner) if inner.as_ref() == &Value::Null => visitor.visit_none(),
-            Value::Union(ref inner) => visitor.visit_some(&mut Deserializer::new(inner)),
+            Value::Union(_, ref inner) if inner.as_ref() == &Value::Null => visitor.visit_none(),
+            Value::Union(_, ref inner) => visitor.visit_some(&mut Deserializer::new(inner)),
             _ => Err(Error::custom("not a union")),
         }
     }

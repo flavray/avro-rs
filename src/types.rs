@@ -5,7 +5,7 @@ use std::hash::BuildHasher;
 use failure::Error;
 use serde_json::Value as JsonValue;
 
-use crate::schema::{RecordField, Schema, SchemaKind, UnionSchema};
+use crate::schema::{Name, RecordField, Schema, SchemaKind, UnionSchema, UnionRef};
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -53,7 +53,7 @@ pub enum Value {
     /// reading values.
     Enum(i32, String),
     /// An `union` Avro value.
-    Union(Box<Value>),
+    Union(UnionRef, Box<Value>),
     /// An `array` Avro value.
     Array(Vec<Value>),
     /// A `map` Avro value.
@@ -72,28 +72,37 @@ pub enum Value {
 pub trait ToAvro {
     /// Transforms this value into an Avro-compatible [Value](enum.Value.html).
     fn avro(self) -> Value;
+    fn union_ref(&self) -> UnionRef;
 }
 
 macro_rules! to_avro(
-    ($t:ty, $v:expr) => (
+    ($t:ty, $v:expr, $k:expr) => (
         impl ToAvro for $t {
             fn avro(self) -> Value {
                 $v(self)
+            }
+
+            fn union_ref(&self) -> UnionRef {
+                UnionRef::primitive($k)
             }
         }
     );
 );
 
-to_avro!(bool, Value::Boolean);
-to_avro!(i32, Value::Int);
-to_avro!(i64, Value::Long);
-to_avro!(f32, Value::Float);
-to_avro!(f64, Value::Double);
-to_avro!(String, Value::String);
+to_avro!(bool, Value::Boolean, SchemaKind::Boolean);
+to_avro!(i32, Value::Int, SchemaKind::Int);
+to_avro!(i64, Value::Long, SchemaKind::Long);
+to_avro!(f32, Value::Float, SchemaKind::Float);
+to_avro!(f64, Value::Double, SchemaKind::Double);
+to_avro!(String, Value::String, SchemaKind::String);
 
 impl ToAvro for () {
     fn avro(self) -> Value {
         Value::Null
+    }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::Null)
     }
 }
 
@@ -101,17 +110,29 @@ impl ToAvro for usize {
     fn avro(self) -> Value {
         (self as i64).avro()
     }
+
+    fn union_ref(&self) -> UnionRef {
+        (*self as i64).union_ref()
+    }
 }
 
 impl<'a> ToAvro for &'a str {
     fn avro(self) -> Value {
         Value::String(self.to_owned())
     }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::String)
+    }
 }
 
 impl<'a> ToAvro for &'a [u8] {
     fn avro(self) -> Value {
         Value::Bytes(self.to_owned())
+    }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::Bytes)
     }
 }
 
@@ -120,11 +141,19 @@ where
     T: ToAvro,
 {
     fn avro(self) -> Value {
+        let union_ref = self.union_ref();
         let v = match self {
             Some(v) => T::avro(v),
             None => Value::Null,
         };
-        Value::Union(Box::new(v))
+        Value::Union(union_ref, Box::new(v))
+    }
+
+    fn union_ref(&self) -> UnionRef {
+        match *self {
+            Some(ref v) => v.union_ref(),
+            None => UnionRef::primitive(SchemaKind::Null),
+        }
     }
 }
 
@@ -139,6 +168,10 @@ where
                 .collect::<_>(),
         )
     }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::Map)
+    }
 }
 
 impl<'a, T, S: BuildHasher> ToAvro for HashMap<&'a str, T, S>
@@ -152,11 +185,19 @@ where
                 .collect::<_>(),
         )
     }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::Map)
+    }
 }
 
 impl ToAvro for Value {
     fn avro(self) -> Value {
         self
+    }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::primitive(SchemaKind::from(self))
     }
 }
 
@@ -178,6 +219,7 @@ pub struct Record<'a> {
     /// `Record` object. Any unset field defaults to `Value::Null`.
     pub fields: Vec<(String, Value)>,
     schema_lookup: &'a HashMap<String, usize>,
+    name: Name,
 }
 
 impl<'a> Record<'a> {
@@ -189,6 +231,7 @@ impl<'a> Record<'a> {
             Schema::Record {
                 fields: ref schema_fields,
                 lookup: ref schema_lookup,
+                ref name,
                 ..
             } => {
                 let mut fields = Vec::with_capacity(schema_fields.len());
@@ -199,6 +242,7 @@ impl<'a> Record<'a> {
                 Some(Record {
                     fields,
                     schema_lookup,
+                    name: name.clone(),
                 })
             },
             _ => None,
@@ -224,6 +268,10 @@ impl<'a> ToAvro for Record<'a> {
     fn avro(self) -> Value {
         Value::Record(self.fields)
     }
+
+    fn union_ref(&self) -> UnionRef {
+        UnionRef::named(&self.name)
+    }
 }
 
 impl ToAvro for JsonValue {
@@ -245,6 +293,20 @@ impl ToAvro for JsonValue {
                     .collect::<_>(),
             ),
         }
+    }
+
+    fn union_ref(&self) -> UnionRef {
+        let kind = match self {
+            JsonValue::Null => SchemaKind::Null,
+            JsonValue::Bool(_) => SchemaKind::Boolean,
+            JsonValue::Number(ref n) if n.is_i64() => SchemaKind::Long,
+            JsonValue::Number(ref n) if n.is_f64() => SchemaKind::Double,
+            JsonValue::Number(_) => SchemaKind::Long,
+            JsonValue::String(_) => SchemaKind::String,
+            JsonValue::Array(_) => SchemaKind::Array,
+            JsonValue::Object(_) => SchemaKind::Map,
+        };
+        UnionRef::primitive(kind)
     }
 }
 
@@ -270,8 +332,10 @@ impl Value {
                 .map(|ref symbol| symbol == &s)
                 .unwrap_or(false),
             // (&Value::Union(None), &Schema::Union(_)) => true,
-            (&Value::Union(ref value), &Schema::Union(ref inner)) => {
-                inner.find_schema(value).is_some()
+            (&Value::Union(ref union_ref, ref value), &Schema::Union(ref inner)) => {
+                inner.find_ref(union_ref)
+                    .map(|(_, value_schema)| value.validate(value_schema))
+                    .unwrap_or(false)
             },
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate(inner))
@@ -303,7 +367,7 @@ impl Value {
         {
             // Pull out the Union, and attempt to resolve against it.
             let v = match self {
-                Value::Union(b) => *b,
+                Value::Union(_, b) => *b,
                 _ => unreachable!(),
             };
             self = v;
@@ -455,16 +519,19 @@ impl Value {
     }
 
     fn resolve_union(self, schema: &UnionSchema) -> Result<Self, Error> {
-        let v = match self {
+        let option: Option<(usize, &Schema)> = match self {
             // Both are unions case.
-            Value::Union(v) => *v,
+            Value::Union(ref union_ref, _) => schema.find_ref(union_ref),
             // Reader is a union, but writer is not.
-            v => v,
+            ref v => schema.find_schema(&v),
         };
         // Find the first match in the reader schema.
-        let (_, inner) = schema
-            .find_schema(&v)
+        let (_, inner) = option
             .ok_or_else(|| SchemaResolutionError::new("Could not find matching type in union"))?;
+        let v = match self {
+            Value::Union(_, v) => *v,
+            v => v,
+        };
         v.resolve(inner)
     }
 
@@ -540,7 +607,7 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Name, RecordField, RecordFieldOrder, UnionSchema};
+    use crate::schema::{Name, RecordField, RecordFieldOrder, UnionRef, UnionSchema};
 
     #[test]
     fn validate() {
@@ -548,22 +615,22 @@ mod tests {
             (Value::Int(42), Schema::Int, true),
             (Value::Int(42), Schema::Boolean, false),
             (
-                Value::Union(Box::new(Value::Null)),
+                Value::Union(UnionRef::primitive(SchemaKind::Null), Box::new(Value::Null)),
                 Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
                 true,
             ),
             (
-                Value::Union(Box::new(Value::Int(42))),
+                Value::Union(UnionRef::primitive(SchemaKind::Int), Box::new(Value::Int(42))),
                 Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
                 true,
             ),
             (
-                Value::Union(Box::new(Value::Null)),
+                Value::Union(UnionRef::primitive(SchemaKind::Null), Box::new(Value::Null)),
                 Schema::Union(UnionSchema::new(vec![Schema::Double, Schema::Int]).unwrap()),
                 false,
             ),
             (
-                Value::Union(Box::new(Value::Int(42))),
+                Value::Union(UnionRef::primitive(SchemaKind::Int), Box::new(Value::Int(42))),
                 Schema::Union(
                     UnionSchema::new(vec![
                         Schema::Null,
@@ -704,5 +771,84 @@ mod tests {
                 ("c".to_string(), Value::Null),
             ]).validate(&schema)
         );
+    }
+
+    #[test]
+    fn validate_union_with_records() {
+        // [
+        //   null,
+        //   {
+        //     "type": "record",
+        //     "name": "some_record",
+        //     "fields": [
+        //       {"type": "long", "name": "a"}
+        //     ],
+        //   },
+        //   {
+        //     "type": "record",
+        //     "name": "other_record",
+        //     "fields": [
+        //       {"type": "string", "name": "b"}
+        //     ]
+        //   }
+        // ]
+        let some_record = Schema::Record {
+            name: Name::new("some_record"),
+            doc: None,
+            fields: vec![
+                RecordField {
+                    name: "a".to_string(),
+                    doc: None,
+                    default: None,
+                    schema: Schema::Long,
+                    order: RecordFieldOrder::Ascending,
+                    position: 0,
+                },
+            ],
+            lookup: HashMap::new(),
+        };
+        let other_record = Schema::Record {
+            name: Name::new("other_record"),
+            doc: None,
+            fields: vec![
+                RecordField {
+                    name: "b".to_string(),
+                    doc: None,
+                    default: None,
+                    schema: Schema::String,
+                    order: RecordFieldOrder::Ascending,
+                    position: 1,
+                },
+            ],
+            lookup: HashMap::new(),
+        };
+        let union_schema = UnionSchema::new(vec![
+            Schema::Null,
+            some_record,
+            other_record,
+        ]).unwrap();
+        let schema = Schema::Union(union_schema);
+
+        let null_value = Box::new(Value::Null);
+        let null_ref = UnionRef::primitive(SchemaKind::Null);
+        let some_value = Box::new(Value::Record(vec![("a".to_string(), Value::Long(42i64))]));
+        let some_ref = UnionRef::from_fullname("some_record".to_string());
+        let other_value = Box::new(Value::Record(vec![("b".to_string(), Value::String("foo".to_string()))]));
+        let other_ref = UnionRef::from_fullname("other_record".to_string());
+        let missing_ref = UnionRef::from_fullname("missing".to_string());
+
+        let validate = |union_ref: &UnionRef, value: &Box<Value>| -> bool {
+            Value::Union(union_ref.clone(), value.clone()).validate(&schema)
+        };
+
+        assert!(validate(&null_ref, &null_value));
+        assert!(validate(&some_ref, &some_value));
+        assert!(validate(&other_ref, &other_value));
+        assert!(!validate(&other_ref, &some_value));
+        assert!(!validate(&other_ref, &null_value));
+        assert!(!validate(&missing_ref, &null_value));
+        assert!(!validate(&missing_ref, &some_value));
+        assert!(!validate(&missing_ref, &other_value));
+        assert!(!validate(&null_ref, &some_value));
     }
 }

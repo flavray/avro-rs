@@ -161,7 +161,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::String(_) => SchemaKind::String,
             types::Value::Array(_) => SchemaKind::Array,
             types::Value::Map(_) => SchemaKind::Map,
-            types::Value::Union(_) => SchemaKind::Union,
+            types::Value::Union(_, _) => SchemaKind::Union,
             types::Value::Record(_) => SchemaKind::Record,
             types::Value::Enum(_, _) => SchemaKind::Enum,
             types::Value::Fixed(_, _) => SchemaKind::Fixed,
@@ -313,6 +313,47 @@ impl RecordField {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnionRef {
+    inner: UnionRefInner,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum UnionRefInner {
+    Primitive(SchemaKind),
+    Named(String),
+}
+
+impl UnionRef {
+    pub(crate) fn primitive(kind: SchemaKind) -> Self {
+        UnionRef {
+            inner: UnionRefInner::Primitive(kind),
+        }
+    }
+
+    pub fn named(name: &Name) -> Self {
+        Self::from_fullname(name.fullname(None))
+    }
+
+    pub fn from_fullname(name: String) -> Self {
+        UnionRef {
+            inner: UnionRefInner::Named(name)
+        }
+    }
+
+    pub fn from_schema(schema: &Schema) -> Self {
+        if let Some(ref name) = schema.name() {
+            Self::named(name)
+        } else {
+            Self::primitive(SchemaKind::from(schema))
+        }
+    }
+
+    pub fn from_value(value: &crate::types::Value) -> Self {
+        UnionRef::primitive(SchemaKind::from(value))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UnionSchema {
     schemas: Vec<Schema>,
@@ -320,7 +361,7 @@ pub struct UnionSchema {
     // schema index given a value.
     // **NOTE** that this approach does not work for named types, and will have to be modified
     // to support that. A simple solution is to also keep a mapping of the names used.
-    variant_index: HashMap<SchemaKind, usize>,
+    variant_index: HashMap<UnionRef, usize>,
 }
 
 impl UnionSchema {
@@ -332,8 +373,8 @@ impl UnionSchema {
                     "Unions may not directly contain a union",
                 ))?;
             }
-            let kind = SchemaKind::from(schema);
-            if vindex.insert(kind, i).is_some() {
+            let union_ref = UnionRef::from_schema(schema);
+            if vindex.insert(union_ref, i).is_some() {
                 Err(ParseSchemaError::new(
                     "Unions cannot contain duplicate types",
                 ))?;
@@ -358,9 +399,13 @@ impl UnionSchema {
     /// Optionally returns a reference to the schema matched by this value, as well as its position
     /// within this enum.
     pub fn find_schema(&self, value: &crate::types::Value) -> Option<(usize, &Schema)> {
-        let kind = SchemaKind::from(value);
+        let union_ref = UnionRef::from_value(value);
+        self.find_ref(&union_ref)
+    }
+
+    pub fn find_ref(&self, union_ref: &UnionRef) -> Option<(usize, &Schema)> {
         self.variant_index
-            .get(&kind)
+            .get(union_ref)
             .cloned()
             .map(|i| (i, &self.schemas[i]))
     }
@@ -555,6 +600,15 @@ impl Schema {
             name,
             size: size as usize,
         })
+    }
+
+    fn name(&self) -> Option<&Name> {
+        match *self {
+            Schema::Record { ref name, .. } => Some(name),
+            Schema::Enum { ref name, .. } => Some(name),
+            Schema::Fixed { ref name, .. } => Some(name),
+            _ => None
+        }
     }
 }
 

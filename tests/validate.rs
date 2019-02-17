@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use avro_rs::types::{ToAvro, Value};
-use avro_rs::{from_avro_datum, to_avro_datum, Schema};
+use avro_rs::{from_avro_datum, to_avro_datum, Schema, UnionRef};
 
 // See https://github.com/apache/avro/blob/5af5e399/lang/py/test/test_io.py#L28
 lazy_static! {
@@ -46,7 +46,7 @@ lazy_static! {
         }),
         (
             r#"["string", "null", "long"]"#,
-            Value::Union(Box::new(Value::Null))
+            Value::Union(UnionRef::from_value(&Value::Null), Box::new(Value::Null))
         ),
         (
             r#"{"type": "record", "name": "Test", "fields": [{"name": "f", "type": "long"}]}"#,
