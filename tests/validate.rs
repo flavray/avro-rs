@@ -45,8 +45,8 @@ lazy_static! {
             map.avro()
         }),
         (
-            r#"["string", "null", "long"]"#,
-            Value::Union(Box::new(Value::Null))
+            r#"["null", "string", "long"]"#,
+            Value::Union(0, Box::new(Value::Null))
         ),
         (
             r#"{"type": "record", "name": "Test", "fields": [{"name": "f", "type": "long"}]}"#,

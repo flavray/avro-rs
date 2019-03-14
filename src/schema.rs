@@ -1,6 +1,6 @@
 //! Logic for parsing and interacting with schemas in Avro format.
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use digest::Digest;
@@ -161,7 +161,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::String(_) => SchemaKind::String,
             types::Value::Array(_) => SchemaKind::Array,
             types::Value::Map(_) => SchemaKind::Map,
-            types::Value::Union(_) => SchemaKind::Union,
+            types::Value::Union(_, _) => SchemaKind::Union,
             types::Value::Record(_) => SchemaKind::Record,
             types::Value::Enum(_, _) => SchemaKind::Enum,
             types::Value::Fixed(_, _) => SchemaKind::Fixed,
@@ -316,32 +316,39 @@ impl RecordField {
 #[derive(Debug, Clone)]
 pub struct UnionSchema {
     schemas: Vec<Schema>,
-    // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
-    // schema index given a value.
-    // **NOTE** that this approach does not work for named types, and will have to be modified
-    // to support that. A simple solution is to also keep a mapping of the names used.
-    variant_index: HashMap<SchemaKind, usize>,
 }
 
 impl UnionSchema {
     pub(crate) fn new(schemas: Vec<Schema>) -> Result<Self, Error> {
-        let mut vindex = HashMap::new();
-        for (i, schema) in schemas.iter().enumerate() {
-            if let Schema::Union(_) = schema {
-                Err(ParseSchemaError::new(
-                    "Unions may not directly contain a union",
-                ))?;
-            }
-            let kind = SchemaKind::from(schema);
-            if vindex.insert(kind, i).is_some() {
-                Err(ParseSchemaError::new(
-                    "Unions cannot contain duplicate types",
-                ))?;
+        let mut prim_index = HashSet::<SchemaKind>::new();
+        let mut record_index = HashSet::<String>::new();
+
+        for (variant_index, schema) in schemas.iter().enumerate() {
+            match schema {
+                Schema::Union(_) =>
+                    Err(ParseSchemaError::new(
+                        format!("Unions may not directly contain a union (variant-index: {})", variant_index),
+                    ))?,
+                Schema::Record { name, .. } => 
+                    if !record_index.insert(name.fullname(None).clone()) {
+                        Err(ParseSchemaError::new(
+                            format!("Union cannot have several record-variants with the same record-name (variant-index: {})", variant_index),
+                        ))?
+                    },
+                
+                primitive => {
+                    let schema_kind = SchemaKind::from(primitive);
+                    if !prim_index.insert(schema_kind) {
+                        Err(ParseSchemaError::new(
+                            format!("Unions cannot contain duplicate primitive types(variant-index: {})", variant_index),
+                        ))?
+                    }
+                },
             }
         }
+
         Ok(UnionSchema {
             schemas,
-            variant_index: vindex,
         })
     }
 
@@ -355,14 +362,8 @@ impl UnionSchema {
         !self.schemas.is_empty() && self.schemas[0] == Schema::Null
     }
 
-    /// Optionally returns a reference to the schema matched by this value, as well as its position
-    /// within this enum.
-    pub fn find_schema(&self, value: &crate::types::Value) -> Option<(usize, &Schema)> {
-        let kind = SchemaKind::from(value);
-        self.variant_index
-            .get(&kind)
-            .cloned()
-            .map(|i| (i, &self.schemas[i]))
+    pub fn variant_schema(&self, variant_index: usize) -> Option<&Schema> {
+        self.schemas.get(variant_index)
     }
 }
 

@@ -6,7 +6,7 @@ use std::u8;
 use failure::Error;
 use serde_json::Value as JsonValue;
 
-use crate::schema::{RecordField, Schema, SchemaKind, UnionSchema};
+use crate::schema::{RecordField, Schema, UnionSchema};
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -54,7 +54,7 @@ pub enum Value {
     /// reading values.
     Enum(i32, String),
     /// An `union` Avro value.
-    Union(Box<Value>),
+    Union(usize, Box<Value>),
     /// An `array` Avro value.
     Array(Vec<Value>),
     /// A `map` Avro value.
@@ -121,11 +121,18 @@ where
     T: ToAvro,
 {
     fn avro(self) -> Value {
-        let v = match self {
-            Some(v) => T::avro(v),
-            None => Value::Null,
+        let (i, v) = match self {
+            Some(v) => (1, T::avro(v)),
+            None => (0, Value::Null),
         };
-        Value::Union(Box::new(v))
+        /*
+         * https://avro.apache.org/docs/current/spec.html#Unions
+         * | Thus, for unions containing "null", the "null" is usually listed first, since the default value of such unions is typically null
+         * 
+         * Although that is not a guarantee (that the schema will be defined as ["null", {"type": ...}]: null-first), 
+         *  this can be used as a guideline to choose variant-index=0 for the None value.
+         */
+        Value::Union(i, Box::new(v))
     }
 }
 
@@ -271,8 +278,14 @@ impl Value {
                 .map(|ref symbol| symbol == &s)
                 .unwrap_or(false),
             // (&Value::Union(None), &Schema::Union(_)) => true,
-            (&Value::Union(ref value), &Schema::Union(ref inner)) => {
-                inner.find_schema(value).is_some()
+            (&Value::Union(variant_idx, ref variant_value), &Schema::Union(ref inner)) => {
+                match inner.variant_schema(variant_idx) {
+                    None => 
+                        // Is an invalid variant-index a schema validation error or a failure worth panicking?
+                        false,
+                    Some(variant_schema) =>
+                        variant_value.validate(variant_schema),
+                }
             },
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate(inner))
@@ -297,8 +310,14 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(mut self, schema: &Schema) -> Result<Self, Error> {
-        // Check if this schema is a union, and if the reader schema is not.
+    pub fn resolve(/*mut */self, schema: &Schema) -> Result<Self, Error> {
+        /*
+        // RGafiyatullin:
+        //  I am convinced that a VariantValue does not conform UnionSchema(vec![ VariantSchema ]) under any circumstances;
+        //  Union(0, VariantValue) on the other hand does.
+        //  Therefore there is no need to extract inner-value of a Union
+        // ---
+        // // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
             && SchemaKind::from(schema) != SchemaKind::Union
         {
@@ -309,6 +328,7 @@ impl Value {
             };
             self = v;
         }
+        */
         match *schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
@@ -462,17 +482,22 @@ impl Value {
     }
 
     fn resolve_union(self, schema: &UnionSchema) -> Result<Self, Error> {
-        let v = match self {
-            // Both are unions case.
-            Value::Union(v) => *v,
-            // Reader is a union, but writer is not.
-            v => v,
-        };
-        // Find the first match in the reader schema.
-        let (_, inner) = schema
-            .find_schema(&v)
-            .ok_or_else(|| SchemaResolutionError::new("Could not find matching type in union"))?;
-        v.resolve(inner)
+        match self {
+            Value::Union(variant_index, v) => {
+                let variant_value = *v;
+                let variant_schema =
+                    schema
+                        .variant_schema(variant_index)
+                        .ok_or_else(
+                            || SchemaResolutionError::new(
+                                format!("Invalid variant index: {:?}", variant_index))
+                        )?;
+                variant_value.resolve(variant_schema)
+            },
+            _ => 
+                Err(SchemaResolutionError::new(
+                    "Attempt to resolve schema for non-union type via UnionSchema"))?
+        }
     }
 
     fn resolve_array(self, schema: &Schema) -> Result<Self, Error> {
@@ -570,22 +595,22 @@ mod tests {
             (Value::Int(42), Schema::Int, true),
             (Value::Int(42), Schema::Boolean, false),
             (
-                Value::Union(Box::new(Value::Null)),
+                Value::Union(0, Box::new(Value::Null)),
                 Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
                 true,
             ),
             (
-                Value::Union(Box::new(Value::Int(42))),
+                Value::Union(1, Box::new(Value::Int(42))),
                 Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
                 true,
             ),
             (
-                Value::Union(Box::new(Value::Null)),
+                Value::Union(0, Box::new(Value::Null)),
                 Schema::Union(UnionSchema::new(vec![Schema::Double, Schema::Int]).unwrap()),
                 false,
             ),
             (
-                Value::Union(Box::new(Value::Int(42))),
+                Value::Union(3, Box::new(Value::Int(42))),
                 Schema::Union(
                     UnionSchema::new(vec![
                         Schema::Null,

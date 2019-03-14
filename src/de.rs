@@ -172,8 +172,15 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         match *self.input {
-            Value::Union(ref inner) if inner.as_ref() == &Value::Null => visitor.visit_none(),
-            Value::Union(ref inner) => visitor.visit_some(&mut Deserializer::new(inner)),
+            /*
+            * https://avro.apache.org/docs/current/spec.html#Unions
+            * | Thus, for unions containing "null", the "null" is usually listed first, since the default value of such unions is typically null
+            * 
+            * Although that is not a guarantee (that the schema will be defined as ["null", {"type": ...}]: null-first), 
+            *  this can be used as a guideline to choose variant-index=0 for the None value.
+            */
+            Value::Union(0, ref inner) if inner.as_ref() == &Value::Null => visitor.visit_none(),
+            Value::Union(1, ref inner) => visitor.visit_some(&mut Deserializer::new(inner)),
             _ => Err(Error::custom("not a union")),
         }
     }
