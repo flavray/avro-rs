@@ -329,31 +329,31 @@ impl UnionSchema {
 
         for (variant_index, schema) in schemas.iter().enumerate() {
             match schema {
-                Schema::Union(_) =>
-                    Err(ParseSchemaError::new(
-                        format!("Unions may not directly contain a union (variant-index: {})", variant_index),
-                    ))?,
-                Schema::Record { name, .. } => 
+                Schema::Union(_) => Err(ParseSchemaError::new(format!(
+                    "Unions may not directly contain a union (variant-index: {})",
+                    variant_index
+                )))?,
+                Schema::Record { name, .. } => {
                     if !record_index.insert(name.fullname(None).clone()) {
                         Err(ParseSchemaError::new(
                             format!("Union cannot have several record-variants with the same record-name (variant-index: {})", variant_index),
                         ))?
-                    },
-                
+                    }
+                }
+
                 primitive => {
                     let schema_kind = SchemaKind::from(primitive);
                     if !prim_index.insert(schema_kind) {
-                        Err(ParseSchemaError::new(
-                            format!("Unions cannot contain duplicate primitive types(variant-index: {})", variant_index),
-                        ))?
+                        Err(ParseSchemaError::new(format!(
+                            "Unions cannot contain duplicate primitive types(variant-index: {})",
+                            variant_index
+                        )))?
                     }
-                },
+                }
             }
         }
 
-        Ok(UnionSchema {
-            schemas,
-        })
+        Ok(UnionSchema { schemas })
     }
 
     /// Returns a slice to all variants of this schema.

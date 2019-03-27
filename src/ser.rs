@@ -104,7 +104,7 @@ impl VariantSeqSerializer {
     pub fn new(variant_index: usize, len: usize) -> VariantSeqSerializer {
         VariantSeqSerializer {
             variant_index,
-            items: Vec::with_capacity(len)
+            items: Vec::with_capacity(len),
         }
     }
 }
@@ -234,7 +234,6 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     where
         T: Serialize,
     {
-
         let variant_value = self.serialize_newtype_struct(name, value)?;
         Ok(Value::Union(index as usize, Box::new(variant_value)))
     }
@@ -424,7 +423,11 @@ impl ser::SerializeStructVariant for VariantStructSerializer {
     type Ok = Value;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, name: &'static str, value: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
     where
         T: Serialize,
     {

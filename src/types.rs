@@ -9,8 +9,6 @@ use serde_json::Value as JsonValue;
 use crate::schema::{RecordField, Schema, UnionSchema};
 use crate::schema_resolution;
 
-
-
 /// Represents any valid Avro value
 /// More information about Avro values can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
@@ -117,8 +115,8 @@ where
         /*
          * https://avro.apache.org/docs/current/spec.html#Unions
          * | Thus, for unions containing "null", the "null" is usually listed first, since the default value of such unions is typically null
-         * 
-         * Although that is not a guarantee (that the schema will be defined as ["null", {"type": ...}]: null-first), 
+         *
+         * Although that is not a guarantee (that the schema will be defined as ["null", {"type": ...}]: null-first),
          *  this can be used as a guideline to choose variant-index=0 for the None value.
          */
         Value::Union(i, Box::new(v))
@@ -269,13 +267,14 @@ impl Value {
             // (&Value::Union(None), &Schema::Union(_)) => true,
             (&Value::Union(variant_idx, ref variant_value), &Schema::Union(ref inner)) => {
                 match inner.variant_schema(variant_idx) {
-                    None => 
-                        // Is an invalid variant-index a schema validation error or a failure worth panicking?
-                        false,
-                    Some(variant_schema) =>
-                        variant_value.validate(variant_schema),
+                    None =>
+                    // Is an invalid variant-index a schema validation error or a failure worth panicking?
+                    {
+                        false
+                    }
+                    Some(variant_schema) => variant_value.validate(variant_schema),
                 }
-            },
+            }
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate(inner))
             }
@@ -300,7 +299,11 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub(crate) fn resolve(/*mut */self, writer_schema: &Schema, reader_schema: &Schema) -> Result<Self, Error> {
+    pub(crate) fn resolve(
+        self,
+        writer_schema: &Schema,
+        reader_schema: &Schema,
+    ) -> Result<Self, Error> {
         let resolution = schema_resolution::Resolution::new(writer_schema, reader_schema)?;
         let promoted_value = resolution.promote_value(self)?;
 
@@ -476,9 +479,9 @@ mod tests {
     #[test]
     fn resolve_bytes_to_bytes_invalid_data() {
         let value = Value::Array(vec![Value::Int(2000), Value::Int(-42)]);
-        // Although the value has little to do with Bytes, 
+        // Although the value has little to do with Bytes,
         //   the resolution implies Identity-transformation;
         // Hence it's a schema-validation's business to address this invalid input
-        assert!(value.resolve(&Schema::Bytes, &Schema::Bytes).is_ok()); 
+        assert!(value.resolve(&Schema::Bytes, &Schema::Bytes).is_ok());
     }
 }
