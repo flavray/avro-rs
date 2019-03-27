@@ -279,7 +279,7 @@ pub fn from_avro_datum<R: Read>(
 ) -> Result<Value, Error> {
     let value = decode(writer_schema, reader)?;
     match reader_schema {
-        Some(ref schema) => value.resolve(schema),
+        Some(ref reader_schema) => value.resolve(writer_schema, reader_schema),
         None => Ok(value),
     }
 }

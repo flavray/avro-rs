@@ -521,6 +521,7 @@ mod reader;
 mod ser;
 mod util;
 mod writer;
+mod schema_resolution;
 
 pub mod schema;
 pub mod types;
@@ -530,7 +531,8 @@ pub use crate::de::from_value;
 pub use crate::reader::{from_avro_datum, Reader};
 pub use crate::schema::{ParseSchemaError, Schema};
 pub use crate::ser::to_value;
-pub use crate::types::SchemaResolutionError;
+pub use crate::schema_resolution::Resolution as SchemaResolution;
+pub use crate::schema_resolution::ResolutionError as SchemaResolutionError;
 pub use crate::util::{max_allocation_bytes, DecodeError};
 pub use crate::writer::{to_avro_datum, ValidationError, Writer};
 

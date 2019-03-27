@@ -7,20 +7,9 @@ use failure::Error;
 use serde_json::Value as JsonValue;
 
 use crate::schema::{RecordField, Schema, UnionSchema};
+use crate::schema_resolution;
 
-/// Describes errors happened while performing schema resolution on Avro data.
-#[derive(Fail, Debug)]
-#[fail(display = "Decoding error: {}", _0)]
-pub struct SchemaResolutionError(String);
 
-impl SchemaResolutionError {
-    pub fn new<S>(msg: S) -> SchemaResolutionError
-    where
-        S: Into<String>,
-    {
-        SchemaResolutionError(msg.into())
-    }
-}
 
 /// Represents any valid Avro value
 /// More information about Avro values can be found in the
@@ -52,7 +41,7 @@ pub enum Value {
     /// of its corresponding schema.
     /// This allows schema-less encoding, as well as schema resolution while
     /// reading values.
-    Enum(i32, String),
+    Enum(i32 /* XXX: should it not be an `usize` */, String),
     /// An `union` Avro value.
     Union(usize, Box<Value>),
     /// An `array` Avro value.
@@ -310,277 +299,11 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(/*mut */self, schema: &Schema) -> Result<Self, Error> {
-        /*
-        // RGafiyatullin:
-        //  I am convinced that a VariantValue does not conform UnionSchema(vec![ VariantSchema ]) under any circumstances;
-        //  Union(0, VariantValue) on the other hand does.
-        //  Therefore there is no need to extract inner-value of a Union
-        // ---
-        // // Check if this schema is a union, and if the reader schema is not.
-        if SchemaKind::from(&self) == SchemaKind::Union
-            && SchemaKind::from(schema) != SchemaKind::Union
-        {
-            // Pull out the Union, and attempt to resolve against it.
-            let v = match self {
-                Value::Union(b) => *b,
-                _ => unreachable!(),
-            };
-            self = v;
-        }
-        */
-        match *schema {
-            Schema::Null => self.resolve_null(),
-            Schema::Boolean => self.resolve_boolean(),
-            Schema::Int => self.resolve_int(),
-            Schema::Long => self.resolve_long(),
-            Schema::Float => self.resolve_float(),
-            Schema::Double => self.resolve_double(),
-            Schema::Bytes => self.resolve_bytes(),
-            Schema::String => self.resolve_string(),
-            Schema::Fixed { size, .. } => self.resolve_fixed(size),
-            Schema::Union(ref inner) => self.resolve_union(inner),
-            Schema::Enum { ref symbols, .. } => self.resolve_enum(symbols),
-            Schema::Array(ref inner) => self.resolve_array(inner),
-            Schema::Map(ref inner) => self.resolve_map(inner),
-            Schema::Record { ref fields, .. } => self.resolve_record(fields),
-        }
-    }
+    pub(crate) fn resolve(/*mut */self, writer_schema: &Schema, reader_schema: &Schema) -> Result<Self, Error> {
+        let resolution = schema_resolution::Resolution::new(writer_schema, reader_schema)?;
+        let promoted_value = resolution.promote_value(self)?;
 
-    fn resolve_null(self) -> Result<Self, Error> {
-        match self {
-            Value::Null => Ok(Value::Null),
-            other => {
-                Err(SchemaResolutionError::new(format!("Null expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_boolean(self) -> Result<Self, Error> {
-        match self {
-            Value::Boolean(b) => Ok(Value::Boolean(b)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Boolean expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_int(self) -> Result<Self, Error> {
-        match self {
-            Value::Int(n) => Ok(Value::Int(n)),
-            Value::Long(n) => Ok(Value::Int(n as i32)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Int expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_long(self) -> Result<Self, Error> {
-        match self {
-            Value::Int(n) => Ok(Value::Long(i64::from(n))),
-            Value::Long(n) => Ok(Value::Long(n)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Long expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_float(self) -> Result<Self, Error> {
-        match self {
-            Value::Int(n) => Ok(Value::Float(n as f32)),
-            Value::Long(n) => Ok(Value::Float(n as f32)),
-            Value::Float(x) => Ok(Value::Float(x)),
-            Value::Double(x) => Ok(Value::Float(x as f32)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Float expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_double(self) -> Result<Self, Error> {
-        match self {
-            Value::Int(n) => Ok(Value::Double(f64::from(n))),
-            Value::Long(n) => Ok(Value::Double(n as f64)),
-            Value::Float(x) => Ok(Value::Double(f64::from(x))),
-            Value::Double(x) => Ok(Value::Double(x)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Double expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_bytes(self) -> Result<Self, Error> {
-        match self {
-            Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
-            Value::String(s) => Ok(Value::Bytes(s.into_bytes())),
-            Value::Array(items) => Ok(Value::Bytes(
-                items
-                    .into_iter()
-                    .map(Value::try_u8)
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            other => {
-                Err(SchemaResolutionError::new(format!("Bytes expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_string(self) -> Result<Self, Error> {
-        match self {
-            Value::String(s) => Ok(Value::String(s)),
-            Value::Bytes(bytes) => Ok(Value::String(String::from_utf8(bytes)?)),
-            other => {
-                Err(SchemaResolutionError::new(format!("String expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_fixed(self, size: usize) -> Result<Self, Error> {
-        match self {
-            Value::Fixed(n, bytes) => if n == size {
-                Ok(Value::Fixed(n, bytes))
-            } else {
-                Err(SchemaResolutionError::new(format!(
-                    "Fixed size mismatch, {} expected, got {}",
-                    size, n
-                )).into())
-            },
-            other => {
-                Err(SchemaResolutionError::new(format!("String expected, got {:?}", other)).into())
-            },
-        }
-    }
-
-    fn resolve_enum(self, symbols: &[String]) -> Result<Self, Error> {
-        let validate_symbol = |symbol: String, symbols: &[String]| {
-            if let Some(index) = symbols.iter().position(|ref item| item == &&symbol) {
-                Ok(Value::Enum(index as i32, symbol))
-            } else {
-                Err(SchemaResolutionError::new(format!(
-                    "Enum default {} is not among allowed symbols {:?}",
-                    symbol, symbols,
-                )).into())
-            }
-        };
-
-        match self {
-            Value::Enum(i, s) => if i >= 0 && i < symbols.len() as i32 {
-                validate_symbol(s, symbols)
-            } else {
-                Err(SchemaResolutionError::new(format!(
-                    "Enum value {} is out of bound {}",
-                    i,
-                    symbols.len() as i32
-                )).into())
-            },
-            Value::String(s) => validate_symbol(s, symbols),
-            other => Err(SchemaResolutionError::new(format!(
-                "Enum({:?}) expected, got {:?}",
-                symbols, other
-            )).into()),
-        }
-    }
-
-    fn resolve_union(self, schema: &UnionSchema) -> Result<Self, Error> {
-        match self {
-            Value::Union(variant_index, v) => {
-                let variant_value = *v;
-                let variant_schema =
-                    schema
-                        .variant_schema(variant_index)
-                        .ok_or_else(
-                            || SchemaResolutionError::new(
-                                format!("Invalid variant index: {:?}", variant_index))
-                        )?;
-                variant_value.resolve(variant_schema)
-            },
-            _ => 
-                Err(SchemaResolutionError::new(
-                    "Attempt to resolve schema for non-union type via UnionSchema"))?
-        }
-    }
-
-    fn resolve_array(self, schema: &Schema) -> Result<Self, Error> {
-        match self {
-            Value::Array(items) => Ok(Value::Array(
-                items
-                    .into_iter()
-                    .map(|item| item.resolve(schema))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            other => Err(SchemaResolutionError::new(format!(
-                "Array({:?}) expected, got {:?}",
-                schema, other
-            )).into()),
-        }
-    }
-
-    fn resolve_map(self, schema: &Schema) -> Result<Self, Error> {
-        match self {
-            Value::Map(items) => Ok(Value::Map(
-                items
-                    .into_iter()
-                    .map(|(key, value)| value.resolve(schema).map(|value| (key, value)))
-                    .collect::<Result<HashMap<_, _>, _>>()?,
-            )),
-            other => Err(SchemaResolutionError::new(format!(
-                "Map({:?}) expected, got {:?}",
-                schema, other
-            )).into()),
-        }
-    }
-
-    fn resolve_record(self, fields: &[RecordField]) -> Result<Self, Error> {
-        let mut items = match self {
-            Value::Map(items) => Ok(items),
-            Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
-            other => Err(Error::from(SchemaResolutionError::new(format!(
-                "Record({:?}) expected, got {:?}",
-                fields, other
-            )))),
-        }?;
-
-        let new_fields = fields
-            .iter()
-            .map(|field| {
-                let value = match items.remove(&field.name) {
-                    Some(value) => value,
-                    None => match field.default {
-                        Some(ref value) => match field.schema {
-                            Schema::Enum { ref symbols, .. } => {
-                                value.clone().avro().resolve_enum(symbols)?
-                            },
-                            _ => value.clone().avro(),
-                        },
-                        _ => {
-                            return Err(SchemaResolutionError::new(format!(
-                                "missing field {} in record",
-                                field.name
-                            )).into())
-                        },
-                    },
-                };
-                value
-                    .resolve(&field.schema)
-                    .map(|value| (field.name.clone(), value))
-            }).collect::<Result<Vec<_>, _>>()?;
-
-        Ok(Value::Record(new_fields))
-    }
-
-    fn try_u8(self) -> Result<u8, Error> {
-        let int = self.resolve(&Schema::Int)?;
-        if let Value::Int(n) = int {
-            if n >= 0 && n <= i32::from(u8::MAX) {
-                return Ok(n as u8)
-            }
-        }
-
-        Err(
-            SchemaResolutionError::new(
-                format!("Unable to convert to u8, got {:?}", int)
-            ).into()
-        )
+        Ok(promoted_value)
     }
 }
 
@@ -754,17 +477,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_bytes_ok() {
-        let value = Value::Array(vec![Value::Int(0), Value::Int(42)]);
-        assert_eq!(
-            value.resolve(&Schema::Bytes).unwrap(),
-            Value::Bytes(vec![0u8, 42u8])
-        );
-    }
-
-    #[test]
-    fn resolve_bytes_failure() {
+    fn resolve_bytes_to_bytes_invalid_data() {
         let value = Value::Array(vec![Value::Int(2000), Value::Int(-42)]);
-        assert!(value.resolve(&Schema::Bytes).is_err());
+        // Although the value has little to do with Bytes, 
+        //   the resolution implies Identity-transformation;
+        // Hence it's a schema-validation's business to address this invalid input
+        assert!(value.resolve(&Schema::Bytes, &Schema::Bytes).is_ok()); 
     }
 }
