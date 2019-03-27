@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::u8;
 
-use failure::Error;
+use failure::{Error, Fail};
 use serde_json::Value as JsonValue;
 
 use crate::schema::{RecordField, Schema, UnionSchema};
@@ -197,7 +197,7 @@ impl<'a> Record<'a> {
                     fields,
                     schema_lookup,
                 })
-            },
+            }
             _ => None,
         }
     }
@@ -234,7 +234,7 @@ impl ToAvro for JsonValue {
             JsonValue::String(s) => Value::String(s),
             JsonValue::Array(items) => {
                 Value::Array(items.into_iter().map(|item| item.avro()).collect::<_>())
-            },
+            }
             JsonValue::Object(items) => Value::Map(
                 items
                     .into_iter()
@@ -278,17 +278,18 @@ impl Value {
             },
             (&Value::Array(ref items), &Schema::Array(ref inner)) => {
                 items.iter().all(|item| item.validate(inner))
-            },
+            }
             (&Value::Map(ref items), &Schema::Map(ref inner)) => {
                 items.iter().all(|(_, value)| value.validate(inner))
-            },
+            }
             (&Value::Record(ref record_fields), &Schema::Record { ref fields, .. }) => {
-                fields.len() == record_fields.len() && fields.iter().zip(record_fields.iter()).all(
-                    |(field, &(ref name, ref value))| {
-                        field.name == *name && value.validate(&field.schema)
-                    },
-                )
-            },
+                fields.len() == record_fields.len()
+                    && fields.iter().zip(record_fields.iter()).all(
+                        |(field, &(ref name, ref value))| {
+                            field.name == *name && value.validate(&field.schema)
+                        },
+                    )
+            }
             _ => false,
         }
     }
@@ -340,7 +341,8 @@ mod tests {
                         Schema::Double,
                         Schema::String,
                         Schema::Int,
-                    ]).unwrap(),
+                    ])
+                    .unwrap(),
                 ),
                 true,
             ),
@@ -439,41 +441,36 @@ mod tests {
             lookup: HashMap::new(),
         };
 
-        assert!(
-            Value::Record(vec![
-                ("a".to_string(), Value::Long(42i64)),
-                ("b".to_string(), Value::String("foo".to_string())),
-            ]).validate(&schema)
-        );
+        assert!(Value::Record(vec![
+            ("a".to_string(), Value::Long(42i64)),
+            ("b".to_string(), Value::String("foo".to_string())),
+        ])
+        .validate(&schema));
 
-        assert!(
-            !Value::Record(vec![
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("a".to_string(), Value::Long(42i64)),
-            ]).validate(&schema)
-        );
+        assert!(!Value::Record(vec![
+            ("b".to_string(), Value::String("foo".to_string())),
+            ("a".to_string(), Value::Long(42i64)),
+        ])
+        .validate(&schema));
 
-        assert!(
-            !Value::Record(vec![
-                ("a".to_string(), Value::Boolean(false)),
-                ("b".to_string(), Value::String("foo".to_string())),
-            ]).validate(&schema)
-        );
+        assert!(!Value::Record(vec![
+            ("a".to_string(), Value::Boolean(false)),
+            ("b".to_string(), Value::String("foo".to_string())),
+        ])
+        .validate(&schema));
 
-        assert!(
-            !Value::Record(vec![
-                ("a".to_string(), Value::Long(42i64)),
-                ("c".to_string(), Value::String("foo".to_string())),
-            ]).validate(&schema)
-        );
+        assert!(!Value::Record(vec![
+            ("a".to_string(), Value::Long(42i64)),
+            ("c".to_string(), Value::String("foo".to_string())),
+        ])
+        .validate(&schema));
 
-        assert!(
-            !Value::Record(vec![
-                ("a".to_string(), Value::Long(42i64)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Null),
-            ]).validate(&schema)
-        );
+        assert!(!Value::Record(vec![
+            ("a".to_string(), Value::Long(42i64)),
+            ("b".to_string(), Value::String("foo".to_string())),
+            ("c".to_string(), Value::Null),
+        ])
+        .validate(&schema));
     }
 
     #[test]
