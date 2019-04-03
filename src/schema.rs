@@ -323,7 +323,7 @@ pub struct UnionSchema {
 }
 
 impl UnionSchema {
-    pub(crate) fn new(schemas: Vec<Schema>) -> Result<Self, Error> {
+    pub fn new(schemas: Vec<Schema>) -> Result<Self, Error> {
         let mut prim_index = HashSet::<SchemaKind>::new();
         let mut record_index = HashSet::<String>::new();
 
