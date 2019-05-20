@@ -467,13 +467,13 @@
 
 mod codec;
 mod de;
-mod decode;
-mod encode;
 mod reader;
 mod ser;
 mod util;
 mod writer;
 
+pub mod decode;
+pub mod encode;
 pub mod schema;
 pub mod types;
 
