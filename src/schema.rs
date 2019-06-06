@@ -255,7 +255,8 @@ impl Name {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecordField {
     /// Name of the field.
-    pub name: String,
+//    pub name: String,
+    pub name: Name,
     /// Documentation of the field.
     pub doc: Documentation,
     /// Default value of the field.
@@ -283,9 +284,26 @@ pub enum RecordFieldOrder {
 impl RecordField {
     /// Parse a `serde_json::Value` into a `RecordField`.
     fn parse(field: &Map<String, Value>, position: usize) -> Result<Self, Error> {
+        let aliases: Option<Vec<String>> = field
+            .get("aliases")
+            .and_then(|aliases| aliases.as_array())
+            .and_then(|aliases| {
+                aliases
+                    .iter()
+                    .map(|alias| alias.as_str())
+                    .map(|alias| alias.map(|a| a.to_string()))
+                    .collect::<Option<_>>()
+            });
+        let namespace = field.string("namespace");
         let name = field
             .name()
             .ok_or_else(|| ParseSchemaError::new("No `name` in record field"))?;
+
+        let name_struct = Name {
+            name,
+            namespace,
+            aliases
+        };
 
         // TODO: "type" = "<record name>"
         let schema = field
@@ -307,7 +325,7 @@ impl RecordField {
             .unwrap_or_else(|| RecordFieldOrder::Ascending);
 
         Ok(RecordField {
-            name,
+            name: name_struct,
             doc: field.doc(),
             default,
             schema,
@@ -480,7 +498,7 @@ impl Schema {
             })?;
 
         for field in &fields {
-            lookup.insert(field.name.clone(), field.position);
+            lookup.insert(field.name.name.clone(), field.position);
         }
 
         Ok(Schema::Record {
@@ -645,7 +663,7 @@ impl Serialize for RecordField {
         S: Serializer,
     {
         let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("name", &self.name)?;
+        map.serialize_entry("name", &self.name.name)?;
         map.serialize_entry("type", &self.schema)?;
 
         if let Some(ref default) = self.default {

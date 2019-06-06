@@ -194,7 +194,7 @@ impl<'a> Record<'a> {
             } => {
                 let mut fields = Vec::with_capacity(schema_fields.len());
                 for schema_field in schema_fields.iter() {
-                    fields.push((schema_field.name.clone(), Value::Null));
+                    fields.push((schema_field.name.name.clone(), Value::Null));
                 }
 
                 Some(Record {
@@ -284,7 +284,7 @@ impl Value {
                 fields.len() == record_fields.len()
                     && fields.iter().zip(record_fields.iter()).all(
                         |(field, &(ref name, ref value))| {
-                            field.name == *name && value.validate(&field.schema)
+                            field.name.name == *name && value.validate(&field.schema)
                         },
                     )
             }
@@ -529,7 +529,19 @@ impl Value {
         let new_fields = fields
             .iter()
             .map(|field| {
-                let value = match items.remove(&field.name) {
+                let mut key = &field.name.name;
+                match &field.name.aliases {
+                    Some(data) => {
+                        for alias in data {
+                            if items.contains_key(alias) {
+                                key = alias;
+                                break;
+                            }
+                        }
+                    }
+                    None => {}
+                }
+                let value = match items.remove(key) {
                     Some(value) => value,
                     None => match field.default {
                         Some(ref value) => match field.schema {
@@ -541,7 +553,7 @@ impl Value {
                         _ => {
                             return Err(SchemaResolutionError::new(format!(
                                 "missing field {} in record",
-                                field.name
+                                field.name.name
                             ))
                             .into());
                         }
@@ -549,7 +561,7 @@ impl Value {
                 };
                 value
                     .resolve(&field.schema)
-                    .map(|value| (field.name.clone(), value))
+                    .map(|value| (field.name.name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
 

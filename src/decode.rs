@@ -131,7 +131,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let mut items = Vec::new();
             for field in fields {
                 // This clone is also expensive. See if we can do away with it...
-                items.push((field.name.clone(), decode(&field.schema, reader)?));
+                items.push((field.name.name.clone(), decode(&field.schema, reader)?));
             }
             Ok(Value::Record(items))
             // fields
