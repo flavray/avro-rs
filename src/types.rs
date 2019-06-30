@@ -694,7 +694,11 @@ mod tests {
             doc: None,
             fields: vec![
                 RecordField {
-                    name: "a".to_string(),
+                    name: Name {
+                        name: "a".to_string(),
+                        namespace: None,
+                        aliases: None
+                    },
                     doc: None,
                     default: None,
                     schema: Schema::Long,
@@ -702,7 +706,11 @@ mod tests {
                     position: 0,
                 },
                 RecordField {
-                    name: "b".to_string(),
+                    name: Name {
+                        name: "b".to_string(),
+                        namespace: None,
+                        aliases: None
+                    },
                     doc: None,
                     default: None,
                     schema: Schema::String,

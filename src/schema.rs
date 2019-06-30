@@ -21,8 +21,8 @@ pub struct ParseSchemaError(String);
 
 impl ParseSchemaError {
     pub fn new<S>(msg: S) -> ParseSchemaError
-    where
-        S: Into<String>,
+        where
+            S: Into<String>,
     {
         ParseSchemaError(msg.into())
     }
@@ -283,7 +283,7 @@ pub enum RecordFieldOrder {
 
 impl RecordField {
     /// Parse a `serde_json::Value` into a `RecordField`.
-    fn parse(field: &Map<String, Value>, position: usize) -> Result<Self, Error> {
+    fn parse(field: &Map<String, Value>, position: usize, parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         let aliases: Option<Vec<String>> = field
             .get("aliases")
             .and_then(|aliases| aliases.as_array())
@@ -302,14 +302,14 @@ impl RecordField {
         let name_struct = Name {
             name,
             namespace,
-            aliases
+            aliases,
         };
 
         // TODO: "type" = "<record name>"
         let schema = field
             .get("type")
             .ok_or_else(|| ParseSchemaError::new("No `type` in record field").into())
-            .and_then(|type_| Schema::parse(type_))?;
+            .and_then(|type_| Schema::parse(type_, parsed_record))?;
 
         let default = field.get("default").cloned();
 
@@ -398,17 +398,18 @@ impl PartialEq for UnionSchema {
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     pub fn parse_str(input: &str) -> Result<Self, Error> {
+        let mut parsed_record = HashMap::new();
         let value = serde_json::from_str(input)?;
-        Self::parse(&value)
+        Self::parse(&value, &mut parsed_record)
     }
 
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
     /// schema.
-    pub fn parse(value: &Value) -> Result<Self, Error> {
+    pub fn parse(value: &Value, parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         match *value {
-            Value::String(ref t) => Schema::parse_primitive(t.as_str()),
-            Value::Object(ref data) => Schema::parse_complex(data),
-            Value::Array(ref data) => Schema::parse_union(data),
+            Value::String(ref t) => Schema::parse_primitive(t.as_str(), parsed_record),
+            Value::Object(ref data) => Schema::parse_complex(data, parsed_record),
+            Value::Array(ref data) => Schema::parse_union(data, parsed_record),
             _ => Err(ParseSchemaError::new("Must be a JSON string, object or array").into()),
         }
     }
@@ -438,7 +439,7 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a primitive Avro type into a
     /// `Schema`.
-    fn parse_primitive(primitive: &str) -> Result<Self, Error> {
+    fn parse_primitive(primitive: &str, parsed_record: &HashMap<String, Schema>) -> Result<Self, Error> {
         match primitive {
             "null" => Ok(Schema::Null),
             "boolean" => Ok(Schema::Boolean),
@@ -448,7 +449,17 @@ impl Schema {
             "float" => Ok(Schema::Float),
             "bytes" => Ok(Schema::Bytes),
             "string" => Ok(Schema::String),
-            other => Err(ParseSchemaError::new(format!("Unknown type: {}", other)).into()),
+            other => {
+                match parsed_record.get(other) {
+                    Some(data) => {
+                        Ok(data.clone())
+                    }
+                    None => {
+                        Err(ParseSchemaError::new(format!("Unknown type: {}", other)).into())
+                    }
+                }
+
+            },
         }
     }
 
@@ -457,18 +468,18 @@ impl Schema {
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
-    fn parse_complex(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_complex(complex: &Map<String, Value>, parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         match complex.get("type") {
             Some(&Value::String(ref t)) => match t.as_str() {
-                "record" => Schema::parse_record(complex),
+                "record" => Schema::parse_record(complex, parsed_record),
                 "enum" => Schema::parse_enum(complex),
-                "array" => Schema::parse_array(complex),
-                "map" => Schema::parse_map(complex),
+                "array" => Schema::parse_array(complex, parsed_record),
+                "map" => Schema::parse_map(complex, parsed_record),
                 "fixed" => Schema::parse_fixed(complex),
-                other => Schema::parse_primitive(other),
+                other => Schema::parse_primitive(other, parsed_record),
             },
             Some(&Value::Object(ref data)) => match data.get("type") {
-                Some(ref value) => Schema::parse(value),
+                Some(ref value) => Schema::parse(value, parsed_record),
                 None => Err(
                     ParseSchemaError::new(format!("Unknown complex type: {:?}", complex)).into(),
                 ),
@@ -479,7 +490,7 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro record type into a
     /// `Schema`.
-    fn parse_record(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_record(complex: &Map<String, Value>, parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         let name = Name::parse(complex)?;
 
         let mut lookup = HashMap::new();
@@ -493,7 +504,7 @@ impl Schema {
                     .iter()
                     .filter_map(|field| field.as_object())
                     .enumerate()
-                    .map(|(position, field)| RecordField::parse(field, position))
+                    .map(|(position, field)| RecordField::parse(field, position, parsed_record))
                     .collect::<Result<_, _>>()
             })?;
 
@@ -501,12 +512,16 @@ impl Schema {
             lookup.insert(field.name.name.clone(), field.position);
         }
 
-        Ok(Schema::Record {
-            name,
+        let res = Schema::Record {
+            name: name.clone(),
             doc: complex.doc(),
             fields,
             lookup,
-        })
+        };
+
+        parsed_record.insert(name.name, res.clone());
+
+        Ok(res)
     }
 
     /// Parse a `serde_json::Value` representing a Avro enum type into a
@@ -535,30 +550,32 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro array type into a
     /// `Schema`.
-    fn parse_array(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_array(complex: &Map<String, Value>, parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         complex
             .get("items")
             .ok_or_else(|| ParseSchemaError::new("No `items` in array").into())
-            .and_then(|items| Schema::parse(items))
+            .and_then(|items| Schema::parse(items, parsed_record))
             .map(|schema| Schema::Array(Box::new(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro map type into a
     /// `Schema`.
-    fn parse_map(complex: &Map<String, Value>) -> Result<Self, Error> {
+    fn parse_map(complex: &Map<String, Value>, parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         complex
             .get("values")
             .ok_or_else(|| ParseSchemaError::new("No `values` in map").into())
-            .and_then(|items| Schema::parse(items))
+            .and_then(|items| Schema::parse(items, parsed_record))
             .map(|schema| Schema::Map(Box::new(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro union type into a
     /// `Schema`.
-    fn parse_union(items: &[Value]) -> Result<Self, Error> {
+    fn parse_union(items: &[Value], parsed_record: &mut HashMap<String, Schema>) -> Result<Self, Error> {
         items
             .iter()
-            .map(Schema::parse)
+            .map(move | val| {
+                Schema::parse(val, parsed_record)
+            })
             .collect::<Result<Vec<_>, _>>()
             .and_then(|schemas| Ok(Schema::Union(UnionSchema::new(schemas)?)))
     }
@@ -582,8 +599,8 @@ impl Schema {
 
 impl Serialize for Schema {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         match *self {
             Schema::Null => serializer.serialize_str("null"),
@@ -659,8 +676,8 @@ impl Serialize for Schema {
 
 impl Serialize for RecordField {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("name", &self.name.name)?;
@@ -860,7 +877,7 @@ mod tests {
             }
         "#,
         )
-        .unwrap();
+            .unwrap();
 
         let mut lookup = HashMap::new();
         lookup.insert("a".to_owned(), 0);
@@ -871,7 +888,11 @@ mod tests {
             doc: None,
             fields: vec![
                 RecordField {
-                    name: "a".to_string(),
+                    name: Name {
+                        name: "a".to_string(),
+                        namespace: None,
+                        aliases: None,
+                    },
                     doc: None,
                     default: Some(Value::Number(42i64.into())),
                     schema: Schema::Long,
@@ -879,7 +900,11 @@ mod tests {
                     position: 0,
                 },
                 RecordField {
-                    name: "b".to_string(),
+                    name: Name {
+                        name: "b".to_string(),
+                        namespace: None,
+                        aliases: None,
+                    },
                     doc: None,
                     default: None,
                     schema: Schema::String,
@@ -1000,4 +1025,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_schema_redefine() {
+        let schema = r#"
+        {
+            "name":"person",
+            "type":"record",
+            "fields":[
+            {
+                "name":"firstname",
+                "type":"string"
+            },
+            {
+                "name":"lastname",
+                "type":"string"
+            },
+            {
+                "name":"address",
+                "type":{
+                    "type":"record",
+                    "name":"AddressUSRecord",
+                    "fields":[
+                        {
+                            "name":"streetaddress",
+                            "type":"string"
+                        },
+                        {
+                            "name":"city",
+                            "type":"string"
+                        }
+                    ]
+                }
+            },
+            {
+                "name":"test",
+                "type":"AddressUSRecord"
+            }
+            ]
+        }
+        "#;
+        assert_eq!(true, Schema::parse_str(schema).is_ok())
+    }
 }

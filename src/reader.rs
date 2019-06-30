@@ -11,6 +11,7 @@ use crate::schema::Schema;
 use crate::types::Value;
 use crate::util::{self, DecodeError};
 use crate::Codec;
+use std::collections::HashMap;
 
 // Internal Block reader.
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ impl<R: Read> Block<R> {
 
         if let Value::Map(meta) = decode(&meta_schema, &mut self.reader)? {
             // TODO: surface original parse schema errors instead of coalescing them here
+            let mut parsed_record = HashMap::new();
             let schema = meta
                 .get("avro.schema")
                 .and_then(|bytes| {
@@ -65,7 +67,7 @@ impl<R: Read> Block<R> {
                         None
                     }
                 })
-                .and_then(|json| Schema::parse(&json).ok());
+                .and_then(|json| Schema::parse(&json, &mut parsed_record).ok());
             if let Some(schema) = schema {
                 self.writer_schema = schema;
             } else {
