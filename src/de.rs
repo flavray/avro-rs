@@ -13,6 +13,7 @@ use serde::{
 };
 
 use crate::types::Value;
+use serde::de::IntoDeserializer;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
@@ -605,7 +606,9 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        self.deserialize_any(visitor)
+        let d = <() as IntoDeserializer<Self::Error>>::into_deserializer(());
+
+        d.deserialize_any(visitor)
     }
 }
 
