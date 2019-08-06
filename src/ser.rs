@@ -27,6 +27,11 @@ pub struct StructSerializer {
     fields: Vec<(String, Value)>,
 }
 
+pub struct VariantStructSerializer {
+    variant_index: usize,
+    fields: Vec<(String, Value)>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
     message: String,
@@ -82,16 +87,38 @@ impl StructSerializer {
     }
 }
 
+impl VariantStructSerializer {
+    pub fn new(variant_index: usize, len: usize) -> VariantStructSerializer {
+        VariantStructSerializer {
+            variant_index,
+            fields: Vec::with_capacity(len),
+        }
+    }
+}
+
+pub struct VariantSeqSerializer {
+    variant_index: usize,
+    items: Vec<Value>,
+}
+impl VariantSeqSerializer {
+    pub fn new(variant_index: usize, len: usize) -> VariantSeqSerializer {
+        VariantSeqSerializer {
+            variant_index,
+            items: Vec::with_capacity(len),
+        }
+    }
+}
+
 impl<'b> ser::Serializer for &'b mut Serializer {
     type Ok = Value;
     type Error = Error;
     type SerializeSeq = SeqSerializer;
     type SerializeTuple = SeqSerializer;
     type SerializeTupleStruct = SeqSerializer;
-    type SerializeTupleVariant = SeqSerializer;
+    type SerializeTupleVariant = VariantSeqSerializer;
     type SerializeMap = MapSerializer;
     type SerializeStruct = StructSerializer;
-    type SerializeStructVariant = StructSerializer;
+    type SerializeStructVariant = VariantStructSerializer;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Boolean(v))
@@ -173,22 +200,22 @@ impl<'b> ser::Serializer for &'b mut Serializer {
         Ok(Value::Null)
     }
 
-    fn serialize_unit_struct(self, _: &'static str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
         self.serialize_unit()
     }
 
     fn serialize_unit_variant(
         self,
-        _: &'static str,
+        _name: &'static str,
         index: u32,
-        variant: &'static str,
+        _variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Enum(index as i32, variant.to_string()))
+        Ok(Value::Union(index as usize, Box::new(Value::Null)))
     }
 
     fn serialize_newtype_struct<T: ?Sized>(
         self,
-        _: &'static str,
+        _name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
@@ -199,15 +226,16 @@ impl<'b> ser::Serializer for &'b mut Serializer {
 
     fn serialize_newtype_variant<T: ?Sized>(
         self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
+        name: &'static str,
+        index: u32,
+        _variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
-        value.serialize(self)
+        let variant_value = self.serialize_newtype_struct(name, value)?;
+        Ok(Value::Union(index as usize, Box::new(variant_value)))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
@@ -220,7 +248,7 @@ impl<'b> ser::Serializer for &'b mut Serializer {
 
     fn serialize_tuple_struct(
         self,
-        _: &'static str,
+        _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         self.serialize_seq(Some(len))
@@ -228,12 +256,12 @@ impl<'b> ser::Serializer for &'b mut Serializer {
 
     fn serialize_tuple_variant(
         self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-        _: usize,
+        _name: &'static str,
+        index: u32,
+        _variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        unimplemented!() // TODO ?
+        Ok(VariantSeqSerializer::new(index as usize, len))
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
@@ -242,7 +270,7 @@ impl<'b> ser::Serializer for &'b mut Serializer {
 
     fn serialize_struct(
         self,
-        _: &'static str,
+        _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
         Ok(StructSerializer::new(len))
@@ -250,12 +278,12 @@ impl<'b> ser::Serializer for &'b mut Serializer {
 
     fn serialize_struct_variant(
         self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-        _: usize,
+        _name: &'static str,
+        index: u32,
+        _variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        unimplemented!() // TODO ?
+        Ok(VariantStructSerializer::new(index as usize, len))
     }
 }
 
@@ -309,19 +337,22 @@ impl ser::SerializeTupleStruct for SeqSerializer {
     }
 }
 
-impl ser::SerializeTupleVariant for SeqSerializer {
+impl ser::SerializeTupleVariant for VariantSeqSerializer {
     type Ok = Value;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, _: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
-        unimplemented!()
+        self.items
+            .push(value.serialize(&mut Serializer::default())?);
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        let variant_value = Value::Array(self.items);
+        Ok(Value::Union(self.variant_index, Box::new(variant_value)))
     }
 }
 
@@ -388,19 +419,28 @@ impl ser::SerializeStruct for StructSerializer {
     }
 }
 
-impl ser::SerializeStructVariant for StructSerializer {
+impl ser::SerializeStructVariant for VariantStructSerializer {
     type Ok = Value;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, _: &'static str, _: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
-        unimplemented!()
+        self.fields.push((
+            name.to_owned(),
+            value.serialize(&mut Serializer::default())?,
+        ));
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        let variant_value = Value::Record(self.fields);
+        Ok(Value::Union(self.variant_index, Box::new(variant_value)))
     }
 }
 

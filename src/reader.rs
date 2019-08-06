@@ -283,7 +283,7 @@ pub fn from_avro_datum<R: Read>(
 ) -> Result<Value, Error> {
     let value = decode(writer_schema, reader)?;
     match reader_schema {
-        Some(ref schema) => value.resolve(schema),
+        Some(ref reader_schema) => value.resolve(writer_schema, reader_schema),
         None => Ok(value),
     }
 }
@@ -348,7 +348,7 @@ mod tests {
 
         assert_eq!(
             from_avro_datum(&schema, &mut encoded, None).unwrap(),
-            Value::Union(Box::new(Value::Long(0)))
+            Value::Union(1, Box::new(Value::Long(0)))
         );
     }
 
