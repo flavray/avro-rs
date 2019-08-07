@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::schema::Name as RecordName;
 use crate::schema::RecordField;
-use crate::types::ToAvro;
 use crate::types::Value;
 use crate::Schema;
 use serde_json::Value as JsonValue;
@@ -426,12 +425,12 @@ impl Resolution {
                         v.to_owned(),
                     )))
                 }),
-            (Schema::Record { name, doc, fields, lookup }, JsonValue::Object(vs)) =>
+            (Schema::Record { name: _, doc: _, fields, lookup }, JsonValue::Object(vs)) =>
                 vs.iter().map(|(k, v)| {
                     (k, lookup.get(k).map(|p| Self::value_from_json(&fields[*p].schema, v)).unwrap_or(Err(ResolutionError::RecordFieldValueMissing(k.to_string()))))
                 })
                 .fold(Ok(vec![]), |mut v, r| match &r.1 {
-                    Ok(x) => { v.as_mut().map(|v| v.push((r.0.clone(), x.to_owned()))); v },
+                    Ok(x) => { v.as_mut().map(|v| v.push((r.0.clone(), x.to_owned()))).expect("No accumulator!"); v },
                     Err(e) => Err(e.to_owned()),
                 })
                 .map(|f| Value::Record(f)),
@@ -440,7 +439,7 @@ impl Resolution {
                     (k, Self::value_from_json(inner, v))
                 })
                 .fold(Ok(HashMap::new()), |mut v, r| match &r.1 {
-                    Ok(x) => { v.as_mut().map(|v| v.insert(r.0.clone(), x.to_owned())); v },
+                    Ok(x) => { v.as_mut().map(|v| v.insert(r.0.clone(), x.to_owned())).expect("No accumulator!"); v },
                     Err(e) => Err(e.to_owned()),
                 })
                 .map(|m| Value::Map(m)),
@@ -452,204 +451,208 @@ impl Resolution {
     }
 }
 
-fn resolve_and_promote_single(
-    writer_schema: &Schema,
-    reader_schema: &Schema,
-    original_value: Value,
-    expected_adjusted_value: Value,
-) -> Result<(), ResolutionError> {
-    let resolution = Resolution::new(writer_schema, reader_schema)?;
-    let adjusted_value = resolution.promote_value(original_value)?;
-    if adjusted_value != expected_adjusted_value {
-        Err(ResolutionError::Generic(
-            format!("{:?} != {:?}", adjusted_value, expected_adjusted_value).into(),
-        ))
-    } else {
-        Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolve_and_promote_single(
+        writer_schema: &Schema,
+        reader_schema: &Schema,
+        original_value: Value,
+        expected_adjusted_value: Value,
+    ) -> Result<(), ResolutionError> {
+        let resolution = Resolution::new(writer_schema, reader_schema)?;
+        let adjusted_value = resolution.promote_value(original_value)?;
+        if adjusted_value != expected_adjusted_value {
+            Err(ResolutionError::Generic(
+                format!("{:?} != {:?}", adjusted_value, expected_adjusted_value).into(),
+            ))
+        } else {
+            Ok(())
+        }
     }
-}
 
-#[test]
-fn test_resolve_and_promote_primitives() {
-    resolve_and_promote_single(&Schema::Null, &Schema::Null, Value::Null, Value::Null).unwrap();
+    #[test]
+    fn test_resolve_and_promote_primitives() {
+        resolve_and_promote_single(&Schema::Null, &Schema::Null, Value::Null, Value::Null).unwrap();
 
-    resolve_and_promote_single(
-        &Schema::Boolean,
-        &Schema::Boolean,
-        Value::Boolean(false),
-        Value::Boolean(false),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Boolean,
-        &Schema::Boolean,
-        Value::Boolean(true),
-        Value::Boolean(true),
-    )
-    .unwrap();
+        resolve_and_promote_single(
+            &Schema::Boolean,
+            &Schema::Boolean,
+            Value::Boolean(false),
+            Value::Boolean(false),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Boolean,
+            &Schema::Boolean,
+            Value::Boolean(true),
+            Value::Boolean(true),
+        )
+            .unwrap();
 
-    resolve_and_promote_single(&Schema::Int, &Schema::Int, Value::Int(42), Value::Int(42)).unwrap();
-    resolve_and_promote_single(&Schema::Int, &Schema::Long, Value::Int(42), Value::Long(42))
-        .unwrap();
-    resolve_and_promote_single(
-        &Schema::Int,
-        &Schema::Float,
-        Value::Int(42),
-        Value::Float(42.0),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Int,
-        &Schema::Double,
-        Value::Int(42),
-        Value::Double(42.0),
-    )
-    .unwrap();
+        resolve_and_promote_single(&Schema::Int, &Schema::Int, Value::Int(42), Value::Int(42)).unwrap();
+        resolve_and_promote_single(&Schema::Int, &Schema::Long, Value::Int(42), Value::Long(42))
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Int,
+            &Schema::Float,
+            Value::Int(42),
+            Value::Float(42.0),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Int,
+            &Schema::Double,
+            Value::Int(42),
+            Value::Double(42.0),
+        )
+            .unwrap();
 
-    resolve_and_promote_single(
-        &Schema::Long,
-        &Schema::Long,
-        Value::Long(42),
-        Value::Long(42),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Long,
-        &Schema::Float,
-        Value::Long(42),
-        Value::Float(42.0),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Long,
-        &Schema::Double,
-        Value::Long(42),
-        Value::Double(42.0),
-    )
-    .unwrap();
+        resolve_and_promote_single(
+            &Schema::Long,
+            &Schema::Long,
+            Value::Long(42),
+            Value::Long(42),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Long,
+            &Schema::Float,
+            Value::Long(42),
+            Value::Float(42.0),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Long,
+            &Schema::Double,
+            Value::Long(42),
+            Value::Double(42.0),
+        )
+            .unwrap();
 
-    resolve_and_promote_single(
-        &Schema::Float,
-        &Schema::Float,
-        Value::Float(42.0),
-        Value::Float(42.0),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Float,
-        &Schema::Double,
-        Value::Float(42.0),
-        Value::Double(42.0),
-    )
-    .unwrap();
+        resolve_and_promote_single(
+            &Schema::Float,
+            &Schema::Float,
+            Value::Float(42.0),
+            Value::Float(42.0),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Float,
+            &Schema::Double,
+            Value::Float(42.0),
+            Value::Double(42.0),
+        )
+            .unwrap();
 
-    resolve_and_promote_single(
-        &Schema::Double,
-        &Schema::Double,
-        Value::Double(42.0),
-        Value::Double(42.0),
-    )
-    .unwrap();
+        resolve_and_promote_single(
+            &Schema::Double,
+            &Schema::Double,
+            Value::Double(42.0),
+            Value::Double(42.0),
+        )
+            .unwrap();
 
-    resolve_and_promote_single(
-        &Schema::Bytes,
-        &Schema::Bytes,
-        Value::Bytes(vec![1, 2, 3]),
-        Value::Bytes(vec![1, 2, 3]),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Bytes,
-        &Schema::String,
-        Value::Bytes("abc".to_owned().into_bytes()),
-        Value::String("abc".to_owned()),
-    )
-    .unwrap();
+        resolve_and_promote_single(
+            &Schema::Bytes,
+            &Schema::Bytes,
+            Value::Bytes(vec![1, 2, 3]),
+            Value::Bytes(vec![1, 2, 3]),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Bytes,
+            &Schema::String,
+            Value::Bytes("abc".to_owned().into_bytes()),
+            Value::String("abc".to_owned()),
+        )
+            .unwrap();
 
-    resolve_and_promote_single(
-        &Schema::String,
-        &Schema::String,
-        Value::String("abc".to_owned()),
-        Value::String("abc".to_owned()),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::String,
-        &Schema::Bytes,
-        Value::String("abc".to_owned()),
-        Value::Bytes("abc".to_owned().into_bytes()),
-    )
-    .unwrap();
-}
+        resolve_and_promote_single(
+            &Schema::String,
+            &Schema::String,
+            Value::String("abc".to_owned()),
+            Value::String("abc".to_owned()),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::String,
+            &Schema::Bytes,
+            Value::String("abc".to_owned()),
+            Value::Bytes("abc".to_owned().into_bytes()),
+        )
+            .unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_arrays() {
-    resolve_and_promote_single(
-        &Schema::Array(Box::new(Schema::Int)),
-        &Schema::Array(Box::new(Schema::Int)),
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Array(Box::new(Schema::Int)),
-        &Schema::Array(Box::new(Schema::Long)),
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
-        Value::Array(vec![Value::Long(1), Value::Long(2)]),
-    )
-    .unwrap();
-}
+    #[test]
+    fn test_resolve_and_promote_arrays() {
+        resolve_and_promote_single(
+            &Schema::Array(Box::new(Schema::Int)),
+            &Schema::Array(Box::new(Schema::Int)),
+            Value::Array(vec![Value::Int(1), Value::Int(2)]),
+            Value::Array(vec![Value::Int(1), Value::Int(2)]),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Array(Box::new(Schema::Int)),
+            &Schema::Array(Box::new(Schema::Long)),
+            Value::Array(vec![Value::Int(1), Value::Int(2)]),
+            Value::Array(vec![Value::Long(1), Value::Long(2)]),
+        )
+            .unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_maps() {
-    resolve_and_promote_single(
-        &Schema::Map(Box::new(Schema::Int)),
-        &Schema::Map(Box::new(Schema::Int)),
-        Value::Map(
-            vec![
-                ("one".to_owned(), Value::Int(1)),
-                ("two".to_owned(), Value::Int(2)),
-            ]
-            .into_iter()
-            .collect(),
-        ),
-        Value::Map(
-            vec![
-                ("one".to_owned(), Value::Int(1)),
-                ("two".to_owned(), Value::Int(2)),
-            ]
-            .into_iter()
-            .collect(),
-        ),
-    )
-    .unwrap();
-    resolve_and_promote_single(
-        &Schema::Map(Box::new(Schema::Int)),
-        &Schema::Map(Box::new(Schema::Long)),
-        Value::Map(
-            vec![
-                ("one".to_owned(), Value::Int(1)),
-                ("two".to_owned(), Value::Int(2)),
-            ]
-            .into_iter()
-            .collect(),
-        ),
-        Value::Map(
-            vec![
-                ("one".to_owned(), Value::Long(1)),
-                ("two".to_owned(), Value::Long(2)),
-            ]
-            .into_iter()
-            .collect(),
-        ),
-    )
-    .unwrap();
-}
+    #[test]
+    fn test_resolve_and_promote_maps() {
+        resolve_and_promote_single(
+            &Schema::Map(Box::new(Schema::Int)),
+            &Schema::Map(Box::new(Schema::Int)),
+            Value::Map(
+                vec![
+                    ("one".to_owned(), Value::Int(1)),
+                    ("two".to_owned(), Value::Int(2)),
+                ]
+                    .into_iter()
+                    .collect(),
+            ),
+            Value::Map(
+                vec![
+                    ("one".to_owned(), Value::Int(1)),
+                    ("two".to_owned(), Value::Int(2)),
+                ]
+                    .into_iter()
+                    .collect(),
+            ),
+        )
+            .unwrap();
+        resolve_and_promote_single(
+            &Schema::Map(Box::new(Schema::Int)),
+            &Schema::Map(Box::new(Schema::Long)),
+            Value::Map(
+                vec![
+                    ("one".to_owned(), Value::Int(1)),
+                    ("two".to_owned(), Value::Int(2)),
+                ]
+                    .into_iter()
+                    .collect(),
+            ),
+            Value::Map(
+                vec![
+                    ("one".to_owned(), Value::Long(1)),
+                    ("two".to_owned(), Value::Long(2)),
+                ]
+                    .into_iter()
+                    .collect(),
+            ),
+        )
+            .unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_records() {
-    let w_schema = Schema::parse_str(
-        r#"
+    #[test]
+    fn test_resolve_and_promote_records() {
+        let w_schema = Schema::parse_str(
+            r#"
             {
                 "type": "record",
                 "name": "r1",
@@ -659,10 +662,10 @@ fn test_resolve_and_promote_records() {
                 ]
             }
         "#,
-    )
-    .unwrap();
-    let r_schema = Schema::parse_str(
-        r#"
+        )
+            .unwrap();
+        let r_schema = Schema::parse_str(
+            r#"
             {
                 "type": "record",
                 "name": "r1",
@@ -672,34 +675,34 @@ fn test_resolve_and_promote_records() {
                 ]
             }
         "#,
-    )
-    .unwrap();
-    let w_record = Value::Record(vec![
-        ("a_number_no_default".to_owned(), Value::Int(13)),
-        ("a_number_obsolete".to_owned(), Value::Int(-1)),
-    ]);
-    let r_record = Value::Record(vec![
-        ("a_number_no_default".to_owned(), Value::Long(13)),
-        ("a_number_with_default".to_owned(), Value::Long(42)),
-    ]);
-    resolve_and_promote_single(&w_schema, &w_schema, w_record.clone(), w_record.clone()).unwrap();
-    resolve_and_promote_single(&w_schema, &r_schema, w_record.clone(), r_record.clone()).unwrap();
-}
+        )
+            .unwrap();
+        let w_record = Value::Record(vec![
+            ("a_number_no_default".to_owned(), Value::Int(13)),
+            ("a_number_obsolete".to_owned(), Value::Int(-1)),
+        ]);
+        let r_record = Value::Record(vec![
+            ("a_number_no_default".to_owned(), Value::Long(13)),
+            ("a_number_with_default".to_owned(), Value::Long(42)),
+        ]);
+        resolve_and_promote_single(&w_schema, &w_schema, w_record.clone(), w_record.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_record.clone(), r_record.clone()).unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_record_with_default_int() {
-    let w_schema = Schema::parse_str(
-        r#"
+    #[test]
+    fn test_resolve_and_promote_record_with_default_int() {
+        let w_schema = Schema::parse_str(
+            r#"
             {
                 "type": "record",
                 "name": "r2",
                 "fields": []
             }
         "#,
-    )
-    .unwrap();
-    let r_schema = Schema::parse_str(
-        r#"
+        )
+            .unwrap();
+        let r_schema = Schema::parse_str(
+            r#"
             {
                 "type": "record",
                 "name": "r2",
@@ -708,18 +711,18 @@ fn test_resolve_and_promote_record_with_default_int() {
                 ]
             }
         "#,
-    )
-    .unwrap();
-    let w_data = Value::Record(vec![]);
-    let r_data = Value::Record(vec![("a_field".to_owned(), Value::Int(42))]);
-    resolve_and_promote_single(&w_schema, &w_schema, w_data.clone(), w_data.clone()).unwrap();
-    resolve_and_promote_single(&w_schema, &r_schema, w_data.clone(), r_data.clone()).unwrap();
-}
+        )
+            .unwrap();
+        let w_data = Value::Record(vec![]);
+        let r_data = Value::Record(vec![("a_field".to_owned(), Value::Int(42))]);
+        resolve_and_promote_single(&w_schema, &w_schema, w_data.clone(), w_data.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_data.clone(), r_data.clone()).unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_into_union() {
-    let w_schema = Schema::parse_str(
-        r#"
+    #[test]
+    fn test_resolve_and_promote_into_union() {
+        let w_schema = Schema::parse_str(
+            r#"
             {
                 "type": "record",
                 "name": "r2",
@@ -728,10 +731,10 @@ fn test_resolve_and_promote_into_union() {
                 ]
             }
         "#,
-    )
-    .unwrap();
-    let r_schema = Schema::parse_str(
-        r#"
+        )
+            .unwrap();
+        let r_schema = Schema::parse_str(
+            r#"
             [
                 {"type": "long"},
                 {
@@ -751,25 +754,25 @@ fn test_resolve_and_promote_into_union() {
                 }
             ]
         "#,
-    )
-    .unwrap();
-    let w_data = Value::Record(vec![("a_field".to_owned(), Value::Long(13))]);
-    let r_data = Value::Union(
-        2,
-        Box::new(Value::Record(vec![
-            ("a_field".to_owned(), Value::Long(13)),
-            ("an_optional_field".to_owned(), Value::Long(42)),
-        ])),
-    );
+        )
+            .unwrap();
+        let w_data = Value::Record(vec![("a_field".to_owned(), Value::Long(13))]);
+        let r_data = Value::Union(
+            2,
+            Box::new(Value::Record(vec![
+                ("a_field".to_owned(), Value::Long(13)),
+                ("an_optional_field".to_owned(), Value::Long(42)),
+            ])),
+        );
 
-    resolve_and_promote_single(&w_schema, &w_schema, w_data.clone(), w_data.clone()).unwrap();
-    resolve_and_promote_single(&w_schema, &r_schema, w_data.clone(), r_data.clone()).unwrap();
-}
+        resolve_and_promote_single(&w_schema, &w_schema, w_data.clone(), w_data.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_data.clone(), r_data.clone()).unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_from_union() {
-    let w_schema = Schema::parse_str(
-        r#"
+    #[test]
+    fn test_resolve_and_promote_from_union() {
+        let w_schema = Schema::parse_str(
+            r#"
             [
                 {"type": "long"},
                 {
@@ -788,10 +791,10 @@ fn test_resolve_and_promote_from_union() {
                 }
             ]
         "#,
-    )
-    .unwrap();
-    let r_schema = Schema::parse_str(
-        r#"
+        )
+            .unwrap();
+        let r_schema = Schema::parse_str(
+            r#"
             {
                 "type": "record",
                 "name": "r2",
@@ -800,110 +803,111 @@ fn test_resolve_and_promote_from_union() {
                 ]
             }
         "#,
-    )
-    .unwrap();
+        )
+            .unwrap();
 
-    let w_data_ok = Value::Union(
-        2,
-        Box::new(Value::Record(vec![("a_field".to_owned(), Value::Long(42))])),
-    );
+        let w_data_ok = Value::Union(
+            2,
+            Box::new(Value::Record(vec![("a_field".to_owned(), Value::Long(42))])),
+        );
 
-    let w_data_err = Value::Union(
-        1,
-        Box::new(Value::Record(vec![(
-            "an_optional_field".to_owned(),
-            Value::Long(1),
-        )])),
-    );
+        let w_data_err = Value::Union(
+            1,
+            Box::new(Value::Record(vec![(
+                "an_optional_field".to_owned(),
+                Value::Long(1),
+            )])),
+        );
 
-    let r_data_ok = Value::Record(vec![("a_field".to_owned(), Value::Long(42))]);
+        let r_data_ok = Value::Record(vec![("a_field".to_owned(), Value::Long(42))]);
 
-    resolve_and_promote_single(&w_schema, &w_schema, w_data_ok.clone(), w_data_ok.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &w_schema, w_data_ok.clone(), w_data_ok.clone()).unwrap();
 
-    resolve_and_promote_single(&w_schema, &r_schema, w_data_ok.clone(), r_data_ok.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_data_ok.clone(), r_data_ok.clone()).unwrap();
 
-    match resolve_and_promote_single(&w_schema, &r_schema, w_data_err.clone(), r_data_ok.clone())
-        .err()
-        .unwrap()
-    {
-        ResolutionError::IncompatibleSchema(_, _) => (),
-        _ => assert!(false),
+        match resolve_and_promote_single(&w_schema, &r_schema, w_data_err.clone(), r_data_ok.clone())
+            .err()
+            .unwrap()
+            {
+                ResolutionError::IncompatibleSchema(_, _) => (),
+                _ => assert!(false),
+            }
     }
-}
 
-#[test]
-fn test_resolve_and_promote_unions() {
-    let w_schema = Schema::parse_str(
-        r#"
+    #[test]
+    fn test_resolve_and_promote_unions() {
+        let w_schema = Schema::parse_str(
+            r#"
         [
             {"type": "null"},
             {"type": "long"},
             {"type": "int"}
         ]
     "#,
-    )
-    .unwrap();
-    let r_schema = Schema::parse_str(
-        r#"
+        )
+            .unwrap();
+        let r_schema = Schema::parse_str(
+            r#"
         [
             {"type": "null"},
             {"type": "int"},
             {"type": "boolean"}
         ]
     "#,
-    )
-    .unwrap();
+        )
+            .unwrap();
 
-    let w_null = Value::Union(0, Box::new(Value::Null));
-    let r_null = Value::Union(0, Box::new(Value::Null));
-    let w_long = Value::Union(1, Box::new(Value::Long(42)));
-    let w_int = Value::Union(2, Box::new(Value::Int(42)));
-    let r_int = Value::Union(1, Box::new(Value::Int(42)));
+        let w_null = Value::Union(0, Box::new(Value::Null));
+        let r_null = Value::Union(0, Box::new(Value::Null));
+        let w_long = Value::Union(1, Box::new(Value::Long(42)));
+        let w_int = Value::Union(2, Box::new(Value::Int(42)));
+        let r_int = Value::Union(1, Box::new(Value::Int(42)));
 
-    resolve_and_promote_single(&w_schema, &r_schema, w_null.clone(), r_null.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_null.clone(), r_null.clone()).unwrap();
 
-    match resolve_and_promote_single(&w_schema, &r_schema, w_long.clone(), w_long.clone())
-        .err()
-        .unwrap()
-    {
-        ResolutionError::IncompatibleSchema(_, _) => (),
-        what => assert!(false),
-    };
+        match resolve_and_promote_single(&w_schema, &r_schema, w_long.clone(), w_long.clone())
+            .err()
+            .unwrap()
+            {
+                ResolutionError::IncompatibleSchema(_, _) => (),
+                _what => assert!(false),
+            };
 
-    resolve_and_promote_single(&w_schema, &r_schema, w_int.clone(), r_int.clone()).unwrap();
-}
+        resolve_and_promote_single(&w_schema, &r_schema, w_int.clone(), r_int.clone()).unwrap();
+    }
 
-#[test]
-fn test_resolve_and_promote_enums() {
-    let w_schema = Schema::parse_str(
-        r#"
+    #[test]
+    fn test_resolve_and_promote_enums() {
+        let w_schema = Schema::parse_str(
+            r#"
         {"type": "enum", "name": "e", "symbols": ["a", "b", "c"]}
     "#,
-    )
-    .unwrap();
+        )
+            .unwrap();
 
-    let r_schema = Schema::parse_str(
-        r#"
+        let r_schema = Schema::parse_str(
+            r#"
         {"type": "enum", "name": "e", "symbols": ["c", "b", "d"]}
     "#,
-    )
-    .unwrap();
+        )
+            .unwrap();
 
-    let w_a = Value::Enum(0, "a".to_owned());
-    let w_b = Value::Enum(1, "b".to_owned());
-    let r_b = Value::Enum(1, "b".to_owned());
-    let w_c = Value::Enum(2, "c".to_owned());
-    let r_c = Value::Enum(0, "c".to_owned());
+        let w_a = Value::Enum(0, "a".to_owned());
+        let w_b = Value::Enum(1, "b".to_owned());
+        let r_b = Value::Enum(1, "b".to_owned());
+        let w_c = Value::Enum(2, "c".to_owned());
+        let r_c = Value::Enum(0, "c".to_owned());
 
-    match resolve_and_promote_single(&w_schema, &r_schema, w_a.clone(), w_a.clone())
-        .err()
-        .unwrap()
-    {
-        ResolutionError::IncompatibleData(_) => (),
-        what => panic!("{:?}", what),
-    };
+        match resolve_and_promote_single(&w_schema, &r_schema, w_a.clone(), w_a.clone())
+            .err()
+            .unwrap()
+            {
+                ResolutionError::IncompatibleData(_) => (),
+                what => panic!("{:?}", what),
+            };
 
-    resolve_and_promote_single(&w_schema, &r_schema, w_b.clone(), r_b.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_b.clone(), r_b.clone()).unwrap();
 
-    resolve_and_promote_single(&w_schema, &r_schema, w_c.clone(), r_c.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_c.clone(), r_c.clone()).unwrap();
+    }
 }

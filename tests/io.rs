@@ -175,15 +175,6 @@ struct PartialRecord {
 
 #[test]
 fn test_unknown_struct_field() {
-    let writer_schema =
-        Schema::parse_str(r#"{"type": "record", "name": "Test",
-                "fields": [
-                    {"name": "A", "type": "int"},
-                    {"name": "B", "type": "int"},
-                    {"name": "C", "type": "int"}
-                ]}"#)
-            .unwrap();
-
     let expected = PartialRecord { a: 1, c: 3 };
 
     let original_value = Value::Record(vec!(("A".to_string(), Value::Int(1)), ("B".to_string(), Value::Int(2)), ("C".to_string(), Value::Int(3))));

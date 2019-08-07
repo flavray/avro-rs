@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::u8;
 
-use failure::{Error, Fail};
+use failure::Error;
 use serde_json::Value as JsonValue;
-use crate::schema::{RecordField, Schema, UnionSchema};
+use crate::schema::Schema;
 use crate::schema_resolution;
 
 /// Represents any valid Avro value
