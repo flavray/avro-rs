@@ -426,8 +426,28 @@ impl Resolution {
                         v.to_owned(),
                     )))
                 }),
-
-            (_, _) => Err(ResolutionError::InvalidDefaultValue(value.clone())),
+            (Schema::Record { name, doc, fields, lookup }, JsonValue::Object(vs)) =>
+                vs.iter().map(|(k, v)| {
+                    (k, lookup.get(k).map(|p| Self::value_from_json(&fields[*p].schema, v)).unwrap_or(Err(ResolutionError::RecordFieldValueMissing(k.to_string()))))
+                })
+                .fold(Ok(vec![]), |mut v, r| match &r.1 {
+                    Ok(x) => { v.as_mut().map(|v| v.push((r.0.clone(), x.to_owned()))); v },
+                    Err(e) => Err(e.to_owned()),
+                })
+                .map(|f| Value::Record(f)),
+            (Schema::Map(inner), JsonValue::Object(vs)) =>
+                vs.iter().map(|(k, v)| {
+                    (k, Self::value_from_json(inner, v))
+                })
+                .fold(Ok(HashMap::new()), |mut v, r| match &r.1 {
+                    Ok(x) => { v.as_mut().map(|v| v.insert(r.0.clone(), x.to_owned())); v },
+                    Err(e) => Err(e.to_owned()),
+                })
+                .map(|m| Value::Map(m)),
+            (_, _) =>
+                {
+                    Err(ResolutionError::InvalidDefaultValue(value.clone()))
+                },
         }
     }
 }
