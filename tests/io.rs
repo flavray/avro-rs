@@ -1,7 +1,10 @@
 //! Port of https://github.com/apache/avro/blob/master/lang/py/test/test_io.py
 use std::io::Cursor;
 
-use avro_rs::{from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, ValidationError, from_value};
+use avro_rs::{
+    from_avro_datum, from_value, to_avro_datum, types::Value, Schema, SchemaResolutionError,
+    ValidationError,
+};
 use lazy_static::lazy_static;
 use serde::Deserialize;
 
@@ -170,14 +173,18 @@ struct PartialRecord {
     #[serde(rename(deserialize = "A"))]
     a: i32,
     #[serde(rename(deserialize = "C"))]
-    c: i32
+    c: i32,
 }
 
 #[test]
 fn test_unknown_struct_field() {
     let expected = PartialRecord { a: 1, c: 3 };
 
-    let original_value = Value::Record(vec!(("A".to_string(), Value::Int(1)), ("B".to_string(), Value::Int(2)), ("C".to_string(), Value::Int(3))));
+    let original_value = Value::Record(vec![
+        ("A".to_string(), Value::Int(1)),
+        ("B".to_string(), Value::Int(2)),
+        ("C".to_string(), Value::Int(3)),
+    ]);
     let deserialised = from_value::<PartialRecord>(&original_value).unwrap();
 
     assert_eq!(expected, deserialised);

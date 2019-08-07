@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::u8;
 
-use failure::Error;
-use serde_json::Value as JsonValue;
 use crate::schema::Schema;
 use crate::schema_resolution;
+use failure::Error;
+use serde_json::Value as JsonValue;
 
 /// Represents any valid Avro value
 /// More information about Avro values can be found in the

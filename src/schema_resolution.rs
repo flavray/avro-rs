@@ -425,28 +425,51 @@ impl Resolution {
                         v.to_owned(),
                     )))
                 }),
-            (Schema::Record { name: _, doc: _, fields, lookup }, JsonValue::Object(vs)) =>
-                vs.iter().map(|(k, v)| {
-                    (k, lookup.get(k).map(|p| Self::value_from_json(&fields[*p].schema, v)).unwrap_or(Err(ResolutionError::RecordFieldValueMissing(k.to_string()))))
+            (
+                Schema::Record {
+                    name: _,
+                    doc: _,
+                    fields,
+                    lookup,
+                },
+                JsonValue::Object(vs),
+            ) => vs
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        lookup
+                            .get(k)
+                            .map(|p| Self::value_from_json(&fields[*p].schema, v))
+                            .unwrap_or(Err(ResolutionError::RecordFieldValueMissing(
+                                k.to_string(),
+                            ))),
+                    )
                 })
                 .fold(Ok(vec![]), |mut v, r| match &r.1 {
-                    Ok(x) => { v.as_mut().map(|v| v.push((r.0.clone(), x.to_owned()))).expect("No accumulator!"); v },
+                    Ok(x) => {
+                        v.as_mut()
+                            .map(|v| v.push((r.0.clone(), x.to_owned())))
+                            .expect("No accumulator!");
+                        v
+                    }
                     Err(e) => Err(e.to_owned()),
                 })
                 .map(|f| Value::Record(f)),
-            (Schema::Map(inner), JsonValue::Object(vs)) =>
-                vs.iter().map(|(k, v)| {
-                    (k, Self::value_from_json(inner, v))
-                })
+            (Schema::Map(inner), JsonValue::Object(vs)) => vs
+                .iter()
+                .map(|(k, v)| (k, Self::value_from_json(inner, v)))
                 .fold(Ok(HashMap::new()), |mut v, r| match &r.1 {
-                    Ok(x) => { v.as_mut().map(|v| v.insert(r.0.clone(), x.to_owned())).expect("No accumulator!"); v },
+                    Ok(x) => {
+                        v.as_mut()
+                            .map(|v| v.insert(r.0.clone(), x.to_owned()))
+                            .expect("No accumulator!");
+                        v
+                    }
                     Err(e) => Err(e.to_owned()),
                 })
                 .map(|m| Value::Map(m)),
-            (_, _) =>
-                {
-                    Err(ResolutionError::InvalidDefaultValue(value.clone()))
-                },
+            (_, _) => Err(ResolutionError::InvalidDefaultValue(value.clone())),
         }
     }
 }
@@ -482,16 +505,17 @@ mod tests {
             Value::Boolean(false),
             Value::Boolean(false),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Boolean,
             &Schema::Boolean,
             Value::Boolean(true),
             Value::Boolean(true),
         )
-            .unwrap();
+        .unwrap();
 
-        resolve_and_promote_single(&Schema::Int, &Schema::Int, Value::Int(42), Value::Int(42)).unwrap();
+        resolve_and_promote_single(&Schema::Int, &Schema::Int, Value::Int(42), Value::Int(42))
+            .unwrap();
         resolve_and_promote_single(&Schema::Int, &Schema::Long, Value::Int(42), Value::Long(42))
             .unwrap();
         resolve_and_promote_single(
@@ -500,14 +524,14 @@ mod tests {
             Value::Int(42),
             Value::Float(42.0),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Int,
             &Schema::Double,
             Value::Int(42),
             Value::Double(42.0),
         )
-            .unwrap();
+        .unwrap();
 
         resolve_and_promote_single(
             &Schema::Long,
@@ -515,21 +539,21 @@ mod tests {
             Value::Long(42),
             Value::Long(42),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Long,
             &Schema::Float,
             Value::Long(42),
             Value::Float(42.0),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Long,
             &Schema::Double,
             Value::Long(42),
             Value::Double(42.0),
         )
-            .unwrap();
+        .unwrap();
 
         resolve_and_promote_single(
             &Schema::Float,
@@ -537,14 +561,14 @@ mod tests {
             Value::Float(42.0),
             Value::Float(42.0),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Float,
             &Schema::Double,
             Value::Float(42.0),
             Value::Double(42.0),
         )
-            .unwrap();
+        .unwrap();
 
         resolve_and_promote_single(
             &Schema::Double,
@@ -552,7 +576,7 @@ mod tests {
             Value::Double(42.0),
             Value::Double(42.0),
         )
-            .unwrap();
+        .unwrap();
 
         resolve_and_promote_single(
             &Schema::Bytes,
@@ -560,14 +584,14 @@ mod tests {
             Value::Bytes(vec![1, 2, 3]),
             Value::Bytes(vec![1, 2, 3]),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Bytes,
             &Schema::String,
             Value::Bytes("abc".to_owned().into_bytes()),
             Value::String("abc".to_owned()),
         )
-            .unwrap();
+        .unwrap();
 
         resolve_and_promote_single(
             &Schema::String,
@@ -575,14 +599,14 @@ mod tests {
             Value::String("abc".to_owned()),
             Value::String("abc".to_owned()),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::String,
             &Schema::Bytes,
             Value::String("abc".to_owned()),
             Value::Bytes("abc".to_owned().into_bytes()),
         )
-            .unwrap();
+        .unwrap();
     }
 
     #[test]
@@ -593,14 +617,14 @@ mod tests {
             Value::Array(vec![Value::Int(1), Value::Int(2)]),
             Value::Array(vec![Value::Int(1), Value::Int(2)]),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Array(Box::new(Schema::Int)),
             &Schema::Array(Box::new(Schema::Long)),
             Value::Array(vec![Value::Int(1), Value::Int(2)]),
             Value::Array(vec![Value::Long(1), Value::Long(2)]),
         )
-            .unwrap();
+        .unwrap();
     }
 
     #[test]
@@ -613,19 +637,19 @@ mod tests {
                     ("one".to_owned(), Value::Int(1)),
                     ("two".to_owned(), Value::Int(2)),
                 ]
-                    .into_iter()
-                    .collect(),
+                .into_iter()
+                .collect(),
             ),
             Value::Map(
                 vec![
                     ("one".to_owned(), Value::Int(1)),
                     ("two".to_owned(), Value::Int(2)),
                 ]
-                    .into_iter()
-                    .collect(),
+                .into_iter()
+                .collect(),
             ),
         )
-            .unwrap();
+        .unwrap();
         resolve_and_promote_single(
             &Schema::Map(Box::new(Schema::Int)),
             &Schema::Map(Box::new(Schema::Long)),
@@ -634,19 +658,19 @@ mod tests {
                     ("one".to_owned(), Value::Int(1)),
                     ("two".to_owned(), Value::Int(2)),
                 ]
-                    .into_iter()
-                    .collect(),
+                .into_iter()
+                .collect(),
             ),
             Value::Map(
                 vec![
                     ("one".to_owned(), Value::Long(1)),
                     ("two".to_owned(), Value::Long(2)),
                 ]
-                    .into_iter()
-                    .collect(),
+                .into_iter()
+                .collect(),
             ),
         )
-            .unwrap();
+        .unwrap();
     }
 
     #[test]
@@ -663,7 +687,7 @@ mod tests {
             }
         "#,
         )
-            .unwrap();
+        .unwrap();
         let r_schema = Schema::parse_str(
             r#"
             {
@@ -676,7 +700,7 @@ mod tests {
             }
         "#,
         )
-            .unwrap();
+        .unwrap();
         let w_record = Value::Record(vec![
             ("a_number_no_default".to_owned(), Value::Int(13)),
             ("a_number_obsolete".to_owned(), Value::Int(-1)),
@@ -685,8 +709,10 @@ mod tests {
             ("a_number_no_default".to_owned(), Value::Long(13)),
             ("a_number_with_default".to_owned(), Value::Long(42)),
         ]);
-        resolve_and_promote_single(&w_schema, &w_schema, w_record.clone(), w_record.clone()).unwrap();
-        resolve_and_promote_single(&w_schema, &r_schema, w_record.clone(), r_record.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &w_schema, w_record.clone(), w_record.clone())
+            .unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_record.clone(), r_record.clone())
+            .unwrap();
     }
 
     #[test]
@@ -700,7 +726,7 @@ mod tests {
             }
         "#,
         )
-            .unwrap();
+        .unwrap();
         let r_schema = Schema::parse_str(
             r#"
             {
@@ -712,7 +738,7 @@ mod tests {
             }
         "#,
         )
-            .unwrap();
+        .unwrap();
         let w_data = Value::Record(vec![]);
         let r_data = Value::Record(vec![("a_field".to_owned(), Value::Int(42))]);
         resolve_and_promote_single(&w_schema, &w_schema, w_data.clone(), w_data.clone()).unwrap();
@@ -732,7 +758,7 @@ mod tests {
             }
         "#,
         )
-            .unwrap();
+        .unwrap();
         let r_schema = Schema::parse_str(
             r#"
             [
@@ -755,7 +781,7 @@ mod tests {
             ]
         "#,
         )
-            .unwrap();
+        .unwrap();
         let w_data = Value::Record(vec![("a_field".to_owned(), Value::Long(13))]);
         let r_data = Value::Union(
             2,
@@ -792,7 +818,7 @@ mod tests {
             ]
         "#,
         )
-            .unwrap();
+        .unwrap();
         let r_schema = Schema::parse_str(
             r#"
             {
@@ -804,7 +830,7 @@ mod tests {
             }
         "#,
         )
-            .unwrap();
+        .unwrap();
 
         let w_data_ok = Value::Union(
             2,
@@ -821,17 +847,24 @@ mod tests {
 
         let r_data_ok = Value::Record(vec![("a_field".to_owned(), Value::Long(42))]);
 
-        resolve_and_promote_single(&w_schema, &w_schema, w_data_ok.clone(), w_data_ok.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &w_schema, w_data_ok.clone(), w_data_ok.clone())
+            .unwrap();
 
-        resolve_and_promote_single(&w_schema, &r_schema, w_data_ok.clone(), r_data_ok.clone()).unwrap();
+        resolve_and_promote_single(&w_schema, &r_schema, w_data_ok.clone(), r_data_ok.clone())
+            .unwrap();
 
-        match resolve_and_promote_single(&w_schema, &r_schema, w_data_err.clone(), r_data_ok.clone())
-            .err()
-            .unwrap()
-            {
-                ResolutionError::IncompatibleSchema(_, _) => (),
-                _ => assert!(false),
-            }
+        match resolve_and_promote_single(
+            &w_schema,
+            &r_schema,
+            w_data_err.clone(),
+            r_data_ok.clone(),
+        )
+        .err()
+        .unwrap()
+        {
+            ResolutionError::IncompatibleSchema(_, _) => (),
+            _ => assert!(false),
+        }
     }
 
     #[test]
@@ -845,7 +878,7 @@ mod tests {
         ]
     "#,
         )
-            .unwrap();
+        .unwrap();
         let r_schema = Schema::parse_str(
             r#"
         [
@@ -855,7 +888,7 @@ mod tests {
         ]
     "#,
         )
-            .unwrap();
+        .unwrap();
 
         let w_null = Value::Union(0, Box::new(Value::Null));
         let r_null = Value::Union(0, Box::new(Value::Null));
@@ -868,10 +901,10 @@ mod tests {
         match resolve_and_promote_single(&w_schema, &r_schema, w_long.clone(), w_long.clone())
             .err()
             .unwrap()
-            {
-                ResolutionError::IncompatibleSchema(_, _) => (),
-                _what => assert!(false),
-            };
+        {
+            ResolutionError::IncompatibleSchema(_, _) => (),
+            _what => assert!(false),
+        };
 
         resolve_and_promote_single(&w_schema, &r_schema, w_int.clone(), r_int.clone()).unwrap();
     }
@@ -883,14 +916,14 @@ mod tests {
         {"type": "enum", "name": "e", "symbols": ["a", "b", "c"]}
     "#,
         )
-            .unwrap();
+        .unwrap();
 
         let r_schema = Schema::parse_str(
             r#"
         {"type": "enum", "name": "e", "symbols": ["c", "b", "d"]}
     "#,
         )
-            .unwrap();
+        .unwrap();
 
         let w_a = Value::Enum(0, "a".to_owned());
         let w_b = Value::Enum(1, "b".to_owned());
@@ -901,10 +934,10 @@ mod tests {
         match resolve_and_promote_single(&w_schema, &r_schema, w_a.clone(), w_a.clone())
             .err()
             .unwrap()
-            {
-                ResolutionError::IncompatibleData(_) => (),
-                what => panic!("{:?}", what),
-            };
+        {
+            ResolutionError::IncompatibleData(_) => (),
+            what => panic!("{:?}", what),
+        };
 
         resolve_and_promote_single(&w_schema, &r_schema, w_b.clone(), r_b.clone()).unwrap();
 
