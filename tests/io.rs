@@ -1,10 +1,9 @@
 //! Port of https://github.com/apache/avro/blob/master/lang/py/test/test_io.py
 use std::io::Cursor;
 
-use avro_rs::{
-    from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, ValidationError,
-};
+use avro_rs::{from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, ValidationError, from_value};
 use lazy_static::lazy_static;
+use serde::Deserialize;
 
 lazy_static! {
     static ref SCHEMAS_TO_VALIDATE: Vec<(&'static str, Value)> = vec![
@@ -164,6 +163,33 @@ fn test_unknown_symbol() {
         Some(&reader_schema),
     );
     assert!(decoded.is_err());
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+struct PartialRecord {
+    #[serde(rename(deserialize = "A"))]
+    a: i32,
+    #[serde(rename(deserialize = "C"))]
+    c: i32
+}
+
+#[test]
+fn test_unknown_struct_field() {
+    let writer_schema =
+        Schema::parse_str(r#"{"type": "record", "name": "Test",
+                "fields": [
+                    {"name": "A", "type": "int"},
+                    {"name": "B", "type": "int"},
+                    {"name": "C", "type": "int"}
+                ]}"#)
+            .unwrap();
+
+    let expected = PartialRecord { a: 1, c: 3 };
+
+    let original_value = Value::Record(vec!(("A".to_string(), Value::Int(1)), ("B".to_string(), Value::Int(2)), ("C".to_string(), Value::Int(3))));
+    let deserialised = from_value::<PartialRecord>(&original_value).unwrap();
+
+    assert_eq!(expected, deserialised);
 }
 
 #[test]
