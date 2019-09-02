@@ -661,6 +661,7 @@ mod util;
 mod writer;
 
 pub mod schema;
+pub mod schema_compatibility;
 pub mod types;
 
 pub use crate::codec::Codec;
