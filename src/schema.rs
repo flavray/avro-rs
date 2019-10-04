@@ -364,9 +364,10 @@ impl UnionSchema {
                 Schema::Record { name, .. } => {
                     let full_name = name.fullname(None);
                     if nindex.insert(full_name.clone(), i).is_some() {
-                        Err(ParseSchemaError::new(
-                            format!("Union may not contain multiple named types with the same name ({})", &full_name)
-                        ))?;
+                        Err(ParseSchemaError::new(format!(
+                            "Union may not contain multiple named types with the same name ({})",
+                            &full_name
+                        )))?;
                     }
                 }
 
@@ -374,9 +375,10 @@ impl UnionSchema {
                 _ => {
                     let kind = SchemaKind::from(schema);
                     if vindex.insert(kind, i).is_some() {
-                        Err(ParseSchemaError::new(
-                            format!("Unions cannot contain duplicate primitive types ({})", kind),
-                        ))?;
+                        Err(ParseSchemaError::new(format!(
+                            "Unions cannot contain duplicate primitive types ({})",
+                            kind
+                        )))?;
                     }
                 }
             }
@@ -411,16 +413,18 @@ impl UnionSchema {
                     .map(|(_, &index)| (index, &self.schemas[index]))
                     .find(|(index, schema)| {
                         // TODO s field names match value field names
-                        if let (Schema::Record { ref fields, .. }, crate::types::Value::Record(vf)) = (schema, value) {
+                        if let (
+                            Schema::Record { ref fields, .. },
+                            crate::types::Value::Record(vf),
+                        ) = (schema, value)
+                        {
                             let schema_fields = fields
                                 .iter()
                                 .map(|f| &f.name[..])
                                 .collect::<HashSet<&str>>();
 
-                            let value_fields = vf
-                                .iter()
-                                .map(|(n, _)| &n[..])
-                                .collect::<HashSet<&str>>();
+                            let value_fields =
+                                vf.iter().map(|(n, _)| &n[..]).collect::<HashSet<&str>>();
 
                             schema_fields == value_fields
                         } else {
@@ -430,12 +434,11 @@ impl UnionSchema {
             }
 
             // primitive types
-            _ => {
-                self.variant_index
-                    .get(&kind)
-                    .cloned()
-                    .map(|i| (i, &self.schemas[i]))
-            }
+            _ => self
+                .variant_index
+                .get(&kind)
+                .cloned()
+                .map(|i| (i, &self.schemas[i])),
         }
     }
 }
@@ -1051,5 +1054,4 @@ mod tests {
             format!("{}", schema.fingerprint::<Md5>())
         );
     }
-
 }
