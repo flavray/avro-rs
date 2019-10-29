@@ -1,6 +1,5 @@
 //! Port of https://github.com/apache/avro/blob/release-1.9.1/lang/py/test/test_schema.py
-use avro_rs::schema::Name;
-use avro_rs::Schema;
+use avro_rs::{Schema, SchemaType};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -126,8 +125,6 @@ lazy_static! {
             true
         ),
         */
-        /*
-        // TODO: (#92) properly support recursive types and uncomment
         (
             r#"{
                 "type": "record",
@@ -175,7 +172,6 @@ lazy_static! {
                 ]
             }"#, true
         ),
-        */
         (
             r#"{
                 "type":"record",
@@ -227,9 +223,6 @@ lazy_static! {
             }"#,
             true
         ),
-        /*
-        // TODO: (#95) support same types but with different names in unions and uncomment (below the explanation)
-
         // Unions may not contain more than one schema with the same type, except for the named
         // types record, fixed and enum. For example, unions containing two array types or two map
         // types are not permitted, but two types with different names are permitted.
@@ -250,7 +243,6 @@ lazy_static! {
             }"#,
             true
         ),
-        */
         (
             r#"{
                 "type": "record",
@@ -293,8 +285,8 @@ lazy_static! {
             r#"{
                 "type": "record",
                 "name": "TestDoc",
-                "doc":  "Doc string",
-                "fields": [{"name": "name", "type": "string", "doc" : "Doc String"}]
+                "doc":  "Record Doc string",
+                "fields": [{"name": "name", "type": "string", "doc" : "Field Doc String"}]
             }"#,
             true
         ),
@@ -506,12 +498,6 @@ lazy_static! {
         EXAMPLES.iter().cloned().filter(|s| s.1).collect();
 }
 
-/*
-// TODO: (#92) properly support recursive types and uncomment
-
-This test is failing unwrapping the outer schema with ParseSchemaError("Unknown type: X"). It seems
-that recursive types are not properly supported.
-
 #[test]
 fn test_correct_recursive_extraction() {
     let raw_outer_schema = r#"{
@@ -534,25 +520,23 @@ fn test_correct_recursive_extraction() {
         ]
     }"#;
     let outer_schema = Schema::parse_str(raw_outer_schema).unwrap();
-    if let Schema::Record { fields: outer_fields, .. } = outer_schema {
-        let raw_inner_schema = outer_fields[0].schema.canonical_form();
-        let inner_schema = Schema::parse_str(raw_inner_schema.as_str()).unwrap();
-        if let Schema::Record { fields: inner_fields, .. } = inner_schema {
-            if let Schema::Record {name: recursive_type, .. } = &inner_fields[0].schema {
-                assert_eq!("X", recursive_type.name.as_str());
+    if let SchemaType::Record(x_record) = outer_schema.root() {
+        let fields = x_record.fields();
+        let inner_schema = fields[0].schema();
+        if let SchemaType::Record(y_record) = inner_schema {
+            if let SchemaType::Record(recur_record) = y_record.fields()[0].schema() {
+                assert_eq!("X", recur_record.name().name());
             }
         } else {
-            panic!("inner schema {} should have been a record", raw_inner_schema)
+            panic!("inner schema {} should have been a record", inner_schema)
         }
     } else {
-        panic!("outer schema {} should have been a record", raw_outer_schema)
+        panic!("outer schema {} should have been a record", outer_schema)
     }
 }
-*/
 
 #[test]
 fn test_parse() {
-    //assert_eq!(EXAMPLES.len(), 10);
     for (raw_schema, valid) in EXAMPLES.iter() {
         let schema = Schema::parse_str(raw_schema);
         if *valid {
@@ -588,8 +572,13 @@ fn test_valid_cast_to_string_after_parse() {
 fn test_equivalence_after_round_trip() {
     for (raw_schema, _) in VALID_EXAMPLES.iter() {
         let original_schema = Schema::parse_str(raw_schema).unwrap();
-        let round_trip_schema =
-            Schema::parse_str(original_schema.canonical_form().as_str()).unwrap();
+        // TODO - Is documentation part of PCF?
+        // TODO - PCF should possibly be redone as it could just work on the serde tree
+        // TODO - And has not historically supported documentation
+        //let round_trip_schema =
+        //    Schema::parse_str(original_schema.canonical_form().as_str()).unwrap();
+        let equiv_schema = serde_json::to_string(&original_schema).unwrap();
+        let round_trip_schema = Schema::parse_str(&equiv_schema).unwrap();
         assert_eq!(original_schema, round_trip_schema);
     }
 }
@@ -619,76 +608,75 @@ fn test_equivalence_after_round_trip() {
 // multiple definitions of a fullname if the definitions are
 // equivalent.
 
+macro_rules! test_namesetup {
+    ($name: expr, $ns: expr, $ns_spec: expr, $expected: expr) => {
+        let schema = Schema::parse_str(&format!(
+            r#"{{
+                "name": "{}", "namespace": {}, "aliases": null, "type": "record",
+                "fields": [{{"name":"x", "type":["null", "int"]}}]
+            }}"#,
+            $name, $ns
+        ))
+        .unwrap();
+
+        match schema.root() {
+            SchemaType::Record(record) => {
+                let name = record.name();
+                let fullname = name.fullname($ns_spec);
+                assert_eq!($expected, fullname);
+            }
+            _ => panic!("Incorrect parse"),
+        };
+    };
+}
+
 #[test]
 fn test_fullname_name_and_namespace_specified() {
-    let name: Name =
-        serde_json::from_str(r#"{"name": "a", "namespace": "o.a.h", "aliases": null}"#).unwrap();
-    let fullname = name.fullname(None);
-    assert_eq!("o.a.h.a", fullname);
+    test_namesetup!("a", r#""o.a.h""#, None, "o.a.h.a");
 }
 
 #[test]
 fn test_fullname_fullname_and_namespace_specified() {
-    let name: Name =
-        serde_json::from_str(r#"{"name": "a.b.c.d", "namespace": "o.a.h", "aliases": null}"#)
-            .unwrap();
-    let fullname = name.fullname(None);
-    assert_eq!("a.b.c.d", fullname);
+    test_namesetup!("a.b.c.d", r#""o.a.h""#, None, "a.b.c.d");
 }
 
 #[test]
 fn test_fullname_name_and_default_namespace_specified() {
-    let name: Name =
-        serde_json::from_str(r#"{"name": "a", "namespace": null, "aliases": null}"#).unwrap();
-    let fullname = name.fullname(Some("b.c.d"));
-    assert_eq!("b.c.d.a", fullname);
+    test_namesetup!("a", "null", Some("b.c.d"), "b.c.d.a");
 }
 
 #[test]
 fn test_fullname_fullname_and_default_namespace_specified() {
-    let name: Name =
-        serde_json::from_str(r#"{"name": "a.b.c.d", "namespace": null, "aliases": null}"#).unwrap();
-    let fullname = name.fullname(Some("o.a.h"));
-    assert_eq!("a.b.c.d", fullname);
+    test_namesetup!("a.b.c.d", "null", Some("o.a.h"), "a.b.c.d");
 }
 
 #[test]
 fn test_fullname_fullname_namespace_and_default_namespace_specified() {
-    let name: Name =
-        serde_json::from_str(r#"{"name": "a.b.c.d", "namespace": "o.a.a", "aliases": null}"#)
-            .unwrap();
-    let fullname = name.fullname(Some("o.a.h"));
-    assert_eq!("a.b.c.d", fullname);
+    test_namesetup!("a.b.c.d", r#""o.a.a""#, Some("o.a.h"), "a.b.c.d");
 }
 
 #[test]
 fn test_fullname_name_namespace_and_default_namespace_specified() {
-    let name: Name =
-        serde_json::from_str(r#"{"name": "a", "namespace": "o.a.a", "aliases": null}"#).unwrap();
-    let fullname = name.fullname(Some("o.a.h"));
-    assert_eq!("o.a.a.a", fullname);
+    test_namesetup!("a", r#""o.a.a""#, Some("o.a.h"), "o.a.a.a");
 }
 
 #[test]
 fn test_doc_attributes() {
-    fn assert_doc(schema: &Schema) {
+    fn assert_doc(schema: SchemaType) {
         match schema {
-            Schema::Enum { doc, .. } => assert!(doc.is_some()),
-            Schema::Record { doc, .. } => assert!(doc.is_some()),
+            SchemaType::Enum(enum_) => assert!(enum_.doc().is_some()),
+            SchemaType::Record(record) => assert!(record.doc().is_some()),
             _ => (),
         }
     }
 
     for (raw_schema, _) in DOC_EXAMPLES.iter() {
         let original_schema = Schema::parse_str(raw_schema).unwrap();
-        assert_doc(&original_schema);
-        match original_schema {
-            Schema::Record { fields, .. } => {
-                for f in fields {
-                    assert_doc(&f.schema)
-                }
+        assert_doc(original_schema.root());
+        if let SchemaType::Record(record) = original_schema.root() {
+            for f in record.iter_fields() {
+                assert_doc(f.schema())
             }
-            _ => (),
         }
     }
 }

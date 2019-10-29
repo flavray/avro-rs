@@ -341,7 +341,6 @@
 //! #     }
 //! # "#;
 //! # let schema = Schema::parse_str(raw_schema).unwrap();
-//! # let schema = Schema::parse_str(raw_schema).unwrap();
 //! # let mut writer = Writer::new(&schema, Vec::new());
 //! # let mut record = Record::new(writer.schema()).unwrap();
 //! # record.put("a", 27i64);
@@ -480,7 +479,7 @@ pub mod types;
 pub use crate::codec::Codec;
 pub use crate::de::from_value;
 pub use crate::reader::{from_avro_datum, Reader};
-pub use crate::schema::{ParseSchemaError, Schema};
+pub use crate::schema::{ParseSchemaError, Schema, SchemaType};
 pub use crate::ser::to_value;
 pub use crate::types::SchemaResolutionError;
 pub use crate::util::{max_allocation_bytes, DecodeError};

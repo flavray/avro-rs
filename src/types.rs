@@ -6,7 +6,7 @@ use std::u8;
 use failure::{Error, Fail};
 use serde_json::Value as JsonValue;
 
-use crate::schema::{RecordField, Schema, SchemaKind, UnionSchema};
+use crate::schema::{Aggregate, RecordSchema, Schema, SchemaKind, SchemaType, UnionSchema};
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -178,28 +178,26 @@ pub struct Record<'a> {
     /// Ordered according to the fields in the schema given to create this
     /// `Record` object. Any unset field defaults to `Value::Null`.
     pub fields: Vec<(String, Value)>,
-    schema_lookup: &'a HashMap<String, usize>,
+    schema_type: SchemaType<'a>,
 }
 
 impl<'a> Record<'a> {
     /// Create a `Record` given a `Schema`.
     ///
     /// If the `Schema` is not a `Schema::Record` variant, `None` will be returned.
-    pub fn new(schema: &Schema) -> Option<Record> {
-        match *schema {
-            Schema::Record {
-                fields: ref schema_fields,
-                lookup: ref schema_lookup,
-                ..
-            } => {
+    pub fn new<'s>(schema: &'s Schema) -> Option<Record<'s>> {
+        let schema_type = schema.root();
+        match schema_type {
+            SchemaType::Record(record) => {
+                let schema_fields = record.fields();
                 let mut fields = Vec::with_capacity(schema_fields.len());
                 for schema_field in schema_fields.iter() {
-                    fields.push((schema_field.name.clone(), Value::Null));
+                    fields.push((schema_field.name().to_string(), Value::Null));
                 }
 
                 Some(Record {
                     fields,
-                    schema_lookup,
+                    schema_type,
                 })
             }
             _ => None,
@@ -215,8 +213,10 @@ impl<'a> Record<'a> {
     where
         V: ToAvro,
     {
-        if let Some(&position) = self.schema_lookup.get(field) {
-            self.fields[position].1 = value.avro()
+        if let SchemaType::Record(record) = self.schema_type {
+            if let Some(schema_field) = record.field(field) {
+                self.fields[schema_field.position()].1 = value.avro()
+            }
         }
     }
 }
@@ -254,37 +254,40 @@ impl Value {
     ///
     /// See the [Avro specification](https://avro.apache.org/docs/current/spec.html)
     /// for the full set of rules of schema validation.
-    pub fn validate(&self, schema: &Schema) -> bool {
+    pub fn validate(&self, schema: SchemaType) -> bool {
         match (self, schema) {
-            (&Value::Null, &Schema::Null) => true,
-            (&Value::Boolean(_), &Schema::Boolean) => true,
-            (&Value::Int(_), &Schema::Int) => true,
-            (&Value::Long(_), &Schema::Long) => true,
-            (&Value::Float(_), &Schema::Float) => true,
-            (&Value::Double(_), &Schema::Double) => true,
-            (&Value::Bytes(_), &Schema::Bytes) => true,
-            (&Value::String(_), &Schema::String) => true,
-            (&Value::Fixed(n, _), &Schema::Fixed { size, .. }) => n == size,
-            (&Value::String(ref s), &Schema::Enum { ref symbols, .. }) => symbols.contains(s),
-            (&Value::Enum(i, ref s), &Schema::Enum { ref symbols, .. }) => symbols
+            (&Value::Null, SchemaType::Null) => true,
+            (&Value::Boolean(_), SchemaType::Boolean) => true,
+            (&Value::Int(_), SchemaType::Int) => true,
+            (&Value::Long(_), SchemaType::Long) => true,
+            (&Value::Float(_), SchemaType::Float) => true,
+            (&Value::Double(_), SchemaType::Double) => true,
+            (&Value::Bytes(_), SchemaType::Bytes) => true,
+            (&Value::String(_), SchemaType::String) => true,
+            (&Value::Fixed(n, _), SchemaType::Fixed(fixed)) => n == fixed.size(),
+            (&Value::String(ref s), SchemaType::Enum(enum_)) => {
+                enum_.symbols().contains(&s.as_ref())
+            }
+            (&Value::Enum(i, ref s), SchemaType::Enum(enum_)) => enum_
+                .symbols()
                 .get(i as usize)
                 .map(|ref symbol| symbol == &s)
                 .unwrap_or(false),
-            // (&Value::Union(None), &Schema::Union(_)) => true,
-            (&Value::Union(ref value), &Schema::Union(ref inner)) => {
-                inner.find_schema(value).is_some()
+            (&Value::Union(ref value), SchemaType::Union(union)) => {
+                union.find_schema(value).is_some()
             }
-            (&Value::Array(ref items), &Schema::Array(ref inner)) => {
-                items.iter().all(|item| item.validate(inner))
+            (&Value::Array(ref items), SchemaType::Array(array)) => {
+                items.iter().all(|item| item.validate(array.items()))
             }
-            (&Value::Map(ref items), &Schema::Map(ref inner)) => {
-                items.iter().all(|(_, value)| value.validate(inner))
+            (&Value::Map(ref items), SchemaType::Map(map)) => {
+                items.iter().all(|(_, value)| value.validate(map.items()))
             }
-            (&Value::Record(ref record_fields), &Schema::Record { ref fields, .. }) => {
+            (&Value::Record(ref record_fields), SchemaType::Record(record)) => {
+                let fields = record.fields();
                 fields.len() == record_fields.len()
                     && fields.iter().zip(record_fields.iter()).all(
                         |(field, &(ref name, ref value))| {
-                            field.name == *name && value.validate(&field.schema)
+                            field.name() == *name && value.validate(field.schema())
                         },
                     )
             }
@@ -298,7 +301,7 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(mut self, schema: &Schema) -> Result<Self, Error> {
+    pub fn resolve(mut self, schema: SchemaType) -> Result<Self, Error> {
         // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
             && SchemaKind::from(schema) != SchemaKind::Union
@@ -310,21 +313,21 @@ impl Value {
             };
             self = v;
         }
-        match *schema {
-            Schema::Null => self.resolve_null(),
-            Schema::Boolean => self.resolve_boolean(),
-            Schema::Int => self.resolve_int(),
-            Schema::Long => self.resolve_long(),
-            Schema::Float => self.resolve_float(),
-            Schema::Double => self.resolve_double(),
-            Schema::Bytes => self.resolve_bytes(),
-            Schema::String => self.resolve_string(),
-            Schema::Fixed { size, .. } => self.resolve_fixed(size),
-            Schema::Union(ref inner) => self.resolve_union(inner),
-            Schema::Enum { ref symbols, .. } => self.resolve_enum(symbols),
-            Schema::Array(ref inner) => self.resolve_array(inner),
-            Schema::Map(ref inner) => self.resolve_map(inner),
-            Schema::Record { ref fields, .. } => self.resolve_record(fields),
+        match schema {
+            SchemaType::Null => self.resolve_null(),
+            SchemaType::Boolean => self.resolve_boolean(),
+            SchemaType::Int => self.resolve_int(),
+            SchemaType::Long => self.resolve_long(),
+            SchemaType::Float => self.resolve_float(),
+            SchemaType::Double => self.resolve_double(),
+            SchemaType::Bytes => self.resolve_bytes(),
+            SchemaType::String => self.resolve_string(),
+            SchemaType::Fixed(fixed) => self.resolve_fixed(fixed.size()),
+            SchemaType::Union(union_) => self.resolve_union(&union_),
+            SchemaType::Enum(enum_) => self.resolve_enum(enum_.symbols().as_slice()),
+            SchemaType::Array(array) => self.resolve_array(&array),
+            SchemaType::Map(map) => self.resolve_map(&map),
+            SchemaType::Record(record) => self.resolve_record(&record),
         }
     }
 
@@ -435,8 +438,8 @@ impl Value {
         }
     }
 
-    fn resolve_enum(self, symbols: &[String]) -> Result<Self, Error> {
-        let validate_symbol = |symbol: String, symbols: &[String]| {
+    fn resolve_enum(self, symbols: &[&str]) -> Result<Self, Error> {
+        let validate_symbol = |symbol: String, symbols: &[&str]| {
             if let Some(index) = symbols.iter().position(|ref item| item == &&symbol) {
                 Ok(Value::Enum(index as i32, symbol))
             } else {
@@ -484,39 +487,42 @@ impl Value {
         v.resolve(inner)
     }
 
-    fn resolve_array(self, schema: &Schema) -> Result<Self, Error> {
+    fn resolve_array(self, array_schema: &Aggregate) -> Result<Self, Error> {
+        let elem_type = array_schema.items();
         match self {
             Value::Array(items) => Ok(Value::Array(
                 items
                     .into_iter()
-                    .map(|item| item.resolve(schema))
+                    .map(|item| item.resolve(elem_type))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             other => Err(SchemaResolutionError::new(format!(
                 "Array({:?}) expected, got {:?}",
-                schema, other
+                elem_type, other
             ))
             .into()),
         }
     }
 
-    fn resolve_map(self, schema: &Schema) -> Result<Self, Error> {
+    fn resolve_map(self, map_schema: &Aggregate) -> Result<Self, Error> {
+        let elem_type = map_schema.items();
         match self {
             Value::Map(items) => Ok(Value::Map(
                 items
                     .into_iter()
-                    .map(|(key, value)| value.resolve(schema).map(|value| (key, value)))
+                    .map(|(key, value)| value.resolve(elem_type).map(|value| (key, value)))
                     .collect::<Result<HashMap<_, _>, _>>()?,
             )),
             other => Err(SchemaResolutionError::new(format!(
                 "Map({:?}) expected, got {:?}",
-                schema, other
+                elem_type, other
             ))
             .into()),
         }
     }
 
-    fn resolve_record(self, fields: &[RecordField]) -> Result<Self, Error> {
+    fn resolve_record(self, record: &RecordSchema) -> Result<Self, Error> {
+        let fields = record.fields();
         let mut items = match self {
             Value::Map(items) => Ok(items),
             Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
@@ -529,27 +535,28 @@ impl Value {
         let new_fields = fields
             .iter()
             .map(|field| {
-                let value = match items.remove(&field.name) {
+                let value = match items.remove(field.name()) {
                     Some(value) => value,
-                    None => match field.default {
-                        Some(ref value) => match field.schema {
-                            Schema::Enum { ref symbols, .. } => {
-                                value.clone().avro().resolve_enum(symbols)?
+                    None => match field.default() {
+                        Some(value) => {
+                            let value = value.clone().avro();
+                            match field.schema() {
+                                SchemaType::Enum(enum_) => value.resolve_enum(&enum_.symbols())?,
+                                _ => value,
                             }
-                            _ => value.clone().avro(),
-                        },
+                        }
                         _ => {
                             return Err(SchemaResolutionError::new(format!(
                                 "missing field {} in record",
-                                field.name
+                                field.name()
                             ))
-                            .into());
+                            .into())
                         }
                     },
                 };
                 value
-                    .resolve(&field.schema)
-                    .map(|value| (field.name.clone(), value))
+                    .resolve(field.schema())
+                    .map(|value| (field.name().to_string(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -557,7 +564,7 @@ impl Value {
     }
 
     fn try_u8(self) -> Result<u8, Error> {
-        let int = self.resolve(&Schema::Int)?;
+        let int = self.resolve(SchemaType::Int)?;
         if let Value::Int(n) = int {
             if n >= 0 && n <= i32::from(u8::MAX) {
                 return Ok(n as u8);
@@ -576,96 +583,147 @@ mod tests {
     #[test]
     fn validate() {
         let value_schema_valid = vec![
-            (Value::Int(42), Schema::Int, true),
-            (Value::Int(42), Schema::Boolean, false),
+            (
+                Value::Int(42),
+                {
+                    let builder = Schema::builder();
+                    let root = builder.int();
+                    builder.build(root).unwrap()
+                },
+                true,
+            ),
+            (
+                Value::Int(42),
+                {
+                    let builder = Schema::builder();
+                    let root = builder.boolean();
+                    builder.build(root).unwrap()
+                },
+                false,
+            ),
             (
                 Value::Union(Box::new(Value::Null)),
-                Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
+                {
+                    let mut builder = Schema::builder();
+                    let mut union = builder.union();
+                    union.variant(builder.null());
+                    union.variant(builder.int());
+                    let root = union.build(&mut builder).unwrap();
+                    builder.build(root).unwrap()
+                },
                 true,
             ),
             (
                 Value::Union(Box::new(Value::Int(42))),
-                Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::Int]).unwrap()),
+                {
+                    let mut builder = Schema::builder();
+                    let mut union = builder.union();
+                    union.variant(builder.null());
+                    union.variant(builder.int());
+                    let root = union.build(&mut builder).unwrap();
+                    builder.build(root).unwrap()
+                },
                 true,
             ),
             (
                 Value::Union(Box::new(Value::Null)),
-                Schema::Union(UnionSchema::new(vec![Schema::Double, Schema::Int]).unwrap()),
+                {
+                    let mut builder = Schema::builder();
+                    let mut union = builder.union();
+                    union.variant(builder.double());
+                    union.variant(builder.int());
+                    let root = union.build(&mut builder).unwrap();
+                    builder.build(root).unwrap()
+                },
                 false,
             ),
             (
                 Value::Union(Box::new(Value::Int(42))),
-                Schema::Union(
-                    UnionSchema::new(vec![
-                        Schema::Null,
-                        Schema::Double,
-                        Schema::String,
-                        Schema::Int,
-                    ])
-                    .unwrap(),
-                ),
+                {
+                    let mut builder = Schema::builder();
+                    let mut union = builder.union();
+                    union.variant(builder.null());
+                    union.variant(builder.double());
+                    union.variant(builder.string());
+                    union.variant(builder.int());
+                    let root = union.build(&mut builder).unwrap();
+                    builder.build(root).unwrap()
+                },
                 true,
             ),
             (
                 Value::Array(vec![Value::Long(42i64)]),
-                Schema::Array(Box::new(Schema::Long)),
+                {
+                    let mut builder = Schema::builder();
+                    let root = builder.array().items(builder.long(), &mut builder).unwrap();
+                    builder.build(root).unwrap()
+                },
                 true,
             ),
             (
                 Value::Array(vec![Value::Boolean(true)]),
-                Schema::Array(Box::new(Schema::Long)),
+                {
+                    let mut builder = Schema::builder();
+                    let root = builder.array().items(builder.long(), &mut builder).unwrap();
+                    builder.build(root).unwrap()
+                },
                 false,
             ),
-            (Value::Record(vec![]), Schema::Null, false),
+            (
+                Value::Record(vec![]),
+                {
+                    let builder = Schema::builder();
+                    let root = builder.null();
+                    builder.build(root).unwrap()
+                },
+                false,
+            ),
         ];
 
         for (value, schema, valid) in value_schema_valid.into_iter() {
-            assert_eq!(valid, value.validate(&schema));
+            assert_eq!(valid, value.validate(schema.root()));
         }
     }
 
     #[test]
     fn validate_fixed() {
-        let schema = Schema::Fixed {
-            size: 4,
-            name: Name::new("some_fixed"),
+        let schema = {
+            let mut builder = Schema::builder();
+            let root = builder.fixed("some_fixed").size(4, &mut builder).unwrap();
+            builder.build(root).unwrap()
         };
 
-        assert!(Value::Fixed(4, vec![0, 0, 0, 0]).validate(&schema));
-        assert!(!Value::Fixed(5, vec![0, 0, 0, 0, 0]).validate(&schema));
+        assert!(Value::Fixed(4, vec![0, 0, 0, 0]).validate(schema.root()));
+        assert!(!Value::Fixed(5, vec![0, 0, 0, 0, 0]).validate(schema.root()));
     }
 
     #[test]
     fn validate_enum() {
-        let schema = Schema::Enum {
-            name: Name::new("some_enum"),
-            doc: None,
-            symbols: vec![
-                "spades".to_string(),
-                "hearts".to_string(),
-                "diamonds".to_string(),
-                "clubs".to_string(),
-            ],
+        let schema = {
+            let mut builder = Schema::builder();
+            let root = builder
+                .enumeration("some_enum")
+                .symbols(vec!["spades", "hearts", "diamonds", "clubs"], &mut builder)
+                .unwrap();
+            builder.build(root).unwrap()
         };
 
-        assert!(Value::Enum(0, "spades".to_string()).validate(&schema));
-        assert!(Value::String("spades".to_string()).validate(&schema));
+        assert!(Value::Enum(0, "spades".to_string()).validate(schema.root()));
+        assert!(Value::String("spades".to_string()).validate(schema.root()));
 
-        assert!(!Value::Enum(1, "spades".to_string()).validate(&schema));
-        assert!(!Value::String("lorem".to_string()).validate(&schema));
+        assert!(!Value::Enum(1, "spades".to_string()).validate(schema.root()));
+        assert!(!Value::String("lorem".to_string()).validate(schema.root()));
 
-        let other_schema = Schema::Enum {
-            name: Name::new("some_other_enum"),
-            doc: None,
-            symbols: vec![
-                "hearts".to_string(),
-                "diamonds".to_string(),
-                "clubs".to_string(),
-                "spades".to_string(),
-            ],
+        let other_schema = {
+            let mut builder = Schema::builder();
+            let root = builder
+                .enumeration("some_other_enum")
+                .symbols(vec!["hearts", "diamonds", "clubs", "spades"], &mut builder)
+                .unwrap();
+            builder.build(root).unwrap()
         };
 
-        assert!(!Value::Enum(0, "spades".to_string()).validate(&other_schema));
+        assert!(!Value::Enum(0, "spades".to_string()).validate(other_schema.root()));
     }
 
     #[test]
@@ -677,67 +735,52 @@ mod tests {
         //      {"type": "string", "name": "b"}
         //    ]
         // }
-        let schema = Schema::Record {
-            name: Name::new("some_record"),
-            doc: None,
-            fields: vec![
-                RecordField {
-                    name: "a".to_string(),
-                    doc: None,
-                    default: None,
-                    schema: Schema::Long,
-                    order: RecordFieldOrder::Ascending,
-                    position: 0,
-                },
-                RecordField {
-                    name: "b".to_string(),
-                    doc: None,
-                    default: None,
-                    schema: Schema::String,
-                    order: RecordFieldOrder::Ascending,
-                    position: 1,
-                },
-            ],
-            lookup: HashMap::new(),
+        let schema = {
+            let mut builder = Schema::builder();
+            let mut some_record = builder.record("some_record");
+            some_record.field("a", builder.long());
+            some_record.field("b", builder.string());
+            let root = some_record.build(&mut builder).unwrap();
+            builder.build(root).unwrap()
         };
 
         assert!(Value::Record(vec![
             ("a".to_string(), Value::Long(42i64)),
             ("b".to_string(), Value::String("foo".to_string())),
         ])
-        .validate(&schema));
+        .validate(schema.root()));
 
         assert!(!Value::Record(vec![
             ("b".to_string(), Value::String("foo".to_string())),
             ("a".to_string(), Value::Long(42i64)),
         ])
-        .validate(&schema));
+        .validate(schema.root()));
 
         assert!(!Value::Record(vec![
             ("a".to_string(), Value::Boolean(false)),
             ("b".to_string(), Value::String("foo".to_string())),
         ])
-        .validate(&schema));
+        .validate(schema.root()));
 
         assert!(!Value::Record(vec![
             ("a".to_string(), Value::Long(42i64)),
             ("c".to_string(), Value::String("foo".to_string())),
         ])
-        .validate(&schema));
+        .validate(schema.root()));
 
         assert!(!Value::Record(vec![
             ("a".to_string(), Value::Long(42i64)),
             ("b".to_string(), Value::String("foo".to_string())),
             ("c".to_string(), Value::Null),
         ])
-        .validate(&schema));
+        .validate(schema.root()));
     }
 
     #[test]
     fn resolve_bytes_ok() {
         let value = Value::Array(vec![Value::Int(0), Value::Int(42)]);
         assert_eq!(
-            value.resolve(&Schema::Bytes).unwrap(),
+            value.resolve(SchemaType::Bytes).unwrap(),
             Value::Bytes(vec![0u8, 42u8])
         );
     }
@@ -745,6 +788,6 @@ mod tests {
     #[test]
     fn resolve_bytes_failure() {
         let value = Value::Array(vec![Value::Int(2000), Value::Int(-42)]);
-        assert!(value.resolve(&Schema::Bytes).is_err());
+        assert!(value.resolve(SchemaType::Bytes).is_err());
     }
 }

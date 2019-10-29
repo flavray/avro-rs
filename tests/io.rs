@@ -2,7 +2,8 @@
 use std::io::Cursor;
 
 use avro_rs::{
-    from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, ValidationError,
+    from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, SchemaType,
+    ValidationError,
 };
 use lazy_static::lazy_static;
 
@@ -89,7 +90,7 @@ fn test_validate() {
     for (raw_schema, value) in SCHEMAS_TO_VALIDATE.iter() {
         let schema = Schema::parse_str(raw_schema).unwrap();
         assert!(
-            value.validate(&schema),
+            value.validate(schema.root()),
             format!("value {:?} does not validate schema: {}", value, raw_schema)
         );
     }
@@ -107,16 +108,28 @@ fn test_round_trip() {
 
 #[test]
 fn test_binary_int_encoding() {
+    let schema = {
+        let builder = Schema::builder();
+        let root = builder.int();
+        builder.build(root).unwrap()
+    };
+
     for (number, hex_encoding) in BINARY_ENCODINGS.iter() {
-        let encoded = to_avro_datum(&Schema::Int, Value::Int(*number as i32)).unwrap();
+        let encoded = to_avro_datum(&schema, Value::Int(*number as i32)).unwrap();
         assert_eq!(&encoded, hex_encoding);
     }
 }
 
 #[test]
 fn test_binary_long_encoding() {
+    let schema = {
+        let builder = Schema::builder();
+        let root = builder.long();
+        builder.build(root).unwrap()
+    };
+
     for (number, hex_encoding) in BINARY_ENCODINGS.iter() {
-        let encoded = to_avro_datum(&Schema::Long, Value::Long(*number as i64)).unwrap();
+        let encoded = to_avro_datum(&schema, Value::Long(*number as i64)).unwrap();
         assert_eq!(&encoded, hex_encoding);
     }
 }

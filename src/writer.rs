@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json;
 
 use crate::encode::{encode, encode_ref, encode_to_vec};
-use crate::schema::Schema;
+use crate::schema::{Schema, SchemaType};
 use crate::ser::Serializer;
 use crate::types::{ToAvro, Value};
 use crate::Codec;
@@ -96,7 +96,7 @@ impl<'a, W: Write> Writer<'a, W> {
         };
 
         let avro = value.avro();
-        write_value_ref(self.schema, &avro, &mut self.buffer)?;
+        write_value_ref(self.schema.root(), &avro, &mut self.buffer)?;
 
         self.num_values += 1;
 
@@ -124,7 +124,7 @@ impl<'a, W: Write> Writer<'a, W> {
             0
         };
 
-        write_value_ref(self.schema, value, &mut self.buffer)?;
+        write_value_ref(self.schema.root(), value, &mut self.buffer)?;
 
         self.num_values += 1;
 
@@ -249,8 +249,8 @@ impl<'a, W: Write> Writer<'a, W> {
         let num_values = self.num_values;
         let stream_len = self.buffer.len();
 
-        let num_bytes = self.append_raw(&num_values.avro(), &Schema::Long)?
-            + self.append_raw(&stream_len.avro(), &Schema::Long)?
+        let num_bytes = self.append_raw(&num_values.avro(), SchemaType::Long)?
+            + self.append_raw(&stream_len.avro(), SchemaType::Long)?
             + self.writer.write(self.buffer.as_ref())?
             + self.append_marker()?;
 
@@ -276,7 +276,7 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     /// Append a raw Avro Value to the payload avoiding to encode it again.
-    fn append_raw(&mut self, value: &Value, schema: &Schema) -> Result<usize, Error> {
+    fn append_raw(&mut self, value: &Value, schema: SchemaType) -> Result<usize, Error> {
         self.append_bytes(encode_to_vec(&value, schema).as_ref())
     }
 
@@ -293,13 +293,11 @@ impl<'a, W: Write> Writer<'a, W> {
         metadata.insert("avro.schema", Value::Bytes(schema_bytes));
         metadata.insert("avro.codec", self.codec.avro());
 
+        let header_schema = Schema::meta_schema();
+
         let mut header = Vec::new();
         header.extend_from_slice(AVRO_OBJECT_HEADER);
-        encode(
-            &metadata.avro(),
-            &Schema::Map(Box::new(Schema::Bytes)),
-            &mut header,
-        );
+        encode(&metadata.avro(), header_schema.root(), &mut header);
         header.extend_from_slice(&self.marker);
 
         Ok(header)
@@ -317,14 +315,14 @@ fn write_avro_datum<T: ToAvro>(
     buffer: &mut Vec<u8>,
 ) -> Result<(), Error> {
     let avro = value.avro();
-    if !avro.validate(schema) {
+    if !avro.validate(schema.root()) {
         return Err(ValidationError::new("value does not match schema").into());
     }
-    encode(&avro, schema, buffer);
+    encode(&avro, schema.root(), buffer);
     Ok(())
 }
 
-fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Result<(), Error> {
+fn write_value_ref(schema: SchemaType, value: &Value, buffer: &mut Vec<u8>) -> Result<(), Error> {
     if !value.validate(schema) {
         return Err(ValidationError::new("value does not match schema").into());
     }
