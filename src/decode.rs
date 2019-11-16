@@ -79,12 +79,16 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let mut items = Vec::new();
 
             loop {
-                let len = decode_len(reader)?;
+                let mut len = zag_i64(reader)?;
                 // arrays are 0-terminated, 0i64 is also encoded as 0 in Avro
                 // reading a length of 0 means the end of the array
                 if len == 0 {
                     break;
+                } else if len < 0 {
+                    let _size = zag_i64(reader)?;
+                    len = -len;
                 }
+                let len = safe_len(len as usize)?;
 
                 items.reserve(len as usize);
                 for _ in 0..len {
@@ -98,12 +102,16 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let mut items = HashMap::new();
 
             loop {
-                let len = decode_len(reader)?;
+                let mut len = zag_i64(reader)?;
                 // maps are 0-terminated, 0i64 is also encoded as 0 in Avro
                 // reading a length of 0 means the end of the map
                 if len == 0 {
                     break;
+                } else if len < 0 {
+                    let _size = zag_i64(reader)?;
+                    len = -len;
                 }
+                let len = safe_len(len as usize)?;
 
                 items.reserve(len as usize);
                 for _ in 0..len {
