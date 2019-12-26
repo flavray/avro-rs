@@ -41,22 +41,20 @@ impl DecodeError {
 }
 
 pub trait MapHelper {
-    fn string(&self, key: &str) -> Option<String>;
+    fn string(&self, key: &str) -> Option<&str>;
 
-    fn name(&self) -> Option<String> {
+    fn name(&self) -> Option<&str> {
         self.string("name")
     }
 
     fn doc(&self) -> Option<String> {
-        self.string("doc")
+        self.string("doc").map(|v| v.to_string())
     }
 }
 
 impl MapHelper for Map<String, Value> {
-    fn string(&self, key: &str) -> Option<String> {
-        self.get(key)
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string())
+    fn string(&self, key: &str) -> Option<&str> {
+        self.get(key).and_then(|v| v.as_str())
     }
 }
 

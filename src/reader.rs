@@ -3,7 +3,6 @@ use std::io::{ErrorKind, Read};
 use std::str::{from_utf8, FromStr};
 
 use failure::Error;
-use serde_json::from_slice;
 
 use crate::decode::decode;
 use crate::schema::ParseSchemaError;
@@ -31,7 +30,7 @@ impl<R: Read> Block<R> {
         let mut block = Block {
             reader,
             codec: Codec::Null,
-            writer_schema: Schema::Null,
+            writer_schema: Schema::meta_schema(),
             buf: vec![],
             buf_idx: 0,
             message_count: 0,
@@ -45,8 +44,6 @@ impl<R: Read> Block<R> {
     /// Try to read the header and to set the writer `Schema`, the `Codec` and the marker based on
     /// its content.
     fn read_header(&mut self) -> Result<(), Error> {
-        let meta_schema = Schema::Map(Box::new(Schema::Bytes));
-
         let mut buf = [0u8; 4];
         self.reader.read_exact(&mut buf)?;
 
@@ -54,18 +51,17 @@ impl<R: Read> Block<R> {
             return Err(DecodeError::new("wrong magic in header").into());
         }
 
-        if let Value::Map(meta) = decode(&meta_schema, &mut self.reader)? {
+        let meta_schema = Schema::meta_schema();
+
+        if let Value::Map(meta) = decode(meta_schema.root(), &mut self.reader)? {
             // TODO: surface original parse schema errors instead of coalescing them here
-            let schema = meta
-                .get("avro.schema")
-                .and_then(|bytes| {
-                    if let Value::Bytes(ref bytes) = *bytes {
-                        from_slice(bytes.as_ref()).ok()
-                    } else {
-                        None
-                    }
-                })
-                .and_then(|json| Schema::parse(&json).ok());
+            let schema = meta.get("avro.schema").and_then(|bytes| {
+                if let Value::Bytes(ref bytes) = *bytes {
+                    Schema::parse_slice(bytes.as_ref()).ok()
+                } else {
+                    None
+                }
+            });
             if let Some(schema) = schema {
                 self.writer_schema = schema;
             } else {
@@ -281,9 +277,9 @@ pub fn from_avro_datum<R: Read>(
     reader: &mut R,
     reader_schema: Option<&Schema>,
 ) -> Result<Value, Error> {
-    let value = decode(writer_schema, reader)?;
+    let value = decode(writer_schema.root(), reader)?;
     match reader_schema {
-        Some(ref schema) => value.resolve(schema),
+        Some(ref schema) => value.resolve(schema.root()),
         None => Ok(value),
     }
 }

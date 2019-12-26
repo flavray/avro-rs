@@ -4,7 +4,7 @@ use std::mem::transmute;
 
 use failure::Error;
 
-use crate::schema::Schema;
+use crate::schema::SchemaType;
 use crate::types::Value;
 use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
 
@@ -24,10 +24,10 @@ fn decode_len<R: Read>(reader: &mut R) -> Result<usize, Error> {
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> {
-    match *schema {
-        Schema::Null => Ok(Value::Null),
-        Schema::Boolean => {
+pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> Result<Value, Error> {
+    match schema {
+        SchemaType::Null => Ok(Value::Null),
+        SchemaType::Boolean => {
             let mut buf = [0u8; 1];
             reader.read_exact(&mut buf[..])?;
 
@@ -37,19 +37,19 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 _ => Err(DecodeError::new("not a bool").into()),
             }
         }
-        Schema::Int => decode_int(reader),
-        Schema::Long => decode_long(reader),
-        Schema::Float => {
+        SchemaType::Int => decode_int(reader),
+        SchemaType::Long => decode_long(reader),
+        SchemaType::Float => {
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf[..])?;
             Ok(Value::Float(unsafe { transmute::<[u8; 4], f32>(buf) }))
         }
-        Schema::Double => {
+        SchemaType::Double => {
             let mut buf = [0u8; 8];
             reader.read_exact(&mut buf[..])?;
             Ok(Value::Double(unsafe { transmute::<[u8; 8], f64>(buf) }))
         }
-        Schema::Bytes => {
+        SchemaType::Bytes => {
             let len = decode_len(reader)?;
             let mut buf = Vec::with_capacity(len);
             unsafe {
@@ -58,7 +58,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             reader.read_exact(&mut buf)?;
             Ok(Value::Bytes(buf))
         }
-        Schema::String => {
+        SchemaType::String => {
             let len = decode_len(reader)?;
             let mut buf = Vec::with_capacity(len);
             unsafe {
@@ -70,12 +70,12 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 .map(Value::String)
                 .map_err(|_| DecodeError::new("not a valid utf-8 string").into())
         }
-        Schema::Fixed { size, .. } => {
-            let mut buf = vec![0u8; size as usize];
+        SchemaType::Fixed(fixed) => {
+            let mut buf = vec![0u8; fixed.size() as usize];
             reader.read_exact(&mut buf)?;
-            Ok(Value::Fixed(size, buf))
+            Ok(Value::Fixed(fixed.size(), buf))
         }
-        Schema::Array(ref inner) => {
+        SchemaType::Array(array) => {
             let mut items = Vec::new();
 
             loop {
@@ -92,13 +92,13 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    items.push(decode(inner, reader)?);
+                    items.push(decode(array.items(), reader)?);
                 }
             }
 
             Ok(Value::Array(items))
         }
-        Schema::Map(ref inner) => {
+        SchemaType::Map(map) => {
             let mut items = HashMap::new();
 
             loop {
@@ -115,8 +115,8 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
 
                 items.reserve(len as usize);
                 for _ in 0..len {
-                    if let Value::String(key) = decode(&Schema::String, reader)? {
-                        let value = decode(inner, reader)?;
+                    if let Value::String(key) = decode(SchemaType::String, reader)? {
+                        let value = decode(map.items(), reader)?;
                         items.insert(key, value);
                     } else {
                         return Err(DecodeError::new("map key is not a string").into());
@@ -126,20 +126,20 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
 
             Ok(Value::Map(items))
         }
-        Schema::Union(ref inner) => {
+        SchemaType::Union(union) => {
             let index = zag_i64(reader)?;
-            let variants = inner.variants();
+            let variants = union.variants();
             match variants.get(index as usize) {
-                Some(variant) => decode(variant, reader).map(|x| Value::Union(Box::new(x))),
+                Some(variant) => decode(*variant, reader).map(|x| Value::Union(Box::new(x))),
                 None => Err(DecodeError::new("Union index out of bounds").into()),
             }
         }
-        Schema::Record { ref fields, .. } => {
+        SchemaType::Record(record) => {
             // Benchmarks indicate ~10% improvement using this method.
             let mut items = Vec::new();
-            for field in fields {
+            for field in record.fields() {
                 // This clone is also expensive. See if we can do away with it...
-                items.push((field.name.clone(), decode(&field.schema, reader)?));
+                items.push((field.name().to_string(), decode(field.schema(), reader)?));
             }
             Ok(Value::Record(items))
             // fields
@@ -148,11 +148,13 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             // .collect::<Result<Vec<(String, Value)>, _>>()
             // .map(|items| Value::Record(items))
         }
-        Schema::Enum { ref symbols, .. } => {
+        SchemaType::Enum(enum_) => {
+            let symbols = enum_.symbols();
             if let Value::Int(index) = decode_int(reader)? {
                 if index >= 0 && (index as usize) <= symbols.len() {
-                    let symbol = symbols[index as usize].clone();
-                    Ok(Value::Enum(index, symbol))
+                    let symbol = &symbols[index as usize];
+                    // TODO: Can this alloc be removed?
+                    Ok(Value::Enum(index, symbol.to_string()))
                 } else {
                     Err(DecodeError::new("enum symbol index out of bounds").into())
                 }
