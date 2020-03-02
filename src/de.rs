@@ -1,14 +1,20 @@
 //! Logic for serde-compatible deserialization.
-use std::collections::hash_map::{Keys, Values};
-use std::collections::HashMap;
+use std::collections::{
+    hash_map::{Keys, Values},
+    HashMap,
+};
 use std::error::{self, Error as StdError};
 use std::fmt;
 use std::slice::Iter;
 
-use serde::de::{self, Deserialize, DeserializeSeed, Error as SerdeError, Visitor};
+use serde::{
+    de::{self, DeserializeSeed, Error as SerdeError, Visitor},
+    forward_to_deserialize_any, Deserialize,
+};
 
 use crate::types::Value;
 
+/// Represents errors that could be encountered while deserializing data
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
     message: String,
@@ -310,7 +316,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
             Value::String(ref s) => visitor.visit_byte_buf(s.clone().into_bytes()),
             Value::Bytes(ref bytes) | Value::Fixed(_, ref bytes) => {
                 visitor.visit_byte_buf(bytes.to_owned())
-            },
+            }
             _ => Err(Error::custom("not a string|bytes|fixed")),
         }
     }

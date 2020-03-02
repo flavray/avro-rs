@@ -4,7 +4,10 @@ use std::error;
 use std::fmt;
 use std::iter::once;
 
-use serde::ser::{self, Error as SerdeError, Serialize};
+use serde::{
+    ser::{self, Error as SerdeError},
+    Serialize,
+};
 
 use crate::types::{ToAvro, Value};
 
@@ -36,6 +39,7 @@ pub struct StructVariantSerializer<'a> {
     fields: Vec<(String, Value)>,
 }
 
+/// Represents errors that could be encountered while serializing data
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
     message: String,
@@ -480,6 +484,7 @@ pub fn to_value<S: Serialize>(value: S) -> Result<Value, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
     struct Test {

@@ -4,8 +4,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use digest::Digest;
-use failure::Error;
-use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use failure::{Error, Fail};
+use serde::{
+    ser::{SerializeMap, SerializeSeq},
+    Deserialize, Serialize, Serializer,
+};
 use serde_json::{self, Map, Value};
 
 use crate::types;
@@ -49,7 +52,7 @@ impl fmt::Display for SchemaFingerprint {
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Schema {
     /// A `null` Avro schema.
     Null,
@@ -97,6 +100,18 @@ pub enum Schema {
     /// A `fixed` Avro schema.
     Fixed { name: Name, size: usize },
 }
+
+impl PartialEq for Schema {
+    /// Assess equality of two `Schema` based on [Parsing Canonical Form].
+    ///
+    /// [Parsing Canonical Form]:
+    /// https://avro.apache.org/docs/1.8.2/spec.html#Parsing+Canonical+Form+for+Schemas
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical_form() == other.canonical_form()
+    }
+}
+
+impl Eq for Schema {}
 
 /// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
 /// It may have utility as part of the public API, but defining as `pub(crate)` for now.
@@ -179,7 +194,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
 ///
 /// More information about schema names can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#names)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Name {
     pub name: String,
     pub namespace: Option<String>,
@@ -300,7 +315,8 @@ impl RecordField {
                 "descending" => Some(RecordFieldOrder::Descending),
                 "ignore" => Some(RecordFieldOrder::Ignore),
                 _ => None,
-            }).unwrap_or_else(|| RecordFieldOrder::Ascending);
+            })
+            .unwrap_or_else(|| RecordFieldOrder::Ascending);
 
         Ok(RecordField {
             name,
@@ -356,7 +372,7 @@ impl UnionSchema {
     }
 
     /// Optionally returns a reference to the schema matched by this value, as well as its position
-    /// within this enum.
+    /// within this union.
     pub fn find_schema(&self, value: &crate::types::Value) -> Option<(usize, &Schema)> {
         let kind = SchemaKind::from(value);
         self.variant_index
@@ -376,6 +392,7 @@ impl PartialEq for UnionSchema {
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     pub fn parse_str(input: &str) -> Result<Self, Error> {
+        // TODO: (#82) this should be a ParseSchemaError wrapping the JSON error
         let value = serde_json::from_str(input)?;
         Self::parse(&value)
     }
@@ -577,13 +594,13 @@ impl Serialize for Schema {
                 map.serialize_entry("type", "array")?;
                 map.serialize_entry("items", &*inner.clone())?;
                 map.end()
-            },
+            }
             Schema::Map(ref inner) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "map")?;
                 map.serialize_entry("values", &*inner.clone())?;
                 map.end()
-            },
+            }
             Schema::Union(ref inner) => {
                 let variants = inner.variants();
                 let mut seq = serializer.serialize_seq(Some(variants.len()))?;
@@ -591,7 +608,7 @@ impl Serialize for Schema {
                     seq.serialize_element(v)?;
                 }
                 seq.end()
-            },
+            }
             Schema::Record {
                 ref name,
                 ref doc,
@@ -612,7 +629,7 @@ impl Serialize for Schema {
                 }
                 map.serialize_entry("fields", fields)?;
                 map.end()
-            },
+            }
             Schema::Enum {
                 ref name,
                 ref symbols,
@@ -623,14 +640,14 @@ impl Serialize for Schema {
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("symbols", symbols)?;
                 map.end()
-            },
+            }
             Schema::Fixed { ref name, ref size } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "fixed")?;
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("size", size)?;
                 map.end()
-            },
+            }
         }
     }
 }
@@ -672,13 +689,13 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
         if schema.len() == 1 && k == "type" {
             // Invariant: function is only callable from a valid schema, so this is acceptable.
             if let serde_json::Value::String(s) = v {
-                return pcf_string(s)
+                return pcf_string(s);
             }
         }
 
         // Strip out unused fields ([STRIP] rule)
         if field_ordering_position(k).is_none() {
-            continue
+            continue;
         }
 
         // Fully qualify the name, if it isn't already ([FULLNAMES] rule).
@@ -688,12 +705,12 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
             let n = match ns {
                 Some(namespace) if !name.contains('.') => {
                     Cow::Owned(format!("{}.{}", namespace, name))
-                },
+                }
                 _ => Cow::Borrowed(name),
             };
 
             fields.push((k, format!("{}:{}", pcf_string(k), pcf_string(&*n))));
-            continue
+            continue;
         }
 
         // Strip off quotes surrounding "size" type, if they exist ([INTEGERS] rule).
@@ -703,7 +720,7 @@ fn pcf_map(schema: &Map<String, serde_json::Value>) -> String {
                 None => v.as_i64().unwrap(),
             };
             fields.push((k, format!("{}:{}", pcf_string(k), i)));
-            continue
+            continue;
         }
 
         // For anything else, recursively process the result.
@@ -754,9 +771,6 @@ fn field_ordering_position(field: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    extern crate md5;
-    extern crate sha2;
-
     use super::*;
 
     #[test]
@@ -840,7 +854,8 @@ mod tests {
                 ]
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut lookup = HashMap::new();
         lookup.insert("a".to_owned(), 0);
@@ -954,8 +969,8 @@ mod tests {
 
     #[test]
     fn test_schema_fingerprint() {
-        use self::md5::Md5;
-        use self::sha2::Sha256;
+        use md5::Md5;
+        use sha2::Sha256;
 
         let raw_schema = r#"
     {
@@ -979,5 +994,4 @@ mod tests {
             format!("{}", schema.fingerprint::<Md5>())
         );
     }
-
 }
