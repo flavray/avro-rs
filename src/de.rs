@@ -566,6 +566,7 @@ pub fn from_value<'de, D: Deserialize<'de>>(value: &'de Value) -> Result<D, Erro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Serialize;
 
     #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
     struct Test {
