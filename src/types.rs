@@ -343,7 +343,67 @@ impl Value {
             Schema::Array(ref inner) => self.resolve_array(inner),
             Schema::Map(ref inner) => self.resolve_map(inner),
             Schema::Record { ref fields, .. } => self.resolve_record(fields),
-            _ => unimplemented!("TODO"),
+            Schema::Date => self.resolve_date(),
+            Schema::TimeMillis => self.resolve_time_millis(),
+            Schema::TimeMicros => self.resolve_time_micros(),
+            Schema::TimestampMillis => self.resolve_timestamp_millis(),
+            Schema::TimestampMicros => self.resolve_timestamp_micros(),
+        }
+    }
+
+    fn resolve_date(self) -> Result<Self, Error> {
+        match self {
+            Value::Date(ts) | Value::Int(ts) => Ok(Value::Date(ts)),
+            other => {
+                Err(SchemaResolutionError::new(format!("Date expected, got {:?}", other)).into())
+            }
+        }
+    }
+
+    fn resolve_time_millis(self) -> Result<Self, Error> {
+        match self {
+            Value::TimeMillis(ts) | Value::Int(ts) => Ok(Value::TimeMillis(ts)),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimeMillis expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
+    }
+
+    fn resolve_time_micros(self) -> Result<Self, Error> {
+        match self {
+            Value::TimeMicros(ts) | Value::Long(ts) => Ok(Value::TimeMicros(ts)),
+            Value::Int(ts) => Ok(Value::TimeMicros(i64::from(ts))),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimeMicros expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
+    }
+
+    fn resolve_timestamp_millis(self) -> Result<Self, Error> {
+        match self {
+            Value::TimestampMillis(ts) | Value::Long(ts) => Ok(Value::TimestampMillis(ts)),
+            Value::Int(ts) => Ok(Value::TimestampMillis(i64::from(ts))),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimestampMillis expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
+    }
+
+    fn resolve_timestamp_micros(self) -> Result<Self, Error> {
+        match self {
+            Value::TimestampMicros(ts) | Value::Long(ts) => Ok(Value::TimestampMicros(ts)),
+            Value::Int(ts) => Ok(Value::TimestampMicros(i64::from(ts))),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimestampMicros expected, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
 
@@ -776,5 +836,14 @@ mod tests {
     fn resolve_bytes_failure() {
         let value = Value::Array(vec![Value::Int(2000), Value::Int(-42)]);
         assert!(value.resolve(&Schema::Bytes).is_err());
+    }
+
+    #[test]
+    fn resolve_logical_type() {
+        let value = Value::TimestampMicros(10);
+        assert!(value.resolve(&Schema::TimestampMicros).is_ok());
+
+        let value = Value::TimestampMillis(10);
+        assert!(value.resolve(&Schema::TimestampMillis).is_ok());
     }
 }

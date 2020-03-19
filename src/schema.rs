@@ -336,10 +336,7 @@ impl RecordField {
             .ok_or_else(|| ParseSchemaError::new("No `name` in record field"))?;
 
         // TODO: "type" = "<record name>"
-        let schema = field
-            .get("type")
-            .ok_or_else(|| ParseSchemaError::new("No `type` in record field").into())
-            .and_then(|type_| Schema::parse(type_))?;
+        let schema = Schema::parse_complex(field)?;
 
         let default = field.get("default").cloned();
 
@@ -543,13 +540,12 @@ impl Schema {
                 "fixed" => Schema::parse_fixed(complex),
                 other => Schema::parse_primitive(other),
             },
-            Some(&Value::Object(ref data)) => match data.get("type") {
-                Some(ref value) => Schema::parse(value),
-                None => Err(
-                    ParseSchemaError::new(format!("Unknown complex type: {:?}", complex)).into(),
-                ),
-            },
-            _ => Err(ParseSchemaError::new("No `type` in complex type").into()),
+            Some(&Value::Object(ref data)) => Schema::parse_complex(data),
+            Some(&Value::Array(ref variants)) => Schema::parse_union(variants),
+            Some(unknown) => {
+                Err(ParseSchemaError::new(format!("Unknown complex type: {0:?}", unknown)).into())
+            }
+            None => Err(ParseSchemaError::new("No `type` in complex type").into()),
         }
     }
 
@@ -1089,25 +1085,31 @@ mod tests {
         "name": "test",
         "fields": [
             {"name": "a", "type": "long", "default": 42},
-            {"name": "b", "type": "string"}
+            {"name": "b", "type": "string"},
+            {"name": "c", "type": "long", "logicalType": "timestamp-micros"}
         ]
     }
 "#;
 
         let schema = Schema::parse_str(raw_schema).unwrap();
         assert_eq!(
-            "c4d97949770866dec733ae7afa3046757e901d0cfea32eb92a8faeadcc4de153",
+            "7eb3b28d73dfc99bdd9af1848298b40804a2f8ad5d2642be2ecc2ad34842b987",
             format!("{}", schema.fingerprint::<Sha256>())
         );
 
         assert_eq!(
-            "7bce8188f28e66480a45ffbdc3615b7d",
+            "cb11615e412ee5d872620d8df78ff6ae",
             format!("{}", schema.fingerprint::<Md5>())
         );
     }
 
+    #[test]
     fn test_logical_types() {
         let schema = Schema::parse_str(r#"{"type": "int", "logicalType": "date"}"#).unwrap();
         assert_eq!(schema, Schema::Date);
+
+        let schema =
+            Schema::parse_str(r#"{"type": "long", "logicalType": "timestamp-micros"}"#).unwrap();
+        assert_eq!(schema, Schema::TimestampMicros);
     }
 }

@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(ser, l_ser);
         // Should deserialize from the schema into the logical type.
         let mut r = ser.as_slice();
-        let de = ::reader::from_avro_datum(&schema, &mut r, None).unwrap();
+        let de = crate::from_avro_datum(&schema, &mut r, None).unwrap();
         assert_eq!(de, Value::TimestampMillis(1));
     }
 
