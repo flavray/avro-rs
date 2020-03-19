@@ -1,5 +1,8 @@
 use std::mem::transmute;
 
+use byteorder::LittleEndian;
+use zerocopy::U32;
+
 use crate::schema::Schema;
 use crate::types::Value;
 use crate::util::{zig_i32, zig_i64};
@@ -44,6 +47,21 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         | Value::TimeMicros(i) => encode_long(*i, buffer),
         Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
         Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
+        Value::Decimal { bytes, .. } => match schema {
+            Schema::Fixed { .. } => buffer.extend(bytes),
+            Schema::Bytes => encode_bytes(bytes, buffer),
+            _ => panic!("invalid type for decimal: {:?}", schema),
+        },
+        &Value::Duration {
+            months,
+            days,
+            millis,
+        } => {
+            buffer.extend_from_slice(U32::<LittleEndian>::new(months).as_ref());
+            buffer.extend_from_slice(U32::<LittleEndian>::new(days).as_ref());
+            buffer.extend_from_slice(U32::<LittleEndian>::new(millis).as_ref());
+        }
+        Value::Uuid(uuid) => encode_bytes(&uuid.to_string(), buffer),
         Value::Bytes(bytes) => encode_bytes(bytes, buffer),
         Value::String(s) => match *schema {
             Schema::String => {

@@ -52,7 +52,8 @@ impl fmt::Display for SchemaFingerprint {
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum_macros::EnumDiscriminants)]
+#[strum_discriminants(name(SchemaKind), derive(Hash))]
 pub enum Schema {
     /// A `null` Avro schema.
     Null,
@@ -102,14 +103,16 @@ pub enum Schema {
         name: Name,
         size: usize,
     },
-    // TODO (JAB): Implement eventually
-    // /// Logical type which represents `Decimal` values. The underlying type is serialized and
-    // /// deserialized as `Schema::Bytes` or `Schema::Fixed`. `scale` defaults to 0 and `precision`
-    // /// ...
-    // Decimal {
-    //     scale: usize,
-    //     precision: usize,
-    // },
+    /// Logical type which represents `Decimal` values. The underlying type is serialized and
+    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
+    ///
+    /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
+    /// integer greater than 0
+    Decimal {
+        precision: usize,
+        scale: usize,
+        inner: Box<Schema>,
+    },
     /// Logical type which represents the number of days since the unix epoch.
     /// Serialization format is `Schema::Int`.
     Date,
@@ -117,7 +120,8 @@ pub enum Schema {
     TimeMicros,
     TimestampMillis,
     TimestampMicros,
-    // Duration,
+    Duration,
+    Uuid,
 }
 
 impl PartialEq for Schema {
@@ -131,66 +135,6 @@ impl PartialEq for Schema {
 }
 
 impl Eq for Schema {}
-
-/// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
-/// It may have utility as part of the public API, but defining as `pub(crate)` for now.
-///
-/// **NOTE** This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
-/// be constructed in order to get the discriminant, which makes it difficult to implement a
-/// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
-/// intermediate type should be especially fast, as the number of enum variants is small, which
-/// _should_ compile into a jump-table for the conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum SchemaKind {
-    Null,
-    Boolean,
-    Int,
-    Long,
-    Float,
-    Double,
-    Bytes,
-    String,
-    Array,
-    Map,
-    Union,
-    Record,
-    Enum,
-    Fixed,
-    // Decimal,
-    Date,
-    TimeMillis,
-    TimeMicros,
-    TimestampMillis,
-    TimestampMicros,
-}
-
-impl<'a> From<&'a Schema> for SchemaKind {
-    #[inline(always)]
-    fn from(schema: &'a Schema) -> SchemaKind {
-        // NOTE: I _believe_ this will always be fast as it should convert into a jump table.
-        match schema {
-            Schema::Null => SchemaKind::Null,
-            Schema::Boolean => SchemaKind::Boolean,
-            Schema::Int => SchemaKind::Int,
-            Schema::Long => SchemaKind::Long,
-            Schema::Float => SchemaKind::Float,
-            Schema::Double => SchemaKind::Double,
-            Schema::Bytes => SchemaKind::Bytes,
-            Schema::String => SchemaKind::String,
-            Schema::Array(_) => SchemaKind::Array,
-            Schema::Map(_) => SchemaKind::Map,
-            Schema::Union(_) => SchemaKind::Union,
-            Schema::Record { .. } => SchemaKind::Record,
-            Schema::Enum { .. } => SchemaKind::Enum,
-            Schema::Fixed { .. } => SchemaKind::Fixed,
-            Schema::Date => SchemaKind::Date,
-            Schema::TimeMillis => SchemaKind::TimeMillis,
-            Schema::TimeMicros => SchemaKind::TimeMicros,
-            Schema::TimestampMillis => SchemaKind::TimestampMillis,
-            Schema::TimestampMicros => SchemaKind::TimestampMicros,
-        }
-    }
-}
 
 impl<'a> From<&'a types::Value> for SchemaKind {
     #[inline(always)]
@@ -211,11 +155,14 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             Value::Record(_) => SchemaKind::Record,
             Value::Enum(_, _) => SchemaKind::Enum,
             Value::Fixed(_, _) => SchemaKind::Fixed,
+            Value::Decimal { .. } => SchemaKind::Decimal,
             Value::Date(_) => SchemaKind::Date,
             Value::TimeMillis(_) => SchemaKind::TimeMillis,
             Value::TimeMicros(_) => SchemaKind::TimeMicros,
             Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
             Value::TimestampMicros(_) => SchemaKind::TimestampMicros,
+            Value::Duration { .. } => SchemaKind::Duration,
+            Value::Uuid(_) => SchemaKind::Uuid,
         }
     }
 }
@@ -725,6 +672,18 @@ impl Serialize for Schema {
                 map.serialize_entry("size", size)?;
                 map.end()
             }
+            Schema::Decimal {
+                ref scale,
+                ref precision,
+                ref inner,
+            } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", &*inner.clone())?;
+                map.serialize_entry("logicalType", "decimal")?;
+                map.serialize_entry("scale", scale)?;
+                map.serialize_entry("precision", precision)?;
+                map.end()
+            }
             Schema::Date => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "int")?;
@@ -753,6 +712,24 @@ impl Serialize for Schema {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "long")?;
                 map.serialize_entry("logicalType", "timestamp-micros")?;
+                map.end()
+            }
+            Schema::Duration => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry(
+                    "type",
+                    &Schema::Fixed {
+                        name: Name::new("duration"),
+                        size: 12,
+                    },
+                )?;
+                map.serialize_entry("logicalType", "duration")?;
+                map.end()
+            }
+            Schema::Uuid => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "string")?;
+                map.serialize_entry("logicalType", "uuid")?;
                 map.end()
             }
         }

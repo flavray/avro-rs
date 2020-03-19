@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::mem::transmute;
 
+use byteorder::LittleEndian;
 use failure::Error;
+use zerocopy::U32;
 
 use crate::schema::Schema;
 use crate::types::Value;
@@ -37,6 +39,29 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 _ => Err(DecodeError::new("not a bool").into()),
             }
         }
+        Schema::Decimal {
+            precision,
+            scale,
+            ref inner,
+        } => {
+            let values = decode(inner, reader)?;
+            match values {
+                Value::Fixed(_, bytes) | Value::Bytes(bytes) => Ok(Value::Decimal {
+                    precision,
+                    scale,
+                    bytes,
+                }),
+                _ => {
+                    Err(DecodeError::new("not a fixed or bytes type, required for decimal").into())
+                }
+            }
+        }
+        Schema::Uuid => Ok(Value::Uuid(uuid::Uuid::parse_str(
+            match decode(&Schema::String, reader)? {
+                Value::String(ref s) => s,
+                _ => return Err(DecodeError::new("not a string type, required for uuid").into()),
+            },
+        )?)),
         Schema::Int => decode_int(reader),
         Schema::Date => zag_i32(reader).map(Value::Date),
         Schema::TimeMillis => zag_i32(reader).map(Value::TimeMillis),
@@ -44,6 +69,19 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
         Schema::TimeMicros => zag_i64(reader).map(Value::TimeMicros),
         Schema::TimestampMillis => zag_i64(reader).map(Value::TimestampMillis),
         Schema::TimestampMicros => zag_i64(reader).map(Value::TimestampMicros),
+        Schema::Duration => {
+            let mut months = U32::<LittleEndian>::new(0);
+            let mut days = U32::<LittleEndian>::new(0);
+            let mut millis = U32::<LittleEndian>::new(0);
+            reader.read_exact(months.as_mut())?;
+            reader.read_exact(days.as_mut())?;
+            reader.read_exact(millis.as_mut())?;
+            Ok(Value::Duration {
+                months: months.get(),
+                days: days.get(),
+                millis: millis.get(),
+            })
+        }
         Schema::Float => {
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf[..])?;
