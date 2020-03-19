@@ -421,7 +421,7 @@ impl Value {
     ) -> Result<Self, Error> {
         match inner {
             &Schema::Fixed { size, .. } => {
-                if precision > max_prec_for_len(size)? {
+                if max_prec_for_len(size)? < precision {
                     return Err(SchemaResolutionError::new(format!(
                         "Fixed size {} is not large enough to hold decimal values of precision {}",
                         size, precision,
@@ -460,7 +460,16 @@ impl Value {
                     .into());
                 }
 
-                // precision and scale match, assume the underlying type can hold
+                if precision < max_prec_for_len(bytes.len())? {
+                    return Err(SchemaResolutionError::new(format!(
+                        "Precision {} too small to hold decimals with {} bytes",
+                        precision,
+                        bytes.len(),
+                    ))
+                    .into());
+                }
+
+                // precision and scale match, can we assume the underlying type can hold the data?
                 Ok(Value::Decimal {
                     precision,
                     scale,
@@ -469,8 +478,8 @@ impl Value {
             }
             // check that bytes fits in the max len for precision, bytes can be smaller but not
             // larger
-            Value::Bytes(bytes) => {
-                if max_prec_for_len(bytes.len())? < precision {
+            Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
+                if max_prec_for_len(bytes.len())? <= precision {
                     Ok(Value::Decimal {
                         precision,
                         scale,
@@ -485,12 +494,6 @@ impl Value {
                     .into());
                 }
             }
-            // TODO: check that bytes fits within precision
-            Value::Fixed(_, bytes) => Ok(Value::Decimal {
-                precision,
-                scale,
-                bytes,
-            }),
             other => {
                 Err(SchemaResolutionError::new(format!("Decimal expected, got {:?}", other)).into())
             }
