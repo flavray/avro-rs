@@ -365,6 +365,9 @@ mod tests {
             ["null", "long"]
         "#;
 
+    static LOGICAL_TYPE_SCHEMA: &'static str =
+        r#"{"type": "long", "logicalType": "timestamp-millis"}"#;
+
     #[test]
     fn test_to_avro_datum() {
         let schema = Schema::parse_str(SCHEMA).unwrap();
@@ -390,6 +393,20 @@ mod tests {
         zig_i64(3, &mut expected);
 
         assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_logical_type() {
+        let schema = Schema::parse_str(LOGICAL_TYPE_SCHEMA).unwrap();
+        // The serialized format should be the same as the schema that is just "long".
+        let l_schema = Schema::Long;
+        let ser = to_avro_datum(&schema, 1i64).unwrap();
+        let l_ser = to_avro_datum(&l_schema, 1i64).unwrap();
+        assert_eq!(ser, l_ser);
+        // Should deserialize from the schema into the logical type.
+        let mut r = ser.as_slice();
+        let de = ::reader::from_avro_datum(&schema, &mut r, None).unwrap();
+        assert_eq!(de, Value::TimestampMillis(1));
     }
 
     #[test]

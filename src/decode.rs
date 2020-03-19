@@ -38,7 +38,12 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             }
         }
         Schema::Int => decode_int(reader),
+        Schema::Date => zag_i32(reader).map(Value::Date),
+        Schema::TimeMillis => zag_i32(reader).map(Value::TimeMillis),
         Schema::Long => decode_long(reader),
+        Schema::TimeMicros => zag_i64(reader).map(Value::TimeMicros),
+        Schema::TimestampMillis => zag_i64(reader).map(Value::TimestampMillis),
+        Schema::TimestampMicros => zag_i64(reader).map(Value::TimestampMicros),
         Schema::Float => {
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf[..])?;
