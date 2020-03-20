@@ -347,11 +347,13 @@ pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Er
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::Name;
+    use crate::types::Decimal;
     use crate::types::Record;
     use crate::util::zig_i64;
     use serde::{Deserialize, Serialize};
 
-    static SCHEMA: &'static str = r#"
+    const SCHEMA: &str = r#"
             {
                 "type": "record",
                 "name": "test",
@@ -361,12 +363,9 @@ mod tests {
                 ]
             }
         "#;
-    static UNION_SCHEMA: &'static str = r#"
+    const UNION_SCHEMA: &str = r#"
             ["null", "long"]
         "#;
-
-    static LOGICAL_TYPE_SCHEMA: &'static str =
-        r#"{"type": "long", "logicalType": "timestamp-millis"}"#;
 
     #[test]
     fn test_to_avro_datum() {
@@ -395,18 +394,83 @@ mod tests {
         assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
     }
 
-    #[test]
-    fn test_logical_type() {
-        let schema = Schema::parse_str(LOGICAL_TYPE_SCHEMA).unwrap();
-        // The serialized format should be the same as the schema that is just "long".
-        let l_schema = Schema::Long;
-        let ser = to_avro_datum(&schema, 1i64).unwrap();
-        let l_ser = to_avro_datum(&l_schema, 1i64).unwrap();
-        assert_eq!(ser, l_ser);
-        // Should deserialize from the schema into the logical type.
-        let mut r = ser.as_slice();
-        let de = crate::from_avro_datum(&schema, &mut r, None).unwrap();
-        assert_eq!(de, Value::TimestampMillis(1));
+    macro_rules! gen_logical_type_tests {
+        (
+            $(
+                #[test]
+                fn $test_name:ident() {
+                $schema_str:literal;
+                $raw_schema:expr;
+                $value:expr;
+            })+
+        ) => {
+            $(
+                #[test]
+                fn $test_name() {
+                    let schema = Schema::parse_str($schema_str).unwrap();
+                    // The serialized format should be the same as the schema that is just "long".
+                    let ser = to_avro_datum(&schema, 1i64).unwrap();
+                    let raw_ser = to_avro_datum(&$raw_schema, 1i64).unwrap();
+                    assert_eq!(ser, raw_ser);
+
+                    // Should deserialize from the schema into the logical type.
+                    let mut r = ser.as_slice();
+                    let de = crate::from_avro_datum(&schema, &mut r, None).unwrap();
+                    assert_eq!(de, $value);
+                }
+            )+
+        };
+    }
+
+    gen_logical_type_tests! {
+        #[test]
+        fn date() {
+            r#"{"type": "int", "logicalType": "date"}"#;
+            Schema::Date;
+            Value::Date(1);
+        }
+
+        #[test]
+        fn time_millis() {
+            r#"{"type": "int", "logicalType": "time-millis"}"#;
+            Schema::TimeMillis;
+            Value::TimeMillis(1);
+        }
+
+        #[test]
+        fn time_micros() {
+            r#"{"type": "long", "logicalType": "time-micros"}"#;
+            Schema::TimeMicros;
+            Value::TimeMicros(1);
+        }
+
+        #[test]
+        fn timestamp_millis() {
+            r#"{"type": "long", "logicalType": "timestamp-millis"}"#;
+            Schema::TimestampMillis;
+            Value::TimestampMillis(1);
+        }
+
+        #[test]
+        fn timestamp_micros() {
+            r#"{"type": "long", "logicalType": "timestamp-micros"}"#;
+            Schema::TimestampMicros;
+            Value::TimestampMicros(1);
+        }
+
+        #[test]
+        fn decimal_fixed() {
+            r#"{"type": {"type": "fixed", "size": 42, "name": "decimal"}, "logicalType": "decimal", "precision": 20, "scale": 5}"#;
+            Schema::Decimal { precision: 20, scale: 5, inner: Box::new(Schema::Fixed { name: Name::new("decimal"), size: 42 }) };
+            Value::Decimal(Decimal::from_bytes(vec![0u8; 42]));
+        }
+
+        #[test]
+        fn decimal_bytes() {
+            r#"{"type": "bytes", "logicalType": "decimal", "precision": 4, "scale": 3}"#;
+            Schema::Decimal { precision: 4, scale: 3, inner: Box::new(Schema::Bytes) };
+            Value::Decimal(Decimal::from_bytes(vec![0u8; 10]));
+        }
     }
 
     #[test]

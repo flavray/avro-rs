@@ -7,7 +7,7 @@ use failure::Error;
 use zerocopy::U32;
 
 use crate::schema::Schema;
-use crate::types::Value;
+use crate::types::{Decimal, Value};
 use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
 
 #[inline]
@@ -39,18 +39,13 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 _ => Err(DecodeError::new("not a bool").into()),
             }
         }
-        Schema::Decimal {
-            precision,
-            scale,
-            ref inner,
-        } => {
+        Schema::Decimal { ref inner, .. } => {
             let values = decode(inner, reader)?;
             match values {
-                Value::Fixed(_, bytes) | Value::Bytes(bytes) => Ok(Value::Decimal {
-                    precision,
-                    scale,
-                    bytes,
-                }),
+                decimal @ Value::Decimal(_) => Ok(decimal),
+                Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
+                    Ok(Value::Decimal(Decimal::from_bytes(bytes)))
+                }
                 _ => {
                     Err(DecodeError::new("not a fixed or bytes type, required for decimal").into())
                 }

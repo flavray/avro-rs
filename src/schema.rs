@@ -1,6 +1,7 @@
 //! Logic for parsing and interacting with schemas in Avro format.
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fmt;
 
 use digest::Digest;
@@ -9,7 +10,7 @@ use serde::{
     ser::{SerializeMap, SerializeSeq},
     Deserialize, Serialize, Serializer,
 };
-use serde_json::{self, Map, Value};
+use serde_json::{Map, Value};
 
 use crate::types;
 use crate::util::MapHelper;
@@ -109,8 +110,8 @@ pub enum Schema {
     /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
     /// integer greater than 0
     Decimal {
-        precision: usize,
-        scale: usize,
+        precision: DecimalMetadata,
+        scale: DecimalMetadata,
         inner: Box<Schema>,
     },
     /// Logical type which represents the number of days since the unix epoch.
@@ -369,6 +370,40 @@ impl PartialEq for UnionSchema {
     }
 }
 
+type DecimalMetadata = usize;
+pub(crate) type Precision = DecimalMetadata;
+pub(crate) type Scale = DecimalMetadata;
+
+fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalMetadata, Error> {
+    if value.is_u64() {
+        return Ok(value
+            .as_u64()
+            .ok_or_else(|| {
+                ParseSchemaError::new(format!(
+                    "JSON value {} claims to be u64 but cannot be converted",
+                    value
+                ))
+            })?
+            .try_into()?);
+    }
+
+    if value.is_i64() {
+        return Ok(value
+            .as_i64()
+            .ok_or_else(|| {
+                ParseSchemaError::new(format!(
+                    "JSON value {} claims to be i64 but cannot be converted",
+                    value
+                ))
+            })?
+            .try_into()?);
+    }
+    return Err(ParseSchemaError::new(format!(
+        "Invalid JSON value for decimal precision/scale integer: {}",
+        value
+    )))?;
+}
+
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     pub fn parse_str(input: &str) -> Result<Self, Error> {
@@ -427,46 +462,107 @@ impl Schema {
         }
     }
 
+    fn parse_precision_and_scale(
+        complex: &Map<String, Value>,
+    ) -> Result<(Precision, Scale), Error> {
+        fn get_decimal_integer(
+            complex: &Map<String, Value>,
+            key: &str,
+        ) -> Result<DecimalMetadata, Error> {
+            match complex.get(key) {
+                Some(&Value::Number(ref value)) => parse_json_integer_for_decimal(value),
+                None => {
+                    return Err(ParseSchemaError::new(format!(
+                        "{} missing for decimal type",
+                        key
+                    )))?
+                }
+                precision => {
+                    return Err(ParseSchemaError::new(format!(
+                        "invalid JSON for {}: {:?}",
+                        key, precision,
+                    )))?
+                }
+            }
+        }
+        let precision = get_decimal_integer(complex, "precision")?;
+        let scale = get_decimal_integer(complex, "scale")?;
+        Ok((precision, scale))
+    }
+
     /// Parse a `serde_json::Value` representing a complex Avro type into a
     /// `Schema`.
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
     fn parse_complex(complex: &Map<String, Value>) -> Result<Self, Error> {
-        fn logical_verify_type(complex: &Map<String, Value>, t: &str) -> Result<(), Error> {
+        fn logical_verify_type(
+            complex: &Map<String, Value>,
+            kinds: &[SchemaKind],
+        ) -> Result<Schema, Error> {
             match complex.get("type") {
-                Some(&Value::String(ref a)) if a == t => Ok(()),
-                Some(&Value::String(ref a)) => Err(ParseSchemaError::new(format!(
-                    "Unexpected `type` ({}) variant for logicalType",
-                    a
-                )))?,
-                _ => Err(ParseSchemaError::new(
-                    "Unexpected type variant for logicalType",
+                Some(value) => {
+                    let ty = Schema::parse(value)?;
+                    if kinds
+                        .iter()
+                        .any(|&kind| SchemaKind::from(ty.clone()) == kind)
+                    {
+                        Ok(ty)
+                    } else {
+                        Err(ParseSchemaError::new(format!(
+                            "Unexpected `type` ({}) variant for `logicalType`",
+                            value
+                        )))?
+                    }
+                }
+                None => Err(ParseSchemaError::new(
+                    "No `type` field found for `logicalType`",
                 ))?,
             }
         }
         match complex.get("logicalType") {
             Some(&Value::String(ref t)) => match t.as_str() {
-                "decimal" => unimplemented!("TODO - XXX `decimal` logicalType"),
+                "decimal" => {
+                    let inner = Box::new(logical_verify_type(
+                        complex,
+                        &[SchemaKind::Fixed, SchemaKind::Bytes],
+                    )?);
+
+                    let (precision, scale) = Self::parse_precision_and_scale(complex)?;
+
+                    return Ok(Schema::Decimal {
+                        precision,
+                        scale,
+                        inner,
+                    });
+                }
                 "date" => {
-                    logical_verify_type(complex, "int")?;
+                    logical_verify_type(complex, &[SchemaKind::Int])?;
                     return Ok(Schema::Date);
                 }
                 "time-millis" => {
-                    logical_verify_type(complex, "int")?;
+                    logical_verify_type(complex, &[SchemaKind::Int])?;
                     return Ok(Schema::TimeMillis);
                 }
                 "time-micros" => {
-                    logical_verify_type(complex, "long")?;
+                    logical_verify_type(complex, &[SchemaKind::Long])?;
                     return Ok(Schema::TimeMicros);
                 }
                 "timestamp-millis" => {
-                    logical_verify_type(complex, "long")?;
+                    logical_verify_type(complex, &[SchemaKind::Long])?;
                     return Ok(Schema::TimestampMillis);
                 }
                 "timestamp-micros" => {
-                    logical_verify_type(complex, "long")?;
+                    logical_verify_type(complex, &[SchemaKind::Long])?;
                     return Ok(Schema::TimestampMicros);
+                }
+                "duration" => {
+                    logical_verify_type(complex, &[SchemaKind::Fixed])?;
+                    return Ok(Schema::Duration);
+                }
+                "uuid" => {
+                    logical_verify_type(complex, &[SchemaKind::String])?;
+                    return Ok(Schema::Uuid);
                 }
                 // In this case, of an unknown logical type, we just pass through to the underlying
                 // type.

@@ -7,7 +7,7 @@ use std::u8;
 use failure::{Error, Fail};
 use serde_json::Value as JsonValue;
 
-use crate::schema::{RecordField, Schema, SchemaKind, UnionSchema};
+use crate::schema::{Precision, RecordField, Scale, Schema, SchemaKind, UnionSchema};
 use byteorder::LittleEndian;
 use zerocopy::U32;
 
@@ -25,15 +25,17 @@ impl SchemaResolutionError {
     }
 }
 
+/// Compute the maximum decimal value precision of a byte array of length `len` could hold.
 fn max_prec_for_len(len: usize) -> Result<usize, std::num::TryFromIntError> {
     Ok((2.0_f64.powi(i32::try_from(8 * len - 1)?) - 1.0 as f64)
         .log10()
         .floor() as usize)
 }
 
-/// Represents any valid Avro value
-/// More information about Avro values can be found in the
-/// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
+/// A valid Avro value.
+///
+/// More information about Avro values can be found in the [Avro
+/// Specification](https://avro.apache.org/docs/current/spec.html#schemas)
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     /// A `null` Avro value.
@@ -75,24 +77,67 @@ pub enum Value {
     ///
     /// See [Record](types.Record) for a more user-friendly support.
     Record(Vec<(String, Value)>),
-    /// Logical type, serialized and deserialized as i32 directly. Can only be deserialized
-    /// properly with a schema.
+    /// A date value.
+    ///
+    /// Serialized and deserialized as `i32` directly. Can only be deserialized properly with a
+    /// schema.
     Date(i32),
-    Decimal {
-        precision: usize,
-        scale: usize,
-        bytes: Vec<u8>,
-    },
+    /// An Avro Decimal value. Bytes are in big-endian order, per the Avro spec.
+    #[cfg(feature = "bigint")]
+    Decimal(Decimal<num_bigint::BigInt>),
+    #[cfg(not(feature = "bigint"))]
+    Decimal(Decimal<Vec<u8>>),
+    /// Time in milliseconds.
     TimeMillis(i32),
+    /// Time in microseconds.
     TimeMicros(i64),
+    /// Timestamp in milliseconds.
     TimestampMillis(i64),
+    /// Timestamp in microseconds.
     TimestampMicros(i64),
-    Duration {
-        months: u32,
-        days: u32,
-        millis: u32,
-    },
+    /// Avro Duration. An amount of time defined by months, days and milliseconds.
+    Duration { months: u32, days: u32, millis: u32 },
+    /// Universally unique identifier. We use the `uuid` crate here (as opposed to presenting a
+    /// string in the interface) to avoid having to write a UUID validator.
     Uuid(uuid::Uuid),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Decimal<V> {
+    value: V,
+}
+
+#[cfg(feature = "bigint")]
+impl Decimal<num_bigint::BigInt> {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.value.to_signed_bytes_be()
+    }
+
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self {
+            value: num_bigint::BigInt::from_signed_bytes_be(&bytes),
+        }
+    }
+
+    pub(super) fn num_bytes(&self) -> usize {
+        const SIGN_BIT: usize = 1;
+        ((self.value.bits() + SIGN_BIT) / 8).max(1)
+    }
+}
+
+#[cfg(not(feature = "bigint"))]
+impl Decimal<Vec<u8>> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        self.value.clone()
+    }
+
+    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self { value: bytes }
+    }
+
+    pub(super) fn num_bytes(&self) -> usize {
+        self.value.len()
+    }
 }
 
 /// Any structure implementing the [ToAvro](trait.ToAvro.html) trait will be usable
@@ -415,97 +460,72 @@ impl Value {
 
     fn resolve_decimal(
         self,
-        precision: usize,
-        scale: usize,
+        precision: Precision,
+        scale: Scale,
         inner: &Schema,
     ) -> Result<Self, Error> {
+        if scale > precision {
+            Err(SchemaResolutionError::new(format!(
+                "Scale {} is greater than precision {}",
+                scale, precision
+            )))?
+        }
         match inner {
             &Schema::Fixed { size, .. } => {
                 if max_prec_for_len(size)? < precision {
-                    return Err(SchemaResolutionError::new(format!(
+                    Err(SchemaResolutionError::new(format!(
                         "Fixed size {} is not large enough to hold decimal values of precision {}",
                         size, precision,
-                    ))
-                    .into());
+                    )))?
                 }
             }
             Schema::Bytes => (),
-            _ => {
-                return Err(SchemaResolutionError::new(format!(
-                    "Underlying decimal type must be fixed or bytes, got {:?}",
-                    inner
-                ))
-                .into())
-            }
+            _ => Err(SchemaResolutionError::new(format!(
+                "Underlying decimal type must be fixed or bytes, got {:?}",
+                inner
+            )))?,
         };
         match self {
-            Value::Decimal {
-                bytes,
-                precision: value_precision,
-                scale: value_scale,
-            } => {
-                if precision != value_precision {
-                    return Err(SchemaResolutionError::new(format!(
-                        "Precision of schema and precision of value do not match, schema: {} != value: {}",
-                        precision, value_precision
-                    ))
-                    .into());
-                }
-
-                if scale != value_scale {
-                    return Err(SchemaResolutionError::new(format!(
-                        "Scale of schema and scale of value do not match, schema: {} != value: {}",
-                        scale, value_scale
-                    ))
-                    .into());
-                }
-
-                if precision < max_prec_for_len(bytes.len())? {
-                    return Err(SchemaResolutionError::new(format!(
-                        "Precision {} too small to hold decimals with {} bytes",
-                        precision,
-                        bytes.len(),
-                    ))
-                    .into());
-                }
-
-                // precision and scale match, can we assume the underlying type can hold the data?
-                Ok(Value::Decimal {
-                    precision,
-                    scale,
-                    bytes,
-                })
-            }
-            // check that bytes fits in the max len for precision, bytes can be smaller but not
-            // larger
-            Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
-                if max_prec_for_len(bytes.len())? <= precision {
-                    Ok(Value::Decimal {
-                        precision,
-                        scale,
-                        bytes,
-                    })
+            Value::Decimal(num) => {
+                // bits doesn't include the sign bit, which we include in the representation
+                // because it's two's complement
+                let num_bytes = num.num_bytes();
+                if max_prec_for_len(num_bytes)? > precision {
+                    Err(SchemaResolutionError::new(format!(
+                        "Precision {} too small to hold decimal values with {} bytes",
+                        precision, num_bytes,
+                    )))?
                 } else {
-                    return Err(SchemaResolutionError::new(format!(
-                        "Precision {} too small to hold decimals with {} bytes",
+                    Ok(Value::Decimal(num))
+                }
+                // check num.bits() here
+            }
+            Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
+                if max_prec_for_len(bytes.len())? > precision {
+                    Err(SchemaResolutionError::new(format!(
+                        "Precision {} too small to hold decimal values with {} bytes",
                         precision,
                         bytes.len(),
-                    ))
-                    .into());
+                    )))?
+                } else {
+                    // precision and scale match, can we assume the underlying type can hold the data?
+                    Ok(Value::Decimal(Decimal::from_bytes(bytes)))
                 }
             }
-            other => {
-                Err(SchemaResolutionError::new(format!("Decimal expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Decimal expected, got {:?}",
+                other
+            )))?,
         }
     }
 
     fn resolve_date(self) -> Result<Self, Error> {
         match self {
             Value::Date(ts) | Value::Int(ts) => Ok(Value::Date(ts)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Date expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Date expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -989,29 +1009,47 @@ mod tests {
 
     #[test]
     fn resolve_decimal_bytes() {
-        let value = Value::Decimal {
-            precision: 10,
-            scale: 4,
-            bytes: vec![1, 2],
-        };
-        assert!(value
+        let value = Value::Decimal(Decimal::from_bytes(vec![1, 2]));
+        value
             .clone()
             .resolve(&Schema::Decimal {
                 precision: 10,
                 scale: 4,
                 inner: Box::new(Schema::Bytes),
             })
-            .is_ok());
+            .unwrap();
         assert!(value.resolve(&Schema::String).is_err());
     }
 
     #[test]
+    fn resolve_decimal_invalid_scale() {
+        let value = Value::Decimal(Decimal::from_bytes(vec![1]));
+        assert!(value
+            .clone()
+            .resolve(&Schema::Decimal {
+                precision: 2,
+                scale: 3,
+                inner: Box::new(Schema::Bytes),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn resolve_decimal_invalid_precision_for_length() {
+        let value = Value::Decimal(Decimal::from_bytes((1..=8).rev().collect()));
+        assert!(value
+            .clone()
+            .resolve(&Schema::Decimal {
+                precision: 1,
+                scale: 0,
+                inner: Box::new(Schema::Bytes),
+            })
+            .is_err());
+    }
+
+    #[test]
     fn resolve_decimal_fixed() {
-        let value = Value::Decimal {
-            precision: 10,
-            scale: 1,
-            bytes: vec![1, 2],
-        };
+        let value = Value::Decimal(Decimal::from_bytes(vec![1, 2]));
         assert!(value
             .clone()
             .resolve(&Schema::Decimal {

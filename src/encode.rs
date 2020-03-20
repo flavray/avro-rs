@@ -47,9 +47,9 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         | Value::TimeMicros(i) => encode_long(*i, buffer),
         Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
         Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
-        Value::Decimal { bytes, .. } => match schema {
-            Schema::Fixed { .. } => buffer.extend(bytes),
-            Schema::Bytes => encode_bytes(bytes, buffer),
+        Value::Decimal(num) => match schema {
+            Schema::Fixed { .. } => buffer.extend(num.to_bytes()),
+            Schema::Bytes => encode_bytes(&num.to_bytes(), buffer),
             _ => panic!("invalid type for decimal: {:?}", schema),
         },
         &Value::Duration {
