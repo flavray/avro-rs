@@ -349,23 +349,29 @@ mod tests {
     use super::*;
     use crate::schema::Name;
     use crate::types::Decimal;
+    use crate::types::Duration;
     use crate::types::Record;
     use crate::util::zig_i64;
     use serde::{Deserialize, Serialize};
 
     const SCHEMA: &str = r#"
-            {
-                "type": "record",
-                "name": "test",
-                "fields": [
-                    {"name": "a", "type": "long", "default": 42},
-                    {"name": "b", "type": "string"}
-                ]
-            }
-        "#;
-    const UNION_SCHEMA: &str = r#"
-            ["null", "long"]
-        "#;
+    {
+      "type": "record",
+      "name": "test",
+      "fields": [
+        {
+          "name": "a",
+          "type": "long",
+          "default": 42
+        },
+        {
+          "name": "b",
+          "type": "string"
+        }
+      ]
+    }
+    "#;
+    const UNION_SCHEMA: &str = r#"["null", "long"]"#;
 
     #[test]
     fn test_to_avro_datum() {
@@ -394,83 +400,138 @@ mod tests {
         assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
     }
 
-    macro_rules! gen_logical_type_tests {
-        (
-            $(
-                #[test]
-                fn $test_name:ident() {
-                $schema_str:literal;
-                $raw_schema:expr;
-                $value:expr;
-            })+
-        ) => {
-            $(
-                #[test]
-                fn $test_name() {
-                    let schema = Schema::parse_str($schema_str).unwrap();
-                    // The serialized format should be the same as the schema that is just "long".
-                    let ser = to_avro_datum(&schema, 1i64).unwrap();
-                    let raw_ser = to_avro_datum(&$raw_schema, 1i64).unwrap();
-                    assert_eq!(ser, raw_ser);
+    type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-                    // Should deserialize from the schema into the logical type.
-                    let mut r = ser.as_slice();
-                    let de = crate::from_avro_datum(&schema, &mut r, None).unwrap();
-                    assert_eq!(de, $value);
-                }
-            )+
-        };
+    fn logical_type_test<T: ToAvro + Clone>(
+        schema_str: &'static str,
+
+        expected_schema: &Schema,
+        value: Value,
+
+        raw_schema: &Schema,
+        raw_value: T,
+    ) -> TestResult<()> {
+        let schema = Schema::parse_str(schema_str)?;
+        assert_eq!(&schema, expected_schema);
+        // The serialized format should be the same as the schema.
+        let ser = to_avro_datum(&schema, value.clone())?;
+        let raw_ser = to_avro_datum(&raw_schema, raw_value)?;
+        assert_eq!(ser, raw_ser);
+
+        // Should deserialize from the schema into the logical type.
+        let mut r = ser.as_slice();
+        let de = crate::from_avro_datum(&schema, &mut r, None).unwrap();
+        assert_eq!(de, value);
+        Ok(())
     }
 
-    gen_logical_type_tests! {
-        #[test]
-        fn date() {
-            r#"{"type": "int", "logicalType": "date"}"#;
-            Schema::Date;
-            Value::Date(1);
-        }
+    #[test]
+    fn date() -> TestResult<()> {
+        logical_type_test(
+            r#"{"type": "int", "logicalType": "date"}"#,
+            &Schema::Date,
+            Value::Date(1_i32),
+            &Schema::Int,
+            1_i32,
+        )
+    }
 
-        #[test]
-        fn time_millis() {
-            r#"{"type": "int", "logicalType": "time-millis"}"#;
-            Schema::TimeMillis;
-            Value::TimeMillis(1);
-        }
+    #[test]
+    fn time_millis() -> TestResult<()> {
+        logical_type_test(
+            r#"{"type": "int", "logicalType": "time-millis"}"#,
+            &Schema::TimeMillis,
+            Value::TimeMillis(1_i32),
+            &Schema::Int,
+            1_i32,
+        )
+    }
 
-        #[test]
-        fn time_micros() {
-            r#"{"type": "long", "logicalType": "time-micros"}"#;
-            Schema::TimeMicros;
-            Value::TimeMicros(1);
-        }
+    #[test]
+    fn time_micros() -> TestResult<()> {
+        logical_type_test(
+            r#"{"type": "long", "logicalType": "time-micros"}"#,
+            &Schema::TimeMicros,
+            Value::TimeMicros(1_i64),
+            &Schema::Long,
+            1_i64,
+        )
+    }
 
-        #[test]
-        fn timestamp_millis() {
-            r#"{"type": "long", "logicalType": "timestamp-millis"}"#;
-            Schema::TimestampMillis;
-            Value::TimestampMillis(1);
-        }
+    #[test]
+    fn timestamp_millis() -> TestResult<()> {
+        logical_type_test(
+            r#"{"type": "long", "logicalType": "timestamp-millis"}"#,
+            &Schema::TimestampMillis,
+            Value::TimestampMillis(1_i64),
+            &Schema::Long,
+            1_i64,
+        )
+    }
 
-        #[test]
-        fn timestamp_micros() {
-            r#"{"type": "long", "logicalType": "timestamp-micros"}"#;
-            Schema::TimestampMicros;
-            Value::TimestampMicros(1);
-        }
+    #[test]
+    fn timestamp_micros() -> TestResult<()> {
+        logical_type_test(
+            r#"{"type": "long", "logicalType": "timestamp-micros"}"#,
+            &Schema::TimestampMicros,
+            Value::TimestampMicros(1_i64),
+            &Schema::Long,
+            1_i64,
+        )
+    }
 
-        #[test]
-        fn decimal_fixed() {
-            r#"{"type": {"type": "fixed", "size": 42, "name": "decimal"}, "logicalType": "decimal", "precision": 20, "scale": 5}"#;
-            Schema::Decimal { precision: 20, scale: 5, inner: Box::new(Schema::Fixed { name: Name::new("decimal"), size: 42 }) };
-            Value::Decimal(Decimal::from_bytes(vec![0u8; 42]));
-        }
+    #[test]
+    fn decimal_fixed() -> TestResult<()> {
+        let size = 30;
+        let inner = Schema::Fixed {
+            name: Name::new("decimal"),
+            size,
+        };
+        let value = vec![0u8; size];
+        logical_type_test(
+            r#"{"type": {"type": "fixed", "size": 30, "name": "decimal"}, "logicalType": "decimal", "precision": 20, "scale": 5}"#,
+            &Schema::Decimal {
+                precision: 20,
+                scale: 5,
+                inner: Box::new(inner.clone()),
+            },
+            Value::Decimal(Decimal::from_bytes(value.clone())),
+            &inner,
+            Value::Fixed(size, value),
+        )
+    }
 
-        #[test]
-        fn decimal_bytes() {
-            r#"{"type": "bytes", "logicalType": "decimal", "precision": 4, "scale": 3}"#;
-            Schema::Decimal { precision: 4, scale: 3, inner: Box::new(Schema::Bytes) };
-            Value::Decimal(Decimal::from_bytes(vec![0u8; 10]));
-        }
+    #[test]
+    fn decimal_bytes() -> TestResult<()> {
+        let inner = Schema::Bytes;
+        let value = vec![0u8; 10];
+        logical_type_test(
+            r#"{"type": "bytes", "logicalType": "decimal", "precision": 4, "scale": 3}"#,
+            &Schema::Decimal {
+                precision: 4,
+                scale: 3,
+                inner: Box::new(inner.clone()),
+            },
+            Value::Decimal(Decimal::from_bytes(value.clone())),
+            &inner,
+            value,
+        )
+    }
+
+    #[test]
+    fn duration() -> TestResult<()> {
+        let inner = Schema::Fixed {
+            name: Name::new("duration"),
+            size: 12,
+        };
+        let value = Value::Duration(Duration::new(256, 512, 1024));
+        logical_type_test(
+            r#"{"type": {"type": "fixed", "name": "duration", "size": 12}, "logicalType": "duration"}"#,
+            &Schema::Duration,
+            value,
+            &inner,
+            Value::Fixed(12, vec![0, 1, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0]),
+        )
     }
 
     #[test]

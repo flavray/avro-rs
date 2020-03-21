@@ -96,7 +96,7 @@ pub enum Value {
     /// Timestamp in microseconds.
     TimestampMicros(i64),
     /// Avro Duration. An amount of time defined by months, days and milliseconds.
-    Duration { months: u32, days: u32, millis: u32 },
+    Duration(Duration),
     /// Universally unique identifier.
     #[cfg(feature = "safe-uuid")]
     Uuid(uuid::Uuid),
@@ -104,26 +104,78 @@ pub enum Value {
     Uuid(String),
 }
 
+/// A struct representing duration that hides the details of endianness and conversion between
+/// platform-native u32 and byte arrays.
+#[derive(Debug, PartialEq, Copy, Clone, Default)]
+pub struct Duration {
+    months: U32<LittleEndian>,
+    days: U32<LittleEndian>,
+    millis: U32<LittleEndian>,
+}
+
+impl Duration {
+    pub fn new(months: u32, days: u32, millis: u32) -> Self {
+        Self {
+            months: U32::new(months),
+            days: U32::new(days),
+            millis: U32::new(millis),
+        }
+    }
+
+    pub fn as_bytes(&self) -> [u8; 12] {
+        let Self {
+            months,
+            days,
+            millis,
+        } = self;
+        let mut bytes = [0u8; 12];
+        bytes[0..4].copy_from_slice(months.as_ref());
+        bytes[4..8].copy_from_slice(days.as_ref());
+        bytes[8..12].copy_from_slice(millis.as_ref());
+        bytes
+    }
+}
+
+impl From<[u8; 12]> for Duration {
+    fn from(bytes: [u8; 12]) -> Self {
+        Self {
+            months: U32::from([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            days: U32::from([bytes[4], bytes[5], bytes[6], bytes[7]]),
+            millis: U32::from([bytes[8], bytes[9], bytes[10], bytes[11]]),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Decimal<V> {
     value: V,
+    num_bytes: usize,
 }
 
 #[cfg(feature = "safe-decimal")]
 impl Decimal<num_bigint::BigInt> {
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.value.to_signed_bytes_be()
+        let sign_value = u8::from(self.value.sign() == num_bigint::Sign::Minus);
+        let num_bytes = self.num_bytes;
+        let mut result = vec![sign_value; num_bytes];
+        let raw_bytes = self.value.to_signed_bytes_be();
+        result[(num_bytes - raw_bytes.len())..].copy_from_slice(&raw_bytes);
+        result
     }
 
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+    pub(crate) fn from_bytes<B>(bytes: B) -> Self
+    where
+        B: AsRef<[u8]>,
+    {
+        let bytes_ref = bytes.as_ref();
         Self {
-            value: num_bigint::BigInt::from_signed_bytes_be(&bytes),
+            value: num_bigint::BigInt::from_signed_bytes_be(bytes_ref),
+            num_bytes: bytes_ref.len(),
         }
     }
 
     pub(super) fn num_bytes(&self) -> usize {
-        const SIGN_BIT: usize = 1;
-        ((self.value.bits() + SIGN_BIT) / 8).max(1)
+        self.num_bytes
     }
 }
 
@@ -133,7 +185,10 @@ impl Decimal<Vec<u8>> {
         self.value.clone()
     }
 
-    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Self {
+    pub(crate) fn from_bytes<B>(bytes: B) -> Self
+    where
+        B: AsRef<[u8]>,
+    {
         Self { value: bytes }
     }
 
@@ -165,6 +220,7 @@ to_avro!(i64, Value::Long);
 to_avro!(f32, Value::Float);
 to_avro!(f64, Value::Double);
 to_avro!(String, Value::String);
+to_avro!(Vec<u8>, Value::Bytes);
 
 impl ToAvro for () {
     fn avro(self) -> Value {
@@ -195,11 +251,7 @@ where
     T: ToAvro,
 {
     fn avro(self) -> Value {
-        let v = match self {
-            Some(v) => T::avro(v),
-            None => Value::Null,
-        };
-        Value::Union(Box::new(v))
+        Value::Union(Box::new(self.map_or_else(|| Value::Null, T::avro)))
     }
 }
 
@@ -211,7 +263,7 @@ where
         Value::Map(
             self.into_iter()
                 .map(|(key, value)| (key, value.avro()))
-                .collect::<_>(),
+                .collect(),
         )
     }
 }
@@ -344,11 +396,18 @@ impl Value {
             (&Value::TimeMicros(_), &Schema::TimeMicros) => true,
             (&Value::TimeMillis(_), &Schema::TimeMillis) => true,
             (&Value::Date(_), &Schema::Date) => true,
+            (&Value::Decimal(_), &Schema::Decimal { .. }) => true,
+            (&Value::Duration(_), &Schema::Duration) => true,
+            (&Value::Uuid(_), &Schema::Uuid) => true,
             (&Value::Float(_), &Schema::Float) => true,
             (&Value::Double(_), &Schema::Double) => true,
             (&Value::Bytes(_), &Schema::Bytes) => true,
+            (&Value::Bytes(_), &Schema::Decimal { .. }) => true,
             (&Value::String(_), &Schema::String) => true,
             (&Value::Fixed(n, _), &Schema::Fixed { size, .. }) => n == size,
+            (&Value::Fixed(n, _), &Schema::Duration) => n == 12,
+            // TODO: check precision against n
+            (&Value::Fixed(_n, _), &Schema::Decimal { .. }) => true,
             (&Value::String(ref s), &Schema::Enum { ref symbols, .. }) => symbols.contains(s),
             (&Value::Enum(i, ref s), &Schema::Enum { ref symbols, .. }) => symbols
                 .get(i as usize)
@@ -449,13 +508,10 @@ impl Value {
                     ))
                     .into());
                 }
-                Ok(Value::Duration {
-                    months: U32::<LittleEndian>::from([bytes[0], bytes[1], bytes[2], bytes[3]])
-                        .get(),
-                    days: U32::<LittleEndian>::from([bytes[4], bytes[5], bytes[6], bytes[7]]).get(),
-                    millis: U32::<LittleEndian>::from([bytes[8], bytes[9], bytes[10], bytes[11]])
-                        .get(),
-                })
+                Ok(Value::Duration(Duration::from([
+                    bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                    bytes[8], bytes[9], bytes[10], bytes[11],
+                ])))
             }
             other => Err(
                 SchemaResolutionError::new(format!("Duration expected, got {:?}", other)).into(),
@@ -1041,7 +1097,7 @@ mod tests {
 
     #[test]
     fn resolve_decimal_invalid_precision_for_length() {
-        let value = Value::Decimal(Decimal::from_bytes((1..=8).rev().collect()));
+        let value = Value::Decimal(Decimal::from_bytes((1u8..=8u8).rev().collect::<Vec<_>>()));
         assert!(value
             .clone()
             .resolve(&Schema::Decimal {
@@ -1112,11 +1168,7 @@ mod tests {
 
     #[test]
     fn resolve_duration() {
-        let value = Value::Duration {
-            months: 10,
-            days: 5,
-            millis: 3000,
-        };
+        let value = Value::Duration(Duration::new(10, 5, 3000));
         assert!(value.clone().resolve(&Schema::Duration).is_ok());
         assert!(value.resolve(&Schema::TimestampMicros).is_err());
         assert!(Value::Long(1i64).resolve(&Schema::Duration).is_err());

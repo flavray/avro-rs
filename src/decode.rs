@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::mem::transmute;
 
-use byteorder::LittleEndian;
 use failure::Error;
-use zerocopy::U32;
 
 use crate::schema::Schema;
-use crate::types::{Decimal, Value};
+use crate::types::{Decimal, Duration, Value};
 use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
 
 #[inline]
@@ -42,7 +40,6 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
         Schema::Decimal { ref inner, .. } => {
             let values = decode(inner, reader)?;
             match values {
-                decimal @ Value::Decimal(_) => Ok(decimal),
                 Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
                     Ok(Value::Decimal(Decimal::from_bytes(bytes)))
                 }
@@ -71,17 +68,9 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
         Schema::TimestampMillis => zag_i64(reader).map(Value::TimestampMillis),
         Schema::TimestampMicros => zag_i64(reader).map(Value::TimestampMicros),
         Schema::Duration => {
-            let mut months = U32::<LittleEndian>::new(0);
-            let mut days = U32::<LittleEndian>::new(0);
-            let mut millis = U32::<LittleEndian>::new(0);
-            reader.read_exact(months.as_mut())?;
-            reader.read_exact(days.as_mut())?;
-            reader.read_exact(millis.as_mut())?;
-            Ok(Value::Duration {
-                months: months.get(),
-                days: days.get(),
-                millis: millis.get(),
-            })
+            let mut buf = [0u8; 12];
+            reader.read_exact(&mut buf)?;
+            Ok(Value::Duration(Duration::from(buf)))
         }
         Schema::Float => {
             let mut buf = [0u8; 4];
