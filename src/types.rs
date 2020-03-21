@@ -404,6 +404,7 @@ impl Value {
             (&Value::Bytes(_), &Schema::Bytes) => true,
             (&Value::Bytes(_), &Schema::Decimal { .. }) => true,
             (&Value::String(_), &Schema::String) => true,
+            (&Value::String(_), &Schema::Uuid) => true,
             (&Value::Fixed(n, _), &Schema::Fixed { size, .. }) => n == size,
             (&Value::Fixed(n, _), &Schema::Duration) => n == 12,
             // TODO: check precision against n
@@ -453,7 +454,6 @@ impl Value {
             };
             self = v;
         }
-        // TODO (JAB): XXX
         match *schema {
             Schema::Null => self.resolve_null(),
             Schema::Boolean => self.resolve_boolean(),
@@ -548,8 +548,6 @@ impl Value {
         };
         match self {
             Value::Decimal(num) => {
-                // bits doesn't include the sign bit, which we include in the representation
-                // because it's two's complement
                 let num_bytes = num.num_bytes();
                 if max_prec_for_len(num_bytes)? > precision {
                     Err(SchemaResolutionError::new(format!(
@@ -582,7 +580,7 @@ impl Value {
 
     fn resolve_date(self) -> Result<Self, Error> {
         match self {
-            Value::Date(ts) | Value::Int(ts) => Ok(Value::Date(ts)),
+            Value::Date(d) | Value::Int(d) => Ok(Value::Date(d)),
             other => Err(SchemaResolutionError::new(format!(
                 "Date expected, got {:?}",
                 other
@@ -592,24 +590,22 @@ impl Value {
 
     fn resolve_time_millis(self) -> Result<Self, Error> {
         match self {
-            Value::TimeMillis(ts) | Value::Int(ts) => Ok(Value::TimeMillis(ts)),
+            Value::TimeMillis(t) | Value::Int(t) => Ok(Value::TimeMillis(t)),
             other => Err(SchemaResolutionError::new(format!(
                 "TimeMillis expected, got {:?}",
                 other
-            ))
-            .into()),
+            )))?,
         }
     }
 
     fn resolve_time_micros(self) -> Result<Self, Error> {
         match self {
-            Value::TimeMicros(ts) | Value::Long(ts) => Ok(Value::TimeMicros(ts)),
-            Value::Int(ts) => Ok(Value::TimeMicros(i64::from(ts))),
+            Value::TimeMicros(t) | Value::Long(t) => Ok(Value::TimeMicros(t)),
+            Value::Int(t) => Ok(Value::TimeMicros(i64::from(t))),
             other => Err(SchemaResolutionError::new(format!(
                 "TimeMicros expected, got {:?}",
                 other
-            ))
-            .into()),
+            )))?,
         }
     }
 
@@ -620,8 +616,7 @@ impl Value {
             other => Err(SchemaResolutionError::new(format!(
                 "TimestampMillis expected, got {:?}",
                 other
-            ))
-            .into()),
+            )))?,
         }
     }
 
@@ -632,26 +627,27 @@ impl Value {
             other => Err(SchemaResolutionError::new(format!(
                 "TimestampMicros expected, got {:?}",
                 other
-            ))
-            .into()),
+            )))?,
         }
     }
 
     fn resolve_null(self) -> Result<Self, Error> {
         match self {
             Value::Null => Ok(Value::Null),
-            other => {
-                Err(SchemaResolutionError::new(format!("Null expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Null expected, got {:?}",
+                other
+            )))?,
         }
     }
 
     fn resolve_boolean(self) -> Result<Self, Error> {
         match self {
             Value::Boolean(b) => Ok(Value::Boolean(b)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Boolean expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Boolean expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -659,9 +655,10 @@ impl Value {
         match self {
             Value::Int(n) => Ok(Value::Int(n)),
             Value::Long(n) => Ok(Value::Int(n as i32)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Int expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Int expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -669,9 +666,10 @@ impl Value {
         match self {
             Value::Int(n) => Ok(Value::Long(i64::from(n))),
             Value::Long(n) => Ok(Value::Long(n)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Long expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Long expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -681,9 +679,10 @@ impl Value {
             Value::Long(n) => Ok(Value::Float(n as f32)),
             Value::Float(x) => Ok(Value::Float(x)),
             Value::Double(x) => Ok(Value::Float(x as f32)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Float expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Float expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -693,9 +692,10 @@ impl Value {
             Value::Long(n) => Ok(Value::Double(n as f64)),
             Value::Float(x) => Ok(Value::Double(f64::from(x))),
             Value::Double(x) => Ok(Value::Double(x)),
-            other => {
-                Err(SchemaResolutionError::new(format!("Double expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Double expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -709,9 +709,10 @@ impl Value {
                     .map(Value::try_u8)
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            other => {
-                Err(SchemaResolutionError::new(format!("Bytes expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "Bytes expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -719,9 +720,10 @@ impl Value {
         match self {
             Value::String(s) => Ok(Value::String(s)),
             Value::Bytes(bytes) => Ok(Value::String(String::from_utf8(bytes)?)),
-            other => {
-                Err(SchemaResolutionError::new(format!("String expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "String expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -734,13 +736,13 @@ impl Value {
                     Err(SchemaResolutionError::new(format!(
                         "Fixed size mismatch, {} expected, got {}",
                         size, n
-                    ))
-                    .into())
+                    )))?
                 }
             }
-            other => {
-                Err(SchemaResolutionError::new(format!("String expected, got {:?}", other)).into())
-            }
+            other => Err(SchemaResolutionError::new(format!(
+                "String expected, got {:?}",
+                other
+            )))?,
         }
     }
 
@@ -752,8 +754,7 @@ impl Value {
                 Err(SchemaResolutionError::new(format!(
                     "Enum default {} is not among allowed symbols {:?}",
                     symbol, symbols,
-                ))
-                .into())
+                )))?
             }
         };
 
@@ -766,16 +767,14 @@ impl Value {
                         "Enum value {} is out of bound {}",
                         i,
                         symbols.len() as i32
-                    ))
-                    .into())
+                    )))?
                 }
             }
             Value::String(s) => validate_symbol(s, symbols),
             other => Err(SchemaResolutionError::new(format!(
                 "Enum({:?}) expected, got {:?}",
                 symbols, other
-            ))
-            .into()),
+            )))?,
         }
     }
 
@@ -799,13 +798,12 @@ impl Value {
                 items
                     .into_iter()
                     .map(|item| item.resolve(schema))
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<_, _>>()?,
             )),
             other => Err(SchemaResolutionError::new(format!(
                 "Array({:?}) expected, got {:?}",
                 schema, other
-            ))
-            .into()),
+            )))?,
         }
     }
 
@@ -815,13 +813,12 @@ impl Value {
                 items
                     .into_iter()
                     .map(|(key, value)| value.resolve(schema).map(|value| (key, value)))
-                    .collect::<Result<HashMap<_, _>, _>>()?,
+                    .collect::<Result<_, _>>()?,
             )),
             other => Err(SchemaResolutionError::new(format!(
                 "Map({:?}) expected, got {:?}",
                 schema, other
-            ))
-            .into()),
+            )))?,
         }
     }
 
@@ -862,8 +859,7 @@ impl Value {
                             return Err(SchemaResolutionError::new(format!(
                                 "missing field {} in record",
                                 field.name
-                            ))
-                            .into());
+                            )))?;
                         }
                     },
                 };
@@ -884,7 +880,10 @@ impl Value {
             }
         }
 
-        Err(SchemaResolutionError::new(format!("Unable to convert to u8, got {:?}", int)).into())
+        Err(SchemaResolutionError::new(format!(
+            "Unable to convert to u8, got {:?}",
+            int
+        )))?
     }
 }
 
