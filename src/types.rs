@@ -199,7 +199,7 @@ impl Decimal<num_bigint::BigInt> {
         }
     }
 
-    pub(super) fn num_bytes(&self) -> usize {
+    pub(crate) fn num_bytes(&self) -> usize {
         self.num_bytes
     }
 }
@@ -217,7 +217,7 @@ impl Decimal<Vec<u8>> {
         Self { value: bytes }
     }
 
-    pub(super) fn num_bytes(&self) -> usize {
+    pub(crate) fn num_bytes(&self) -> usize {
         self.value.len()
     }
 }
