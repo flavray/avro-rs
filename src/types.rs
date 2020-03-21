@@ -83,9 +83,9 @@ pub enum Value {
     /// schema.
     Date(i32),
     /// An Avro Decimal value. Bytes are in big-endian order, per the Avro spec.
-    #[cfg(feature = "bigint")]
+    #[cfg(feature = "safe-decimal")]
     Decimal(Decimal<num_bigint::BigInt>),
-    #[cfg(not(feature = "bigint"))]
+    #[cfg(not(feature = "safe-decimal"))]
     Decimal(Decimal<Vec<u8>>),
     /// Time in milliseconds.
     TimeMillis(i32),
@@ -97,9 +97,11 @@ pub enum Value {
     TimestampMicros(i64),
     /// Avro Duration. An amount of time defined by months, days and milliseconds.
     Duration { months: u32, days: u32, millis: u32 },
-    /// Universally unique identifier. We use the `uuid` crate here (as opposed to presenting a
-    /// string in the interface) to avoid having to write a UUID validator.
+    /// Universally unique identifier.
+    #[cfg(feature = "safe-uuid")]
     Uuid(uuid::Uuid),
+    #[cfg(not(feature = "safe-uuid"))]
+    Uuid(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -107,7 +109,7 @@ pub struct Decimal<V> {
     value: V,
 }
 
-#[cfg(feature = "bigint")]
+#[cfg(feature = "safe-decimal")]
 impl Decimal<num_bigint::BigInt> {
     pub fn to_bytes(&self) -> Vec<u8> {
         self.value.to_signed_bytes_be()
@@ -125,7 +127,7 @@ impl Decimal<num_bigint::BigInt> {
     }
 }
 
-#[cfg(not(feature = "bigint"))]
+#[cfg(not(feature = "safe-decimal"))]
 impl Decimal<Vec<u8>> {
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         self.value.clone()
@@ -426,7 +428,10 @@ impl Value {
     fn resolve_uuid(self) -> Result<Self, Error> {
         match self {
             uuid @ Value::Uuid(_) => Ok(uuid),
+            #[cfg(feature = "safe-uuid")]
             Value::String(ref string) => Ok(Value::Uuid(uuid::Uuid::parse_str(string)?)),
+            #[cfg(not(feature = "safe-uuid"))]
+            Value::String(ref string) => Ok(Value::Uuid(string.clone())),
             other => {
                 Err(SchemaResolutionError::new(format!("UUID expected, got {:?}", other)).into())
             }
@@ -1117,9 +1122,18 @@ mod tests {
         assert!(Value::Long(1i64).resolve(&Schema::Duration).is_err());
     }
 
+    #[cfg(feature = "safe-uuid")]
     #[test]
     fn resolve_uuid() {
         let value = Value::Uuid(uuid::Uuid::new_v4());
+        assert!(value.clone().resolve(&Schema::Uuid).is_ok());
+        assert!(value.resolve(&Schema::TimestampMicros).is_err());
+    }
+
+    #[cfg(not(feature = "safe-uuid"))]
+    #[test]
+    fn resolve_uuid() {
+        let value = Value::Uuid("1481531d-ccc9-46d9-a56f-5b67459c0537".to_owned());
         assert!(value.clone().resolve(&Schema::Uuid).is_ok());
         assert!(value.resolve(&Schema::TimestampMicros).is_err());
     }

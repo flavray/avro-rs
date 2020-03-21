@@ -51,12 +51,18 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 }
             }
         }
+        #[cfg(feature = "safe-uuid")]
         Schema::Uuid => Ok(Value::Uuid(uuid::Uuid::parse_str(
             match decode(&Schema::String, reader)? {
                 Value::String(ref s) => s,
                 _ => return Err(DecodeError::new("not a string type, required for uuid").into()),
             },
         )?)),
+        #[cfg(not(feature = "safe-uuid"))]
+        Schema::Uuid => Ok(Value::Uuid(match decode(&Schema::String, reader)? {
+            Value::String(ref s) => s.clone(),
+            _ => return Err(DecodeError::new("not a string type, required for uuid").into()),
+        })),
         Schema::Int => decode_int(reader),
         Schema::Date => zag_i32(reader).map(Value::Date),
         Schema::TimeMillis => zag_i32(reader).map(Value::TimeMillis),
