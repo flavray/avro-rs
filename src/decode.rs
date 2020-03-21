@@ -41,7 +41,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             let values = decode(inner, reader)?;
             match values {
                 Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
-                    Ok(Value::Decimal(Decimal::from_bytes(bytes)))
+                    Ok(Value::Decimal(Decimal::from(bytes)))
                 }
                 _ => {
                     Err(DecodeError::new("not a fixed or bytes type, required for decimal").into())

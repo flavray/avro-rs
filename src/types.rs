@@ -125,7 +125,7 @@ impl Uuid<String> {
     }
 
     pub(crate) fn parse_str(input: &str) -> Result<Self, Error> {
-        Ok(Self(input))
+        Ok(Self(input.to_owned()))
     }
 }
 
@@ -177,6 +177,18 @@ pub struct Decimal<T> {
     num_bytes: usize,
 }
 
+impl<T> Decimal<T> {
+    fn num_bytes(&self) -> usize {
+        self.num_bytes
+    }
+}
+
+impl<T> AsRef<T> for Decimal<T> {
+    fn as_ref(&self) -> &T {
+        &self.value
+    }
+}
+
 #[cfg(feature = "safe-decimal")]
 impl Decimal<num_bigint::BigInt> {
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
@@ -187,20 +199,14 @@ impl Decimal<num_bigint::BigInt> {
         result[(num_bytes - raw_bytes.len())..].copy_from_slice(&raw_bytes);
         result
     }
+}
 
-    pub(crate) fn from_bytes<B>(bytes: B) -> Self
-    where
-        B: AsRef<[u8]>,
-    {
-        let bytes_ref = bytes.as_ref();
-        Self {
-            value: num_bigint::BigInt::from_signed_bytes_be(bytes_ref),
-            num_bytes: bytes_ref.len(),
-        }
-    }
-
-    pub(crate) fn num_bytes(&self) -> usize {
-        self.num_bytes
+#[cfg(feature = "safe-decimal")]
+impl From<Vec<u8>> for Decimal<num_bigint::BigInt> {
+    fn from(bytes: Vec<u8>) -> Self {
+        let value = num_bigint::BigInt::from_signed_bytes_be(&bytes);
+        let num_bytes = bytes.len();
+        Self { value, num_bytes }
     }
 }
 
@@ -209,16 +215,16 @@ impl Decimal<Vec<u8>> {
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         self.value.clone()
     }
+}
 
-    pub(crate) fn from_bytes<B>(bytes: B) -> Self
-    where
-        B: AsRef<[u8]>,
-    {
-        Self { value: bytes }
-    }
-
-    pub(crate) fn num_bytes(&self) -> usize {
-        self.value.len()
+#[cfg(not(feature = "safe-decimal"))]
+impl From<Vec<u8>> for Decimal<Vec<u8>> {
+    fn from(bytes: Vec<u8>) -> Self {
+        let num_bytes = bytes.len();
+        Self {
+            value: bytes,
+            num_bytes,
+        }
     }
 }
 
@@ -590,7 +596,7 @@ impl Value {
                     )))?
                 } else {
                     // precision and scale match, can we assume the underlying type can hold the data?
-                    Ok(Value::Decimal(Decimal::from_bytes(bytes)))
+                    Ok(Value::Decimal(Decimal::from(bytes)))
                 }
             }
             other => Err(SchemaResolutionError::new(format!(
@@ -1091,7 +1097,7 @@ mod tests {
 
     #[test]
     fn resolve_decimal_bytes() {
-        let value = Value::Decimal(Decimal::from_bytes(vec![1, 2]));
+        let value = Value::Decimal(Decimal::from(vec![1, 2]));
         value
             .clone()
             .resolve(&Schema::Decimal {
@@ -1105,7 +1111,7 @@ mod tests {
 
     #[test]
     fn resolve_decimal_invalid_scale() {
-        let value = Value::Decimal(Decimal::from_bytes(vec![1]));
+        let value = Value::Decimal(Decimal::from(vec![1]));
         assert!(value
             .clone()
             .resolve(&Schema::Decimal {
@@ -1118,7 +1124,7 @@ mod tests {
 
     #[test]
     fn resolve_decimal_invalid_precision_for_length() {
-        let value = Value::Decimal(Decimal::from_bytes((1u8..=8u8).rev().collect::<Vec<_>>()));
+        let value = Value::Decimal(Decimal::from((1u8..=8u8).rev().collect::<Vec<_>>()));
         assert!(value
             .clone()
             .resolve(&Schema::Decimal {
@@ -1131,7 +1137,7 @@ mod tests {
 
     #[test]
     fn resolve_decimal_fixed() {
-        let value = Value::Decimal(Decimal::from_bytes(vec![1, 2]));
+        let value = Value::Decimal(Decimal::from(vec![1, 2]));
         assert!(value
             .clone()
             .resolve(&Schema::Decimal {
