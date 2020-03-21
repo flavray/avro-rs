@@ -99,9 +99,34 @@ pub enum Value {
     Duration(Duration),
     /// Universally unique identifier.
     #[cfg(feature = "safe-uuid")]
-    Uuid(uuid::Uuid),
+    Uuid(Uuid<uuid::Uuid>),
     #[cfg(not(feature = "safe-uuid"))]
-    Uuid(String),
+    Uuid(Uuid<String>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Uuid<T>(T);
+
+#[cfg(feature = "safe-uuid")]
+impl Uuid<uuid::Uuid> {
+    pub(crate) fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+
+    pub(crate) fn parse_str(input: &str) -> Result<Self, Error> {
+        Ok(Self(uuid::Uuid::parse_str(input)?))
+    }
+}
+
+#[cfg(not(feature = "safe-uuid"))]
+impl Uuid<String> {
+    pub(crate) fn to_string(&self) -> String {
+        self.0.clone()
+    }
+
+    pub(crate) fn parse_str(input: &str) -> Result<Self, Error> {
+        Ok(Self(input))
+    }
 }
 
 /// A struct representing duration that hides the details of endianness and conversion between
@@ -147,14 +172,14 @@ impl From<[u8; 12]> for Duration {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Decimal<V> {
-    value: V,
+pub struct Decimal<T> {
+    value: T,
     num_bytes: usize,
 }
 
 #[cfg(feature = "safe-decimal")]
 impl Decimal<num_bigint::BigInt> {
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let sign_value = u8::from(self.value.sign() == num_bigint::Sign::Minus);
         let num_bytes = self.num_bytes;
         let mut result = vec![sign_value; num_bytes];
@@ -487,10 +512,7 @@ impl Value {
     fn resolve_uuid(self) -> Result<Self, Error> {
         match self {
             uuid @ Value::Uuid(_) => Ok(uuid),
-            #[cfg(feature = "safe-uuid")]
-            Value::String(ref string) => Ok(Value::Uuid(uuid::Uuid::parse_str(string)?)),
-            #[cfg(not(feature = "safe-uuid"))]
-            Value::String(ref string) => Ok(Value::Uuid(string.clone())),
+            Value::String(ref string) => Ok(Value::Uuid(Uuid::parse_str(string)?)),
             other => {
                 Err(SchemaResolutionError::new(format!("UUID expected, got {:?}", other)).into())
             }
@@ -1173,18 +1195,9 @@ mod tests {
         assert!(Value::Long(1i64).resolve(&Schema::Duration).is_err());
     }
 
-    #[cfg(feature = "safe-uuid")]
     #[test]
     fn resolve_uuid() {
-        let value = Value::Uuid(uuid::Uuid::new_v4());
-        assert!(value.clone().resolve(&Schema::Uuid).is_ok());
-        assert!(value.resolve(&Schema::TimestampMicros).is_err());
-    }
-
-    #[cfg(not(feature = "safe-uuid"))]
-    #[test]
-    fn resolve_uuid() {
-        let value = Value::Uuid("1481531d-ccc9-46d9-a56f-5b67459c0537".to_owned());
+        let value = Value::Uuid(Uuid::parse_str("1481531d-ccc9-46d9-a56f-5b67459c0537").unwrap());
         assert!(value.clone().resolve(&Schema::Uuid).is_ok());
         assert!(value.resolve(&Schema::TimestampMicros).is_err());
     }
