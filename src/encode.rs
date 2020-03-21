@@ -44,10 +44,12 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         | Value::TimeMicros(i) => encode_long(*i, buffer),
         Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
         Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
-        Value::Decimal(num) => match schema {
-            Schema::Decimal { ref inner, .. } => encode_ref(value, inner, buffer),
-            Schema::Fixed { .. } => buffer.extend(num.to_bytes()),
-            Schema::Bytes => encode_bytes(&num.to_bytes(), buffer),
+        Value::Decimal(decimal) => match schema {
+            Schema::Decimal { ref inner, .. } => match *inner.clone() {
+                Schema::Fixed { .. } => buffer.extend(decimal.to_bytes()),
+                Schema::Bytes => encode_bytes(&decimal.to_bytes(), buffer),
+                _ => panic!("invalid inner type for decimal: {:?}", inner),
+            },
             _ => panic!("invalid type for decimal: {:?}", schema),
         },
         &Value::Duration(duration) => {
