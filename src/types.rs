@@ -147,7 +147,19 @@ impl Duration {
         }
     }
 
-    pub fn as_bytes(&self) -> [u8; 12] {
+    pub fn months(&self) -> u32 {
+        self.months.get()
+    }
+
+    pub fn days(&self) -> u32 {
+        self.days.get()
+    }
+
+    pub fn millis(&self) -> u32 {
+        self.millis.get()
+    }
+
+    pub(crate) fn as_bytes(&self) -> [u8; 12] {
         let Self {
             months,
             days,
@@ -178,6 +190,10 @@ pub struct Decimal<T> {
 }
 
 impl<T> Decimal<T> {
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+
     fn num_bytes(&self) -> usize {
         self.num_bytes
     }
