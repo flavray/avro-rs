@@ -402,3 +402,19 @@ pub fn from_value<'de, D: Deserialize<'de>>(value: &'de Value) -> Result<D, Erro
     let mut de = Deserializer::new(value);
     D::deserialize(&mut de)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::types::Value;
+
+    type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+    #[test]
+    fn test_timestamp_micros() -> TestResult<()> {
+        let raw_value = 1_i64;
+        let value = Value::TimestampMicros(raw_value);
+        let result = crate::from_value::<i64>(&value)?;
+        assert_eq!(result, raw_value);
+        Ok(())
+    }
+}
