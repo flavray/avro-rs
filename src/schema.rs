@@ -140,8 +140,6 @@ impl PartialEq for Schema {
     }
 }
 
-impl Eq for Schema {}
-
 impl<'a> From<&'a types::Value> for SchemaKind {
     fn from(value: &'a types::Value) -> Self {
         use crate::types::Value;
