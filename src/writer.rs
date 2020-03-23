@@ -347,9 +347,9 @@ pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Er
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decimal::Decimal;
+    use crate::duration::{Days, Duration, Millis, Months};
     use crate::schema::Name;
-    use crate::types::Decimal;
-    use crate::types::Duration;
     use crate::types::Record;
     use crate::util::zig_i64;
     use serde::{Deserialize, Serialize};
@@ -524,7 +524,11 @@ mod tests {
             name: Name::new("duration"),
             size: 12,
         };
-        let value = Value::Duration(Duration::new(256, 512, 1024));
+        let value = Value::Duration(Duration::new(
+            Months::new(256),
+            Days::new(512),
+            Millis::new(1024),
+        ));
         logical_type_test(
             r#"{"type": {"type": "fixed", "name": "duration", "size": 12}, "logicalType": "duration"}"#,
             &Schema::Duration,

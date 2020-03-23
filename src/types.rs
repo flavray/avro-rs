@@ -7,9 +7,10 @@ use std::u8;
 use failure::{Error, Fail};
 use serde_json::Value as JsonValue;
 
+use crate::decimal::Decimal;
+use crate::duration::Duration;
 use crate::schema::{Precision, RecordField, Scale, Schema, SchemaKind, UnionSchema};
-use byteorder::LittleEndian;
-use zerocopy::U32;
+use crate::uuid::Uuid;
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -83,10 +84,7 @@ pub enum Value {
     /// schema.
     Date(i32),
     /// An Avro Decimal value. Bytes are in big-endian order, per the Avro spec.
-    #[cfg(feature = "safe-decimal")]
-    Decimal(Decimal<num_bigint::BigInt>),
-    #[cfg(not(feature = "safe-decimal"))]
-    Decimal(Decimal<Vec<u8>>),
+    Decimal(Decimal),
     /// Time in milliseconds.
     TimeMillis(i32),
     /// Time in microseconds.
@@ -98,152 +96,9 @@ pub enum Value {
     /// Avro Duration. An amount of time defined by months, days and milliseconds.
     Duration(Duration),
     /// Universally unique identifier.
-    #[cfg(feature = "safe-uuid")]
-    Uuid(Uuid<uuid::Uuid>),
-    #[cfg(not(feature = "safe-uuid"))]
-    Uuid(Uuid<String>),
+    /// Universally unique identifier.
+    Uuid(Uuid),
 }
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Uuid<T>(T);
-
-#[cfg(feature = "safe-uuid")]
-impl Uuid<uuid::Uuid> {
-    pub(crate) fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
-    pub(crate) fn parse_str(input: &str) -> Result<Self, Error> {
-        Ok(Self(uuid::Uuid::parse_str(input)?))
-    }
-}
-
-#[cfg(not(feature = "safe-uuid"))]
-impl Uuid<String> {
-    pub(crate) fn to_string(&self) -> String {
-        self.0.clone()
-    }
-
-    pub(crate) fn parse_str(input: &str) -> Result<Self, Error> {
-        Ok(Self(input.to_owned()))
-    }
-}
-
-/// A struct representing duration that hides the details of endianness and conversion between
-/// platform-native u32 and byte arrays.
-#[derive(Debug, PartialEq, Copy, Clone, Default)]
-pub struct Duration {
-    months: U32<LittleEndian>,
-    days: U32<LittleEndian>,
-    millis: U32<LittleEndian>,
-}
-
-impl Duration {
-    pub fn new(months: u32, days: u32, millis: u32) -> Self {
-        Self {
-            months: U32::new(months),
-            days: U32::new(days),
-            millis: U32::new(millis),
-        }
-    }
-
-    pub fn months(&self) -> u32 {
-        self.months.get()
-    }
-
-    pub fn days(&self) -> u32 {
-        self.days.get()
-    }
-
-    pub fn millis(&self) -> u32 {
-        self.millis.get()
-    }
-
-    pub(crate) fn as_bytes(&self) -> [u8; 12] {
-        let Self {
-            months,
-            days,
-            millis,
-        } = self;
-        let mut bytes = [0u8; 12];
-        bytes[0..4].copy_from_slice(months.as_ref());
-        bytes[4..8].copy_from_slice(days.as_ref());
-        bytes[8..12].copy_from_slice(millis.as_ref());
-        bytes
-    }
-}
-
-impl From<[u8; 12]> for Duration {
-    fn from(bytes: [u8; 12]) -> Self {
-        Self {
-            months: U32::from([bytes[0], bytes[1], bytes[2], bytes[3]]),
-            days: U32::from([bytes[4], bytes[5], bytes[6], bytes[7]]),
-            millis: U32::from([bytes[8], bytes[9], bytes[10], bytes[11]]),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Decimal<T> {
-    value: T,
-    num_bytes: usize,
-}
-
-impl<T> Decimal<T> {
-    pub fn into_inner(self) -> T {
-        self.value
-    }
-
-    fn num_bytes(&self) -> usize {
-        self.num_bytes
-    }
-}
-
-impl<T> AsRef<T> for Decimal<T> {
-    fn as_ref(&self) -> &T {
-        &self.value
-    }
-}
-
-#[cfg(feature = "safe-decimal")]
-impl Decimal<num_bigint::BigInt> {
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let sign_value = u8::from(self.value.sign() == num_bigint::Sign::Minus);
-        let num_bytes = self.num_bytes;
-        let mut result = vec![sign_value; num_bytes];
-        let raw_bytes = self.value.to_signed_bytes_be();
-        result[(num_bytes - raw_bytes.len())..].copy_from_slice(&raw_bytes);
-        result
-    }
-}
-
-#[cfg(feature = "safe-decimal")]
-impl From<Vec<u8>> for Decimal<num_bigint::BigInt> {
-    fn from(bytes: Vec<u8>) -> Self {
-        let value = num_bigint::BigInt::from_signed_bytes_be(&bytes);
-        let num_bytes = bytes.len();
-        Self { value, num_bytes }
-    }
-}
-
-#[cfg(not(feature = "safe-decimal"))]
-impl Decimal<Vec<u8>> {
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        self.value.clone()
-    }
-}
-
-#[cfg(not(feature = "safe-decimal"))]
-impl From<Vec<u8>> for Decimal<Vec<u8>> {
-    fn from(bytes: Vec<u8>) -> Self {
-        let num_bytes = bytes.len();
-        Self {
-            value: bytes,
-            num_bytes,
-        }
-    }
-}
-
 /// Any structure implementing the [ToAvro](trait.ToAvro.html) trait will be usable
 /// from a [Writer](../writer/struct.Writer.html).
 pub trait ToAvro {
@@ -933,8 +788,11 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema::{Name, RecordField, RecordFieldOrder, UnionSchema};
+    use crate::decimal::Decimal;
+    use crate::duration::{Days, Duration, Millis, Months};
+    use crate::schema::{Name, RecordField, RecordFieldOrder, Schema, UnionSchema};
+    use crate::types::Value;
+    use crate::uuid::Uuid;
 
     #[test]
     fn validate() {
@@ -1033,6 +891,7 @@ mod tests {
 
     #[test]
     fn validate_record() {
+        use std::collections::HashMap;
         // {
         //    "type": "record",
         //    "fields": [
@@ -1211,7 +1070,11 @@ mod tests {
 
     #[test]
     fn resolve_duration() {
-        let value = Value::Duration(Duration::new(10, 5, 3000));
+        let value = Value::Duration(Duration::new(
+            Months::new(10),
+            Days::new(5),
+            Millis::new(3000),
+        ));
         assert!(value.clone().resolve(&Schema::Duration).is_ok());
         assert!(value.resolve(&Schema::TimestampMicros).is_err());
         assert!(Value::Long(1i64).resolve(&Schema::Duration).is_err());

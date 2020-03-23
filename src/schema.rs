@@ -105,7 +105,7 @@ pub enum Schema {
     /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
     ///
     /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
-    /// integer greater than 0
+    /// integer greater than 0.
     Decimal {
         precision: DecimalMetadata,
         scale: DecimalMetadata,
@@ -356,10 +356,9 @@ impl UnionSchema {
 
     /// Optionally returns a reference to the schema matched by this value, as well as its position
     /// within this union.
-    pub fn find_schema(&self, value: &crate::types::Value) -> Option<(usize, &Schema)> {
-        let kind = SchemaKind::from(value);
+    pub fn find_schema(&self, value: &types::Value) -> Option<(usize, &Schema)> {
         self.variant_index
-            .get(&kind)
+            .get(&SchemaKind::from(value))
             .cloned()
             .map(|i| (i, &self.schemas[i]))
     }
@@ -538,6 +537,10 @@ impl Schema {
                         inner,
                     });
                 }
+                "uuid" => {
+                    logical_verify_type(complex, &[SchemaKind::String])?;
+                    return Ok(Schema::Uuid);
+                }
                 "date" => {
                     logical_verify_type(complex, &[SchemaKind::Int])?;
                     return Ok(Schema::Date);
@@ -561,10 +564,6 @@ impl Schema {
                 "duration" => {
                     logical_verify_type(complex, &[SchemaKind::Fixed])?;
                     return Ok(Schema::Duration);
-                }
-                "uuid" => {
-                    logical_verify_type(complex, &[SchemaKind::String])?;
-                    return Ok(Schema::Uuid);
                 }
                 // In this case, of an unknown logical type, we just pass through to the underlying
                 // type.

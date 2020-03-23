@@ -4,9 +4,12 @@ use std::mem::transmute;
 
 use failure::Error;
 
+use crate::decimal::Decimal;
+use crate::duration::Duration;
 use crate::schema::Schema;
-use crate::types::{Decimal, Duration, Uuid, Value};
+use crate::types::Value;
 use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
+use crate::uuid::Uuid;
 
 #[inline]
 fn decode_long<R: Read>(reader: &mut R) -> Result<Value, Error> {

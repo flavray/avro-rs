@@ -45,15 +45,16 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
         Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
         Value::Decimal(decimal) => match schema {
-            Schema::Decimal { ref inner, .. } => match *inner.clone() {
-                Schema::Fixed { .. } => buffer.extend(decimal.to_bytes()),
-                Schema::Bytes => encode_bytes(&decimal.to_bytes(), buffer),
+            Schema::Decimal { inner, .. } => match *inner.clone() {
+                Schema::Fixed { .. } => buffer.extend(Vec::from(decimal)),
+                Schema::Bytes => encode_bytes(&Vec::from(decimal), buffer),
                 _ => panic!("invalid inner type for decimal: {:?}", inner),
             },
             _ => panic!("invalid type for decimal: {:?}", schema),
         },
         &Value::Duration(duration) => {
-            buffer.extend_from_slice(&duration.as_bytes());
+            let slice: [u8; 12] = duration.into();
+            buffer.extend_from_slice(&slice);
         }
         Value::Uuid(uuid) => encode_bytes(&uuid.to_string(), buffer),
         Value::Bytes(bytes) => encode_bytes(bytes, buffer),

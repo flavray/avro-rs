@@ -467,11 +467,14 @@
 
 mod codec;
 mod de;
+mod decimal;
 mod decode;
+mod duration;
 mod encode;
 mod reader;
 mod ser;
 mod util;
+mod uuid;
 mod writer;
 
 pub mod schema;
@@ -479,11 +482,14 @@ pub mod types;
 
 pub use crate::codec::Codec;
 pub use crate::de::{from_value, Error as DeError};
+pub use crate::decimal::Decimal;
+pub use crate::duration::Duration;
 pub use crate::reader::{from_avro_datum, Reader};
 pub use crate::schema::{ParseSchemaError, Schema};
 pub use crate::ser::{to_value, Error as SerError};
 pub use crate::types::SchemaResolutionError;
 pub use crate::util::{max_allocation_bytes, DecodeError};
+pub use crate::uuid::Uuid;
 pub use crate::writer::{to_avro_datum, ValidationError, Writer};
 
 #[cfg(test)]
