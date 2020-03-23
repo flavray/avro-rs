@@ -100,10 +100,7 @@ pub enum Schema {
         symbols: Vec<String>,
     },
     /// A `fixed` Avro schema.
-    Fixed {
-        name: Name,
-        size: usize,
-    },
+    Fixed { name: Name, size: usize },
     /// Logical type which represents `Decimal` values. The underlying type is serialized and
     /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
     ///
