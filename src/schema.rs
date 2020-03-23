@@ -143,32 +143,31 @@ impl PartialEq for Schema {
 impl Eq for Schema {}
 
 impl<'a> From<&'a types::Value> for SchemaKind {
-    #[inline(always)]
-    fn from(value: &'a types::Value) -> SchemaKind {
-        use self::types::Value;
+    fn from(value: &'a types::Value) -> Self {
+        use crate::types::Value;
         match value {
-            Value::Null => SchemaKind::Null,
-            Value::Boolean(_) => SchemaKind::Boolean,
-            Value::Int(_) => SchemaKind::Int,
-            Value::Long(_) => SchemaKind::Long,
-            Value::Float(_) => SchemaKind::Float,
-            Value::Double(_) => SchemaKind::Double,
-            Value::Bytes(_) => SchemaKind::Bytes,
-            Value::String(_) => SchemaKind::String,
-            Value::Array(_) => SchemaKind::Array,
-            Value::Map(_) => SchemaKind::Map,
-            Value::Union(_) => SchemaKind::Union,
-            Value::Record(_) => SchemaKind::Record,
-            Value::Enum(_, _) => SchemaKind::Enum,
-            Value::Fixed(_, _) => SchemaKind::Fixed,
-            Value::Decimal { .. } => SchemaKind::Decimal,
-            Value::Date(_) => SchemaKind::Date,
-            Value::TimeMillis(_) => SchemaKind::TimeMillis,
-            Value::TimeMicros(_) => SchemaKind::TimeMicros,
-            Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
-            Value::TimestampMicros(_) => SchemaKind::TimestampMicros,
-            Value::Duration { .. } => SchemaKind::Duration,
-            Value::Uuid(_) => SchemaKind::Uuid,
+            Value::Null => Self::Null,
+            Value::Boolean(_) => Self::Boolean,
+            Value::Int(_) => Self::Int,
+            Value::Long(_) => Self::Long,
+            Value::Float(_) => Self::Float,
+            Value::Double(_) => Self::Double,
+            Value::Bytes(_) => Self::Bytes,
+            Value::String(_) => Self::String,
+            Value::Array(_) => Self::Array,
+            Value::Map(_) => Self::Map,
+            Value::Union(_) => Self::Union,
+            Value::Record(_) => Self::Record,
+            Value::Enum(_, _) => Self::Enum,
+            Value::Fixed(_, _) => Self::Fixed,
+            Value::Decimal { .. } => Self::Decimal,
+            Value::Uuid(_) => Self::Uuid,
+            Value::Date(_) => Self::Date,
+            Value::TimeMillis(_) => Self::TimeMillis,
+            Value::TimeMicros(_) => Self::TimeMicros,
+            Value::TimestampMillis(_) => Self::TimestampMillis,
+            Value::TimestampMicros(_) => Self::TimestampMicros,
+            Value::Duration { .. } => Self::Duration,
         }
     }
 }
@@ -785,6 +784,12 @@ impl Serialize for Schema {
                 map.serialize_entry("precision", precision)?;
                 map.end()
             }
+            Schema::Uuid => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "string")?;
+                map.serialize_entry("logicalType", "uuid")?;
+                map.end()
+            }
             Schema::Date => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "int")?;
@@ -817,20 +822,15 @@ impl Serialize for Schema {
             }
             Schema::Duration => {
                 let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry(
-                    "type",
-                    &Schema::Fixed {
-                        name: Name::new("duration"),
-                        size: 12,
-                    },
-                )?;
+
+                // the Avro doesn't indicate what the name of the underlying fixed type of a
+                // duration should be or typically is.
+                let inner = Schema::Fixed {
+                    name: Name::new("duration"),
+                    size: 12,
+                };
+                map.serialize_entry("type", &inner)?;
                 map.serialize_entry("logicalType", "duration")?;
-                map.end()
-            }
-            Schema::Uuid => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "string")?;
-                map.serialize_entry("logicalType", "uuid")?;
                 map.end()
             }
         }
