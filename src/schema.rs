@@ -111,15 +111,23 @@ pub enum Schema {
         scale: DecimalMetadata,
         inner: Box<Schema>,
     },
+    /// A universally unique identifier, annotating a string.
+    Uuid,
     /// Logical type which represents the number of days since the unix epoch.
     /// Serialization format is `Schema::Int`.
     Date,
+    /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
     TimeMillis,
+    /// The time of day in number of microseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
     TimeMicros,
+    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
     TimestampMillis,
+    /// An instant in time represented as the number of microseconds after the UNIX epoch.
     TimestampMicros,
+    /// An amount of time defined by a number of months, days and milliseconds.
     Duration,
-    Uuid,
 }
 
 impl PartialEq for Schema {
