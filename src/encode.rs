@@ -1,5 +1,3 @@
-use std::mem::transmute;
-
 use crate::schema::Schema;
 use crate::types::Value;
 use crate::util::{zig_i32, zig_i64};
@@ -42,8 +40,8 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         | Value::TimestampMillis(i)
         | Value::TimestampMicros(i)
         | Value::TimeMicros(i) => encode_long(*i, buffer),
-        Value::Float(x) => buffer.extend_from_slice(&unsafe { transmute::<f32, [u8; 4]>(*x) }),
-        Value::Double(x) => buffer.extend_from_slice(&unsafe { transmute::<f64, [u8; 8]>(*x) }),
+        Value::Float(x) => buffer.extend_from_slice(&x.to_ne_bytes()),
+        Value::Double(x) => buffer.extend_from_slice(&x.to_ne_bytes()),
         Value::Decimal(decimal) => match schema {
             Schema::Decimal { inner, .. } => match *inner.clone() {
                 Schema::Fixed { .. } => buffer.extend(Vec::from(decimal)),
