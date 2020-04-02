@@ -40,8 +40,8 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         | Value::TimestampMillis(i)
         | Value::TimestampMicros(i)
         | Value::TimeMicros(i) => encode_long(*i, buffer),
-        Value::Float(x) => buffer.extend_from_slice(&x.to_ne_bytes()),
-        Value::Double(x) => buffer.extend_from_slice(&x.to_ne_bytes()),
+        Value::Float(x) => buffer.extend_from_slice(&x.to_le_bytes()),
+        Value::Double(x) => buffer.extend_from_slice(&x.to_le_bytes()),
         Value::Decimal(decimal) => match schema {
             Schema::Decimal { inner, .. } => match *inner.clone() {
                 Schema::Fixed { .. } => buffer.extend(Vec::from(decimal)),
