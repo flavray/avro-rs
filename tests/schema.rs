@@ -287,6 +287,36 @@ lazy_static! {
             }"#,
             false
         ),
+        (
+            r#"{
+                  "type": "record",
+                  "name": "mymsg",
+                  "namespace": "myns",
+                  "fields": [
+                    {
+                      "name": "myid",
+                      "type": "int"
+                    },
+                    {
+                      "name": "c1",
+                      "type": {
+                        "type": "enum",
+                        "name": "myflag",
+                        "symbols": [
+                          "A",
+                          "B",
+                          "C"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "c2",
+                      "type": "myflag"
+                    }
+                  ]
+            }"#,
+            true
+        ),
     ];
     static ref DOC_EXAMPLES: Vec<(&'static str, bool)> = vec![
         (

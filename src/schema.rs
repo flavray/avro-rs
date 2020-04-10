@@ -2,6 +2,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
+use lazy_static::lazy_static;
+use std::sync::Mutex;
 
 use digest::Digest;
 use failure::{Error, Fail};
@@ -13,6 +15,10 @@ use serde_json::{self, Map, Value};
 
 use crate::types;
 use crate::util::MapHelper;
+
+lazy_static! {
+    static ref ENUM_CACHE : Mutex<HashMap<String, Schema>> = Mutex::new(HashMap::new());
+}
 
 /// Describes errors happened while parsing Avro schemas.
 #[derive(Fail, Debug)]
@@ -305,6 +311,11 @@ impl RecordField {
             .ok_or_else(|| ParseSchemaError::new("No `type` in record field").into())
             .and_then(|type_| Schema::parse(type_))?;
 
+
+        if let Schema::Enum {name, doc: _, symbols: _} = schema.clone() {
+            ENUM_CACHE.lock().unwrap().insert(name.name, schema.clone());
+        }
+
         let default = field.get("default").cloned();
 
         let order = field
@@ -434,6 +445,10 @@ impl Schema {
     /// Parse a `serde_json::Value` representing a primitive Avro type into a
     /// `Schema`.
     fn parse_primitive(primitive: &str) -> Result<Self, Error> {
+        match ENUM_CACHE.lock().unwrap().get(primitive) {
+            Some(schema) => return Ok(schema.clone()),
+            None => ()
+        }
         match primitive {
             "null" => Ok(Schema::Null),
             "boolean" => Ok(Schema::Boolean),
