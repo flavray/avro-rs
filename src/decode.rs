@@ -226,4 +226,54 @@ mod tests {
         expected.insert(String::from("test"), Int(1));
         assert_eq!(Map(expected), result.unwrap());
     }
+
+    #[test]
+    fn test_negative_decimal_value() {
+        use crate::{encode::encode, schema::Name};
+        use num_bigint::ToBigInt;
+        let inner = Box::new(Schema::Fixed {
+            size: 2,
+            name: Name::new("decimal"),
+        });
+        let schema = Schema::Decimal {
+            inner,
+            precision: 4,
+            scale: 2,
+        };
+        let bigint = -42.to_bigint().unwrap();
+        let signed_bytes = bigint.to_signed_bytes_be();
+        dbg!(num_bigint::BigInt::from_signed_bytes_be(&[0xFF, 214]));
+        let value = Value::Decimal(Decimal::from(signed_bytes));
+
+        let mut buffer = Vec::new();
+        encode(&value, &schema, &mut buffer);
+
+        let mut bytes = &buffer[..];
+        let result = decode(&schema, &mut bytes).unwrap();
+        assert_eq!(result, value);
+    }
+
+    #[test]
+    fn test_decode_decimal_with_bigger_than_necessary_size() {
+        use crate::{encode::encode, schema::Name};
+        use num_bigint::ToBigInt;
+        let inner = Box::new(Schema::Fixed {
+            size: 13,
+            name: Name::new("decimal"),
+        });
+        let schema = Schema::Decimal {
+            inner,
+            precision: 4,
+            scale: 2,
+        };
+        let value = Value::Decimal(Decimal::from(
+            (-42.to_bigint().unwrap()).to_signed_bytes_le(),
+        ));
+        let mut buffer = Vec::<u8>::new();
+
+        encode(&value, &schema, &mut buffer);
+        let mut bytes: &[u8] = &buffer[..];
+        let result = decode(&schema, &mut bytes).unwrap();
+        assert_eq!(result, value);
+    }
 }
