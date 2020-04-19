@@ -44,8 +44,10 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         Value::Double(x) => buffer.extend_from_slice(&x.to_le_bytes()),
         Value::Decimal(decimal) => match schema {
             Schema::Decimal { inner, .. } => match *inner.clone() {
-                Schema::Fixed { .. } => buffer.extend(Vec::from(decimal)),
-                Schema::Bytes => encode_bytes(&Vec::from(decimal), buffer),
+                Schema::Fixed { size, .. } => {
+                    encode(&Value::Fixed(size, Vec::from(decimal)), inner, buffer)
+                }
+                Schema::Bytes => encode(&Value::Bytes(Vec::from(decimal)), inner, buffer),
                 _ => panic!("invalid inner type for decimal: {:?}", inner),
             },
             _ => panic!("invalid type for decimal: {:?}", schema),
