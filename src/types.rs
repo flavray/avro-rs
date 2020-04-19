@@ -193,16 +193,6 @@ impl ToAvro for Value {
     }
 }
 
-/*
-impl<S: Serialize> ToAvro for S {
-    fn avro(self) -> Value {
-        use ser::Serializer;
-
-        self.serialize(&mut Serializer::new()).unwrap()
-    }
-}
-*/
-
 /// Utility interface to build `Value::Record` objects.
 #[derive(Debug, Clone)]
 pub struct Record<'a> {
