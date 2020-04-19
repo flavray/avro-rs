@@ -259,15 +259,15 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
             | Value::TimeMicros(i)
             | Value::TimestampMillis(i)
             | Value::TimestampMicros(i) => visitor.visit_i64(*i),
-            &Value::Float(x) => visitor.visit_f32(x),
-            &Value::Double(x) => visitor.visit_f64(x),
-            Value::Union(x) => match **x {
+            &Value::Float(f) => visitor.visit_f32(f),
+            &Value::Double(d) => visitor.visit_f64(d),
+            Value::Union(u) => match **u {
                 Value::Null => visitor.visit_unit(),
                 Value::Boolean(b) => visitor.visit_bool(b),
                 Value::Int(i) => visitor.visit_i32(i),
                 Value::Long(i) => visitor.visit_i64(i),
                 Value::Float(f) => visitor.visit_f32(f),
-                Value::Double(f) => visitor.visit_f64(f),
+                Value::Double(d) => visitor.visit_f64(d),
                 _ => Err(Error::custom("Unsupported union")),
             },
             Value::Record(ref fields) => visitor.visit_map(StructDeserializer::new(fields)),
