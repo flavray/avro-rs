@@ -40,17 +40,25 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 _ => Err(DecodeError::new("not a bool").into()),
             }
         }
-        Schema::Decimal { ref inner, .. } => {
-            let values = decode(inner, reader)?;
-            match values {
-                Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
-                    Ok(Value::Decimal(Decimal::from(bytes)))
-                }
-                _ => {
-                    Err(DecodeError::new("not a fixed or bytes type, required for decimal").into())
-                }
-            }
-        }
+        Schema::Decimal { ref inner, .. } => match **inner {
+            Schema::Fixed { .. } => match decode(inner, reader)? {
+                Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+                _ => Err(DecodeError::new(
+                    "not a fixed value, required for decimal with fixed schema",
+                )
+                .into()),
+            },
+            Schema::Bytes => match decode(inner, reader)? {
+                Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+                _ => Err(DecodeError::new(
+                    "not a bytes value, required for decimal with bytes schema",
+                )
+                .into()),
+            },
+            _ => Err(
+                DecodeError::new("not a fixed or bytes type, required for decimal schema").into(),
+            ),
+        },
         Schema::Uuid => Ok(Value::Uuid(Uuid::from_str(
             match decode(&Schema::String, reader)? {
                 Value::String(ref s) => s,
