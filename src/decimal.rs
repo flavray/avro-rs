@@ -1,6 +1,8 @@
+use num_bigint::BigInt;
+
 #[derive(Debug, Clone)]
 pub struct Decimal {
-    value: num_bigint::BigInt,
+    value: BigInt,
     len: usize,
 }
 
