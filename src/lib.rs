@@ -575,6 +575,9 @@
 //!     let input = writer.into_inner();
 //!     let reader = Reader::with_schema(&schema, &input[..])?;
 //!
+//!     for record in reader {
+//!         println!("{:?}", record?);
+//!     }
 //!     Ok(())
 //! }
 //! ```
