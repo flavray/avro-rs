@@ -6,7 +6,7 @@ pub struct Decimal {
     len: usize,
 }
 
-// We only care about value equality, not byte length. Can two equal BigInt's have two different
+// We only care about value equality, not byte length. Can two equal `BigInt`s have two different
 // byte lengths?
 impl PartialEq for Decimal {
     fn eq(&self, other: &Self) -> bool {
