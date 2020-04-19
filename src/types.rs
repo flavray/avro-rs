@@ -124,6 +124,9 @@ to_avro!(f32, Value::Float);
 to_avro!(f64, Value::Double);
 to_avro!(String, Value::String);
 to_avro!(Vec<u8>, Value::Bytes);
+to_avro!(uuid::Uuid, Value::Uuid);
+to_avro!(Decimal, Value::Decimal);
+to_avro!(Duration, Value::Duration);
 
 impl ToAvro for () {
     fn avro(self) -> Value {
