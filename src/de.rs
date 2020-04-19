@@ -251,17 +251,17 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        match &*self.input {
+        match self.input {
             Value::Null => visitor.visit_unit(),
-            Value::Boolean(b) => visitor.visit_bool(b),
+            &Value::Boolean(b) => visitor.visit_bool(b),
             Value::Int(i) | Value::Date(i) | Value::TimeMillis(i) => visitor.visit_i32(*i),
             Value::Long(i)
             | Value::TimeMicros(i)
             | Value::TimestampMillis(i)
             | Value::TimestampMicros(i) => visitor.visit_i64(*i),
-            Value::Float(x) => visitor.visit_f32(x),
-            Value::Double(x) => visitor.visit_f64(x),
-            Value::Union(ref x) => match **x {
+            &Value::Float(x) => visitor.visit_f32(x),
+            &Value::Double(x) => visitor.visit_f64(x),
+            Value::Union(x) => match **x {
                 Value::Null => visitor.visit_unit(),
                 Value::Boolean(b) => visitor.visit_bool(b),
                 Value::Int(i) => visitor.visit_i32(i),
@@ -841,11 +841,6 @@ mod tests {
             "error serializing tuple external enum(union)"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::types::Value;
 
     type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
