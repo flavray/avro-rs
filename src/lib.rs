@@ -495,7 +495,7 @@
 //!           "name": "decimal_fixed",
 //!           "type": {
 //!             "type": "fixed",
-//!             "size": 13,
+//!             "size": 2,
 //!             "name": "decimal"
 //!           },
 //!           "logicalType": "decimal",
