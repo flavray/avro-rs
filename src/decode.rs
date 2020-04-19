@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::io::Read;
+use std::str::FromStr;
 
 use failure::Error;
+use uuid::Uuid;
 
 use crate::decimal::Decimal;
 use crate::duration::Duration;
 use crate::schema::Schema;
 use crate::types::Value;
 use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
-use crate::uuid::Uuid;
 
 #[inline]
 fn decode_long<R: Read>(reader: &mut R) -> Result<Value, Error> {
@@ -50,7 +51,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
                 }
             }
         }
-        Schema::Uuid => Ok(Value::Uuid(Uuid::parse_str(
+        Schema::Uuid => Ok(Value::Uuid(Uuid::from_str(
             match decode(&Schema::String, reader)? {
                 Value::String(ref s) => s,
                 _ => return Err(DecodeError::new("not a string type, required for uuid").into()),

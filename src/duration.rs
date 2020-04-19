@@ -3,7 +3,7 @@ use zerocopy::U32;
 
 /// A struct representing duration that hides the details of endianness and conversion between
 /// platform-native u32 and byte arrays.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Duration {
     months: Months,
     days: Days,

@@ -2,15 +2,16 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::hash::BuildHasher;
+use std::str::FromStr;
 use std::u8;
 
 use failure::{Error, Fail};
 use serde_json::Value as JsonValue;
+use uuid::Uuid;
 
 use crate::decimal::Decimal;
 use crate::duration::Duration;
 use crate::schema::{Precision, RecordField, Scale, Schema, SchemaKind, UnionSchema};
-use crate::uuid::Uuid;
 
 /// Describes errors happened while performing schema resolution on Avro data.
 #[derive(Fail, Debug)]
@@ -389,7 +390,7 @@ impl Value {
     fn resolve_uuid(self) -> Result<Self, Error> {
         match self {
             uuid @ Value::Uuid(_) => Ok(uuid),
-            Value::String(ref string) => Ok(Value::Uuid(Uuid::parse_str(string)?)),
+            Value::String(ref string) => Ok(Value::Uuid(Uuid::from_str(string)?)),
             other => {
                 Err(SchemaResolutionError::new(format!("UUID expected, got {:?}", other)).into())
             }
@@ -447,7 +448,7 @@ impl Value {
         };
         match self {
             Value::Decimal(num) => {
-                let num_bytes = num.num_bytes();
+                let num_bytes = num.len();
                 if max_prec_for_len(num_bytes)? > precision {
                     Err(SchemaResolutionError::new(format!(
                         "Precision {} too small to hold decimal values with {} bytes",
@@ -792,7 +793,7 @@ mod tests {
     use crate::duration::{Days, Duration, Millis, Months};
     use crate::schema::{Name, RecordField, RecordFieldOrder, Schema, UnionSchema};
     use crate::types::Value;
-    use crate::uuid::Uuid;
+    use uuid::Uuid;
 
     #[test]
     fn validate() {

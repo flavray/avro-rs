@@ -474,7 +474,6 @@ mod encode;
 mod reader;
 mod ser;
 mod util;
-mod uuid;
 mod writer;
 
 pub mod schema;
@@ -489,7 +488,6 @@ pub use crate::schema::{ParseSchemaError, Schema};
 pub use crate::ser::{to_value, Error as SerError};
 pub use crate::types::SchemaResolutionError;
 pub use crate::util::{max_allocation_bytes, DecodeError};
-pub use crate::uuid::Uuid;
 pub use crate::writer::{to_avro_datum, ValidationError, Writer};
 
 #[cfg(test)]
