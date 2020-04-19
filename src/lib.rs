@@ -482,7 +482,7 @@ pub mod types;
 pub use crate::codec::Codec;
 pub use crate::de::{from_value, Error as DeError};
 pub use crate::decimal::Decimal;
-pub use crate::duration::Duration;
+pub use crate::duration::{Days, Duration, Millis, Months};
 pub use crate::reader::{from_avro_datum, Reader};
 pub use crate::schema::{ParseSchemaError, Schema};
 pub use crate::ser::{to_value, Error as SerError};
