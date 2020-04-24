@@ -609,6 +609,7 @@ mod tests {
             .writer(Vec::new())
             .schema(schema)
             .codec(Codec::Deflate)
+            .block_size(100)
             .build()
     }
 
