@@ -562,37 +562,21 @@ mod tests {
 
         assert_eq!(n1 + n2 + n3, result.len());
 
-        let mut header = Vec::new();
-        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+        let header = b"Obj\x01".to_vec();
 
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
-        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        data.extend(b"foo");
         let data_copy = data.clone();
         data.extend(data_copy);
 
         // starts with magic
-        assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .take(header.len())
-                .collect::<Vec<u8>>(),
-            header
-        );
+        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
         // ends with data and sync marker
+        let last_data_byte = result.len() - 16;
         assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .rev()
-                .skip(16)
-                .take(data.len())
-                .collect::<Vec<u8>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<u8>>(),
+            result.as_slice()[last_data_byte - data.len()..last_data_byte].to_vec(),
             data
         );
     }
@@ -614,37 +598,21 @@ mod tests {
 
         assert_eq!(n1 + n2, result.len());
 
-        let mut header = Vec::new();
-        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+        let header = b"Obj\x01".to_vec();
 
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
-        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        data.extend(b"foo");
         let data_copy = data.clone();
         data.extend(data_copy);
 
         // starts with magic
-        assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .take(header.len())
-                .collect::<Vec<u8>>(),
-            header
-        );
+        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
         // ends with data and sync marker
+        let last_data_byte = result.len() - 16;
         assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .rev()
-                .skip(16)
-                .take(data.len())
-                .collect::<Vec<u8>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<u8>>(),
+            result.as_slice()[last_data_byte - data.len()..last_data_byte].to_vec(),
             data
         );
     }
@@ -671,35 +639,19 @@ mod tests {
 
         assert_eq!(n1 + n2, result.len());
 
-        let mut header = Vec::new();
-        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+        let header = b"Obj\x01".to_vec();
 
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
-        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        data.extend(b"foo");
 
         // starts with magic
-        assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .take(header.len())
-                .collect::<Vec<u8>>(),
-            header
-        );
+        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
         // ends with data and sync marker
+        let last_data_byte = result.len() - 16;
         assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .rev()
-                .skip(16)
-                .take(data.len())
-                .collect::<Vec<u8>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<u8>>(),
+            result.as_slice()[last_data_byte - data.len()..last_data_byte].to_vec(),
             data
         );
     }
@@ -722,37 +674,21 @@ mod tests {
 
         assert_eq!(n1 + n2, result.len());
 
-        let mut header = Vec::new();
-        header.extend(vec![b'O', b'b', b'j', b'\x01']);
+        let header = b"Obj\x01".to_vec();
 
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
-        data.extend(vec![b'f', b'o', b'o'].into_iter());
+        data.extend(b"foo");
         let data_copy = data.clone();
         data.extend(data_copy);
 
         // starts with magic
-        assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .take(header.len())
-                .collect::<Vec<u8>>(),
-            header
-        );
+        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
         // ends with data and sync marker
+        let last_data_byte = result.len() - 16;
         assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .rev()
-                .skip(16)
-                .take(data.len())
-                .collect::<Vec<u8>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<u8>>(),
+            result.as_slice()[last_data_byte - data.len()..last_data_byte].to_vec(),
             data
         );
     }
@@ -782,38 +718,20 @@ mod tests {
 
         assert_eq!(n1 + n2 + n3, result.len());
 
-        let mut header = Vec::new();
-        header.extend(vec![b'O', b'b', b'j', b'\x01']);
-
+        let header = b"Obj\x01".to_vec();
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
-        data.extend(vec![b'f', b'o', b'o'].into_iter());
-        let data_copy = data.clone();
-        data.extend(data_copy);
+        data.extend(b"foo");
+        data.extend(data.clone());
         Codec::Deflate.compress(&mut data).unwrap();
 
         // starts with magic
-        assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .take(header.len())
-                .collect::<Vec<u8>>(),
-            header
-        );
+        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
         // ends with data and sync marker
+        let last_data_byte = result.len() - 16;
         assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .rev()
-                .skip(16)
-                .take(data.len())
-                .collect::<Vec<u8>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<u8>>(),
+            result.as_slice()[last_data_byte - data.len()..last_data_byte].to_vec(),
             data
         );
     }
