@@ -14,7 +14,7 @@ use crate::types::{ToAvro, Value};
 use crate::Codec;
 
 const DEFAULT_BLOCK_SIZE: usize = 16000;
-const AVRO_OBJECT_HEADER: &[u8] = &[b'O', b'b', b'j', 1u8];
+const AVRO_OBJECT_HEADER: [u8; 4] = [b'O', b'b', b'j', 1_u8];
 
 /// Describes errors happened while validating Avro data.
 #[derive(Fail, Debug)]
@@ -291,7 +291,7 @@ impl<'a, W: Write> Writer<'a, W> {
         metadata.insert("avro.codec", self.codec.avro());
 
         let mut header = Vec::new();
-        header.extend_from_slice(AVRO_OBJECT_HEADER);
+        header.extend_from_slice(&AVRO_OBJECT_HEADER);
         encode(
             &metadata.avro(),
             &Schema::Map(Box::new(Schema::Bytes)),
@@ -562,8 +562,6 @@ mod tests {
 
         assert_eq!(n1 + n2 + n3, result.len());
 
-        let header = b"Obj\x01".to_vec();
-
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
@@ -571,7 +569,10 @@ mod tests {
         data.extend(data.clone());
 
         // starts with magic
-        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
+        assert_eq!(
+            &result.as_slice()[..AVRO_OBJECT_HEADER.len()],
+            &AVRO_OBJECT_HEADER[..]
+        );
         // ends with data and sync marker
         let last_data_byte = result.len() - 16;
         assert_eq!(
@@ -597,8 +598,6 @@ mod tests {
 
         assert_eq!(n1 + n2, result.len());
 
-        let header = b"Obj\x01".to_vec();
-
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
@@ -606,7 +605,10 @@ mod tests {
         data.extend(data.clone());
 
         // starts with magic
-        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
+        assert_eq!(
+            &result.as_slice()[..AVRO_OBJECT_HEADER.len()],
+            &AVRO_OBJECT_HEADER[..]
+        );
         // ends with data and sync marker
         let last_data_byte = result.len() - 16;
         assert_eq!(
@@ -637,15 +639,16 @@ mod tests {
 
         assert_eq!(n1 + n2, result.len());
 
-        let header = b"Obj\x01".to_vec();
-
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
         data.extend(b"foo");
 
         // starts with magic
-        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
+        assert_eq!(
+            &result.as_slice()[..AVRO_OBJECT_HEADER.len()],
+            &AVRO_OBJECT_HEADER[..]
+        );
         // ends with data and sync marker
         let last_data_byte = result.len() - 16;
         assert_eq!(
@@ -672,8 +675,6 @@ mod tests {
 
         assert_eq!(n1 + n2, result.len());
 
-        let header = b"Obj\x01".to_vec();
-
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
@@ -681,7 +682,10 @@ mod tests {
         data.extend(data.clone());
 
         // starts with magic
-        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
+        assert_eq!(
+            &result.as_slice()[..AVRO_OBJECT_HEADER.len()],
+            &AVRO_OBJECT_HEADER[..]
+        );
         // ends with data and sync marker
         let last_data_byte = result.len() - 16;
         assert_eq!(
@@ -715,7 +719,6 @@ mod tests {
 
         assert_eq!(n1 + n2 + n3, result.len());
 
-        let header = b"Obj\x01".to_vec();
         let mut data = Vec::new();
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
@@ -724,7 +727,10 @@ mod tests {
         Codec::Deflate.compress(&mut data).unwrap();
 
         // starts with magic
-        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
+        assert_eq!(
+            &result.as_slice()[..AVRO_OBJECT_HEADER.len()],
+            &AVRO_OBJECT_HEADER[..]
+        );
         // ends with data and sync marker
         let last_data_byte = result.len() - 16;
         assert_eq!(
@@ -791,8 +797,6 @@ mod tests {
 
         assert_eq!(n1 + n2 + n3, result.len());
 
-        let header = b"Obj\x01".to_vec();
-
         let mut data = Vec::new();
         // byte indicating _not_ null
         zig_i64(1, &mut data);
@@ -803,7 +807,10 @@ mod tests {
         codec.compress(&mut data).unwrap();
 
         // starts with magic
-        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
+        assert_eq!(
+            &result.as_slice()[..AVRO_OBJECT_HEADER.len()],
+            &AVRO_OBJECT_HEADER[..]
+        );
         // ends with data and sync marker
         let last_data_byte = result.len() - 16;
         assert_eq!(
