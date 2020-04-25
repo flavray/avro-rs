@@ -750,86 +750,68 @@ mod tests {
         check_writer(writer, &schema);
     }
 
-    fn check_logical_writer(mut writer: Writer<'_, Vec<u8>>, schema: &Schema) {
-        let mut record = Record::new(schema).unwrap();
-        record.put("a", 27i64);
-        record.put("b", "foo");
-        record.put("c", Value::TimestampMicros(1234));
+    #[test]
+    fn test_logical_writer() {
+        const LOGICAL_TYPE_SCHEMA: &str = r#"
+        {
+          "type": "record",
+          "name": "logical_type_test",
+          "fields": [
+            {
+              "name": "a",
+              "type": [
+                "null",
+                {
+                  "type": "long",
+                  "logicalType": "timestamp-micros"
+                }
+              ]
+            }
+          ]
+        }
+        "#;
+        let codec = Codec::Deflate;
+        let schema = Schema::parse_str(LOGICAL_TYPE_SCHEMA).unwrap();
+        let mut writer = Writer::builder()
+            .schema(&schema)
+            .codec(codec)
+            .writer(Vec::new())
+            .build();
 
-        let n1 = writer.append(record.clone()).unwrap();
-        let n2 = writer.append(record.clone()).unwrap();
+        let mut record1 = Record::new(&schema).unwrap();
+        record1.put(
+            "a",
+            Value::Union(Box::new(Value::TimestampMicros(1234_i64))),
+        );
+
+        let mut record2 = Record::new(&schema).unwrap();
+        record2.put("a", Value::Union(Box::new(Value::Null)));
+
+        let n1 = writer.append(record1).unwrap();
+        let n2 = writer.append(record2).unwrap();
         let n3 = writer.flush().unwrap();
         let result = writer.into_inner();
 
         assert_eq!(n1 + n2 + n3, result.len());
 
-        let mut header = Vec::<u8>::new();
-        header.extend(b"Obj\x01");
+        let header = b"Obj\x01".to_vec();
 
         let mut data = Vec::new();
-        zig_i64(27, &mut data);
-        zig_i64(3, &mut data);
-        data.extend(b"foo");
+        // byte indicating _not_ null
+        zig_i64(1, &mut data);
         zig_i64(1234, &mut data);
-        let data_copy = data.clone();
-        data.extend(data_copy);
-        Codec::Snappy.compress(&mut data).unwrap();
+
+        // byte indicating null
+        zig_i64(0, &mut data);
+        codec.compress(&mut data).unwrap();
 
         // starts with magic
-        assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .take(header.len())
-                .collect::<Vec<u8>>(),
-            header
-        );
+        assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
         // ends with data and sync marker
+        let last_data_byte = result.len() - 16;
         assert_eq!(
-            result
-                .iter()
-                .cloned()
-                .rev()
-                .skip(16)
-                .take(data.len())
-                .collect::<Vec<u8>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<u8>>(),
+            result.as_slice()[last_data_byte - data.len()..last_data_byte].to_vec(),
             data
         );
-    }
-
-    #[test]
-    fn test_logical_writer_with_codec() {
-        const LOGICAL_TYPE_SCHEMA: &str = r#"
-        {
-          "type": "record",
-          "name": "test",
-          "fields": [
-            {
-              "name": "a",
-              "type": "long",
-              "default": 42
-            },
-            {
-              "name": "b",
-              "type": "string"
-            },
-            {
-              "name": "c",
-              "type": "long",
-              "logicalType": "timestamp-micros"
-            }
-          ]
-        }
-        "#;
-        let schema = Schema::parse_str(LOGICAL_TYPE_SCHEMA).unwrap();
-        let writer = Writer::builder()
-            .schema(&schema)
-            .codec(Codec::Snappy)
-            .writer(Vec::new())
-            .build();
-        check_logical_writer(writer, &schema);
     }
 }
