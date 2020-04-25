@@ -820,4 +820,87 @@ mod tests {
         let writer = make_writer_with_builder(&schema);
         check_writer(writer, &schema);
     }
+
+    fn check_logical_writer(mut writer: Writer<'_, Vec<u8>>, schema: &Schema) {
+        let mut record = Record::new(schema).unwrap();
+        record.put("a", 27i64);
+        record.put("b", "foo");
+        record.put("c", Value::TimestampMicros(1234));
+
+        let n1 = writer.append(record.clone()).unwrap();
+        let n2 = writer.append(record.clone()).unwrap();
+        let n3 = writer.flush().unwrap();
+        let result = writer.into_inner();
+
+        assert_eq!(n1 + n2 + n3, result.len());
+
+        let mut header = Vec::<u8>::new();
+        header.extend(b"Obj\x01");
+
+        let mut data = Vec::new();
+        zig_i64(27, &mut data);
+        zig_i64(3, &mut data);
+        data.extend(b"foo");
+        zig_i64(1234, &mut data);
+        let data_copy = data.clone();
+        data.extend(data_copy);
+        Codec::Snappy.compress(&mut data).unwrap();
+
+        // starts with magic
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .take(header.len())
+                .collect::<Vec<u8>>(),
+            header
+        );
+        // ends with data and sync marker
+        assert_eq!(
+            result
+                .iter()
+                .cloned()
+                .rev()
+                .skip(16)
+                .take(data.len())
+                .collect::<Vec<u8>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<u8>>(),
+            data
+        );
+    }
+
+    #[test]
+    fn test_logical_writer_with_codec() {
+        const LOGICAL_TYPE_SCHEMA: &str = r#"
+        {
+          "type": "record",
+          "name": "test",
+          "fields": [
+            {
+              "name": "a",
+              "type": "long",
+              "default": 42
+            },
+            {
+              "name": "b",
+              "type": "string"
+            },
+            {
+              "name": "c",
+              "type": "long",
+              "logicalType": "timestamp-micros"
+            }
+          ]
+        }
+        "#;
+        let schema = Schema::parse_str(LOGICAL_TYPE_SCHEMA).unwrap();
+        let writer = Writer::builder()
+            .schema(&schema)
+            .codec(Codec::Snappy)
+            .writer(Vec::new())
+            .build();
+        check_logical_writer(writer, &schema);
+    }
 }
