@@ -386,13 +386,24 @@ mod tests {
     }
 
     #[test]
-    fn test_union() {
+    fn test_union_not_null() {
         let schema = Schema::parse_str(UNION_SCHEMA).unwrap();
         let union = Value::Union(Box::new(Value::Long(3)));
 
         let mut expected = Vec::new();
         zig_i64(1, &mut expected);
         zig_i64(3, &mut expected);
+
+        assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_union_null() {
+        let schema = Schema::parse_str(UNION_SCHEMA).unwrap();
+        let union = Value::Union(Box::new(Value::Null));
+
+        let mut expected = Vec::new();
+        zig_i64(0, &mut expected);
 
         assert_eq!(to_avro_datum(&schema, union).unwrap(), expected);
     }
