@@ -568,8 +568,7 @@ mod tests {
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
         data.extend(b"foo");
-        let data_copy = data.clone();
-        data.extend(data_copy);
+        data.extend(data.clone());
 
         // starts with magic
         assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
@@ -604,8 +603,7 @@ mod tests {
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
         data.extend(b"foo");
-        let data_copy = data.clone();
-        data.extend(data_copy);
+        data.extend(data.clone());
 
         // starts with magic
         assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
@@ -680,8 +678,7 @@ mod tests {
         zig_i64(27, &mut data);
         zig_i64(3, &mut data);
         data.extend(b"foo");
-        let data_copy = data.clone();
-        data.extend(data_copy);
+        data.extend(data.clone());
 
         // starts with magic
         assert_eq!(result.as_slice()[..header.len()].to_vec(), header);
