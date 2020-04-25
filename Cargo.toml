@@ -37,7 +37,7 @@ libflate = "0.1"
 num-bigint = "0.2.6"
 rand = "0.4"
 serde_json = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 snap = { version = "0.2.3", optional = true }
 strum = "0.18.0"
 strum_macros = "0.18.0"

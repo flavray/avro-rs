@@ -6,6 +6,7 @@ use std::collections::{
 use std::error;
 use std::fmt;
 use std::slice::Iter;
+use std::sync::Arc;
 
 use serde::{
     de::{self, DeserializeSeed, Error as SerdeError, Visitor},
@@ -54,7 +55,7 @@ struct MapDeserializer<'de> {
 }
 
 struct StructDeserializer<'de> {
-    input: Iter<'de, (String, Value)>,
+    input: Iter<'de, (Arc<String>, Value)>,
     value: Option<&'de Value>,
 }
 
@@ -63,18 +64,18 @@ pub struct EnumUnitDeserializer<'a> {
 }
 
 pub struct EnumDeserializer<'de> {
-    input: &'de Vec<(String, Value)>,
+    input: &'de [(Arc<String>, Value)],
 }
 
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de Value) -> Self {
-        Deserializer { input }
+        Self { input }
     }
 }
 
 impl<'de> SeqDeserializer<'de> {
     pub fn new(input: &'de [Value]) -> Self {
-        SeqDeserializer {
+        Self {
             input: input.iter(),
         }
     }
@@ -82,17 +83,15 @@ impl<'de> SeqDeserializer<'de> {
 
 impl<'de> MapDeserializer<'de> {
     pub fn new(input: &'de HashMap<String, Value>) -> Self {
-        MapDeserializer {
-            input_keys: input.keys(), // input.keys().map(|k| Value::String(k.clone())).collect::<Vec<_>>().iter(),
+        Self {
+            input_keys: input.keys(),
             input_values: input.values(),
-            // keys: input.keys().map(|s| Value::String(s.to_owned())).collect::<Vec<Value>>(),
-            // values: input.values().map(|s| s.to_owned()).collect::<Vec<Value>>(),
         }
     }
 }
 
 impl<'de> StructDeserializer<'de> {
-    pub fn new(input: &'de [(String, Value)]) -> Self {
+    pub fn new(input: &'de [(Arc<String>, Value)]) -> Self {
         StructDeserializer {
             input: input.iter(),
             value: None,
@@ -102,13 +101,13 @@ impl<'de> StructDeserializer<'de> {
 
 impl<'a> EnumUnitDeserializer<'a> {
     pub fn new(input: &'a str) -> Self {
-        EnumUnitDeserializer { input }
+        Self { input }
     }
 }
 
 impl<'de> EnumDeserializer<'de> {
-    pub fn new(input: &'de Vec<(String, Value)>) -> Self {
-        EnumDeserializer { input }
+    pub fn new(input: &'de [(Arc<String>, Value)]) -> Self {
+        Self { input }
     }
 }
 
@@ -122,7 +121,7 @@ impl<'de> de::EnumAccess<'de> for EnumUnitDeserializer<'de> {
     {
         Ok((
             seed.deserialize(StringDeserializer {
-                input: self.input.to_owned(),
+                input: Arc::new(self.input.to_owned()),
             })?,
             self,
         ))
@@ -172,10 +171,10 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
     {
         self.input.first().map_or(
             Err(Error::custom("A record must have a least one field")),
-            |item| match (item.0.as_ref(), &item.1) {
-                ("type", Value::String(x)) => Ok((
+            |(key, value)| match (key.as_ref().as_str(), value) {
+                ("type", Value::String(s)) => Ok((
                     seed.deserialize(StringDeserializer {
-                        input: x.to_owned(),
+                        input: Arc::new(s.to_owned()),
                     })?,
                     self,
                 )),
@@ -295,7 +294,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
         V: Visitor<'de>,
     {
         match *self.input {
-            Value::String(ref s) => visitor.visit_str(s),
+            Value::String(ref s) => visitor.visit_borrowed_str(s),
             Value::Bytes(ref bytes) | Value::Fixed(_, ref bytes) => ::std::str::from_utf8(bytes)
                 .map_err(|e| Error::custom(e.to_string()))
                 .and_then(|s| visitor.visit_str(s)),
@@ -308,7 +307,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
         V: Visitor<'de>,
     {
         match *self.input {
-            Value::String(ref s) => visitor.visit_string(s.to_owned()),
+            Value::String(ref s) => visitor.visit_borrowed_str(s),
             Value::Bytes(ref bytes) | Value::Fixed(_, ref bytes) => {
                 String::from_utf8(bytes.to_owned())
                     .map_err(|e| Error::custom(e.to_string()))
@@ -426,8 +425,8 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        match *self.input {
-            Value::Map(ref items) => visitor.visit_map(MapDeserializer::new(items)),
+        match self.input {
+            Value::Map(items) => visitor.visit_map(MapDeserializer::new(items)),
             _ => Err(Error::custom("not a map")),
         }
     }
@@ -506,9 +505,9 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
         K: DeserializeSeed<'de>,
     {
         match self.input_keys.next() {
-            Some(ref key) => seed
+            Some(input) => seed
                 .deserialize(StringDeserializer {
-                    input: (*key).clone(),
+                    input: Arc::new(input.clone()),
                 })
                 .map(Some),
             None => Ok(None),
@@ -534,11 +533,10 @@ impl<'de> de::MapAccess<'de> for StructDeserializer<'de> {
         K: DeserializeSeed<'de>,
     {
         match self.input.next() {
-            Some(item) => {
-                let (ref field, ref value) = *item;
+            Some((input, ref value)) => {
                 self.value = Some(value);
                 seed.deserialize(StringDeserializer {
-                    input: field.clone(),
+                    input: input.clone(),
                 })
                 .map(Some)
             }
@@ -559,7 +557,7 @@ impl<'de> de::MapAccess<'de> for StructDeserializer<'de> {
 
 #[derive(Clone)]
 struct StringDeserializer {
-    input: String,
+    input: Arc<String>,
 }
 
 impl<'de> de::Deserializer<'de> for StringDeserializer {
@@ -569,7 +567,7 @@ impl<'de> de::Deserializer<'de> for StringDeserializer {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_string(self.input)
+        visitor.visit_str(self.input.as_ref())
     }
 
     forward_to_deserialize_any! {
@@ -688,8 +686,8 @@ mod tests {
     #[test]
     fn test_from_value() {
         let test = Value::Record(vec![
-            ("a".to_owned(), Value::Long(27)),
-            ("b".to_owned(), Value::String("foo".to_owned())),
+            (Arc::new("a".to_owned()), Value::Long(27)),
+            (Arc::new("b".to_owned()), Value::String("foo".to_owned())),
         ]);
         let expected = Test {
             a: 27,
@@ -700,13 +698,13 @@ mod tests {
 
         let test_inner = Value::Record(vec![
             (
-                "a".to_owned(),
+                Arc::new("a".to_owned()),
                 Value::Record(vec![
-                    ("a".to_owned(), Value::Long(27)),
-                    ("b".to_owned(), Value::String("foo".to_owned())),
+                    (Arc::new("a".to_owned()), Value::Long(27)),
+                    (Arc::new("b".to_owned()), Value::String("foo".to_owned())),
                 ]),
             ),
-            ("b".to_owned(), Value::Int(35)),
+            (Arc::new("b".to_owned()), Value::Int(35)),
         ]);
 
         let expected_inner = TestInner {
@@ -722,7 +720,10 @@ mod tests {
             a: UnitExternalEnum::Val1,
         };
 
-        let test = Value::Record(vec![("a".to_owned(), Value::Enum(0, "Val1".to_owned()))]);
+        let test = Value::Record(vec![(
+            Arc::new("a".to_owned()),
+            Value::Enum(0, Arc::new("Val1".to_owned())),
+        )]);
         let final_value: TestUnitExternalEnum = from_value(&test).unwrap();
         assert_eq!(
             final_value, expected,
@@ -734,8 +735,11 @@ mod tests {
         };
 
         let test = Value::Record(vec![(
-            "a".to_owned(),
-            Value::Record(vec![("t".to_owned(), Value::String("Val1".to_owned()))]),
+            Arc::new("a".to_owned()),
+            Value::Record(vec![(
+                Arc::new("t".to_owned()),
+                Value::String("Val1".to_owned()),
+            )]),
         )]);
         let final_value: TestUnitInternalEnum = from_value(&test).unwrap();
         assert_eq!(
@@ -747,8 +751,11 @@ mod tests {
         };
 
         let test = Value::Record(vec![(
-            "a".to_owned(),
-            Value::Record(vec![("t".to_owned(), Value::String("Val1".to_owned()))]),
+            Arc::new("a".to_owned()),
+            Value::Record(vec![(
+                Arc::new("t".to_owned()),
+                Value::String("Val1".to_owned()),
+            )]),
         )]);
         let final_value: TestUnitAdjacentEnum = from_value(&test).unwrap();
         assert_eq!(
@@ -759,7 +766,7 @@ mod tests {
             a: UnitUntaggedEnum::Val1,
         };
 
-        let test = Value::Record(vec![("a".to_owned(), Value::Null)]);
+        let test = Value::Record(vec![(Arc::new("a".to_owned()), Value::Null)]);
         let final_value: TestUnitUntaggedEnum = from_value(&test).unwrap();
         assert_eq!(
             final_value, expected,
@@ -774,11 +781,14 @@ mod tests {
         };
 
         let test = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::String("Double".to_owned())),
                 (
-                    "value".to_owned(),
+                    Arc::new("type".to_owned()),
+                    Value::String("Double".to_owned()),
+                ),
+                (
+                    Arc::new("value".to_owned()),
                     Value::Union(Box::new(Value::Double(64.0))),
                 ),
             ]),
@@ -797,14 +807,17 @@ mod tests {
         };
 
         let test = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::String("Val1".to_owned())),
                 (
-                    "value".to_owned(),
+                    Arc::new("type".to_owned()),
+                    Value::String("Val1".to_owned()),
+                ),
+                (
+                    Arc::new("value".to_owned()),
                     Value::Union(Box::new(Value::Record(vec![
-                        ("x".to_owned(), Value::Float(1.0)),
-                        ("y".to_owned(), Value::Float(2.0)),
+                        (Arc::new("x".to_owned()), Value::Float(1.0)),
+                        (Arc::new("y".to_owned()), Value::Float(2.0)),
                     ]))),
                 ),
             ]),
@@ -823,11 +836,14 @@ mod tests {
         };
 
         let test = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::String("Val1".to_owned())),
                 (
-                    "value".to_owned(),
+                    Arc::new("type".to_owned()),
+                    Value::String("Val1".to_owned()),
+                ),
+                (
+                    Arc::new("value".to_owned()),
                     Value::Union(Box::new(Value::Array(vec![
                         Value::Float(1.0),
                         Value::Float(2.0),

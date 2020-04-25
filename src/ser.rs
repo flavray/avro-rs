@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::error;
 use std::fmt;
 use std::iter::once;
+use std::sync::Arc;
 
 use serde::{
     ser::{self, Error as SerdeError},
@@ -30,13 +31,13 @@ pub struct MapSerializer {
 }
 
 pub struct StructSerializer {
-    fields: Vec<(String, Value)>,
+    fields: Vec<(Arc<String>, Value)>,
 }
 
 pub struct StructVariantSerializer<'a> {
     index: u32,
     variant: &'a str,
-    fields: Vec<(String, Value)>,
+    fields: Vec<(Arc<String>, Value)>,
 }
 
 /// Represents errors that could be encountered while serializing data
@@ -47,7 +48,7 @@ pub struct Error {
 
 impl ser::Error for Error {
     fn custom<T: fmt::Display>(msg: T) -> Self {
-        Error {
+        Self {
             message: msg.to_string(),
         }
     }
@@ -66,52 +67,44 @@ impl error::Error for Error {
 }
 
 impl SeqSerializer {
-    pub fn new(len: Option<usize>) -> SeqSerializer {
-        let items = match len {
-            Some(len) => Vec::with_capacity(len),
-            None => Vec::new(),
-        };
-
-        SeqSerializer { items }
+    pub fn new(len: Option<usize>) -> Self {
+        Self {
+            items: len.map_or_else(Vec::new, Vec::with_capacity),
+        }
     }
 }
 
 impl<'a> SeqVariantSerializer<'a> {
-    pub fn new(index: u32, variant: &'a str, len: Option<usize>) -> SeqVariantSerializer {
-        let items = match len {
-            Some(len) => Vec::with_capacity(len),
-            None => Vec::new(),
-        };
-        SeqVariantSerializer {
+    pub fn new(index: u32, variant: &'a str, len: Option<usize>) -> Self {
+        Self {
             index,
             variant,
-            items,
+            items: len.map_or_else(Vec::new, Vec::with_capacity),
         }
     }
 }
 
 impl MapSerializer {
-    pub fn new(len: Option<usize>) -> MapSerializer {
-        let (indices, values) = match len {
-            Some(len) => (HashMap::with_capacity(len), Vec::with_capacity(len)),
-            None => (HashMap::new(), Vec::new()),
-        };
+    pub fn new(len: Option<usize>) -> Self {
+        let (indices, values) = len.map_or_else(Default::default, |len| {
+            (HashMap::with_capacity(len), Vec::with_capacity(len))
+        });
 
-        MapSerializer { indices, values }
+        Self { indices, values }
     }
 }
 
 impl StructSerializer {
-    pub fn new(len: usize) -> StructSerializer {
-        StructSerializer {
+    pub fn new(len: usize) -> Self {
+        Self {
             fields: Vec::with_capacity(len),
         }
     }
 }
 
 impl<'a> StructVariantSerializer<'a> {
-    pub fn new(index: u32, variant: &'a str, len: usize) -> StructVariantSerializer {
-        StructVariantSerializer {
+    pub fn new(index: u32, variant: &'a str, len: usize) -> Self {
+        Self {
             index,
             variant,
             fields: Vec::with_capacity(len),
@@ -220,7 +213,7 @@ impl<'b> ser::Serializer for &'b mut Serializer {
         index: u32,
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Enum(index as i32, variant.to_string()))
+        Ok(Value::Enum(index as i32, Arc::new(variant.to_owned())))
     }
 
     fn serialize_newtype_struct<T: ?Sized>(
@@ -246,11 +239,11 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     {
         Ok(Value::Record(vec![
             (
-                "type".to_owned(),
-                Value::Enum(index as i32, variant.to_owned()),
+                Arc::new("type".to_owned()),
+                Value::Enum(index as i32, Arc::new(variant.to_owned())),
             ),
             (
-                "value".to_owned(),
+                Arc::new("value".to_owned()),
                 Value::Union(Box::new(value.serialize(self)?)),
             ),
         ]))
@@ -372,10 +365,10 @@ impl<'a> ser::SerializeSeq for SeqVariantSerializer<'a> {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Record(vec![
             (
-                "type".to_owned(),
-                Value::Enum(self.index as i32, self.variant.to_owned()),
+                Arc::new("type".to_owned()),
+                Value::Enum(self.index as i32, Arc::new(self.variant.to_owned())),
             ),
-            ("value".to_owned(), Value::Array(self.items)),
+            (Arc::new("value".to_owned()), Value::Array(self.items)),
         ]))
     }
 }
@@ -448,7 +441,7 @@ impl ser::SerializeStruct for StructSerializer {
         T: Serialize,
     {
         self.fields.push((
-            name.to_owned(),
+            Arc::new(name.to_owned()),
             value.serialize(&mut Serializer::default())?,
         ));
         Ok(())
@@ -472,7 +465,7 @@ impl<'a> ser::SerializeStructVariant for StructVariantSerializer<'a> {
         T: Serialize,
     {
         self.fields.push((
-            name.to_owned(),
+            Arc::new(name.to_owned()),
             value.serialize(&mut Serializer::default())?,
         ));
         Ok(())
@@ -481,11 +474,11 @@ impl<'a> ser::SerializeStructVariant for StructVariantSerializer<'a> {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Record(vec![
             (
-                "type".to_owned(),
-                Value::Enum(self.index as i32, self.variant.to_owned()),
+                Arc::new("type".to_owned()),
+                Value::Enum(self.index as i32, Arc::new(self.variant.to_owned())),
             ),
             (
-                "value".to_owned(),
+                Arc::new("value".to_owned()),
                 Value::Union(Box::new(Value::Record(self.fields))),
             ),
         ]))
@@ -702,8 +695,8 @@ mod tests {
             b: "foo".to_owned(),
         };
         let expected = Value::Record(vec![
-            ("a".to_owned(), Value::Long(27)),
-            ("b".to_owned(), Value::String("foo".to_owned())),
+            (Arc::new("a".to_owned()), Value::Long(27)),
+            (Arc::new("b".to_owned()), Value::String("foo".to_owned())),
         ]);
 
         assert_eq!(to_value(test.clone()).unwrap(), expected);
@@ -715,13 +708,13 @@ mod tests {
 
         let expected_inner = Value::Record(vec![
             (
-                "a".to_owned(),
+                Arc::new("a".to_owned()),
                 Value::Record(vec![
-                    ("a".to_owned(), Value::Long(27)),
-                    ("b".to_owned(), Value::String("foo".to_owned())),
+                    (Arc::new("a".to_owned()), Value::Long(27)),
+                    (Arc::new("b".to_owned()), Value::String("foo".to_owned())),
                 ]),
             ),
-            ("b".to_owned(), Value::Int(35)),
+            (Arc::new("b".to_owned()), Value::Int(35)),
         ]);
 
         assert_eq!(to_value(test_inner).unwrap(), expected_inner);
@@ -733,7 +726,10 @@ mod tests {
             a: UnitExternalEnum::Val1,
         };
 
-        let expected = Value::Record(vec![("a".to_owned(), Value::Enum(0, "Val1".to_owned()))]);
+        let expected = Value::Record(vec![(
+            Arc::new("a".to_owned()),
+            Value::Enum(0, Arc::new("Val1".to_owned())),
+        )]);
 
         assert_eq!(
             to_value(test).unwrap(),
@@ -746,8 +742,11 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
-            Value::Record(vec![("t".to_owned(), Value::String("Val1".to_owned()))]),
+            Arc::new("a".to_owned()),
+            Value::Record(vec![(
+                Arc::new("t".to_owned()),
+                Value::String("Val1".to_owned()),
+            )]),
         )]);
 
         assert_eq!(
@@ -761,8 +760,11 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
-            Value::Record(vec![("t".to_owned(), Value::String("Val1".to_owned()))]),
+            Arc::new("a".to_owned()),
+            Value::Record(vec![(
+                Arc::new("t".to_owned()),
+                Value::String("Val1".to_owned()),
+            )]),
         )]);
 
         assert_eq!(
@@ -775,7 +777,7 @@ mod tests {
             a: UnitUntaggedEnum::Val1,
         };
 
-        let expected = Value::Record(vec![("a".to_owned(), Value::Null)]);
+        let expected = Value::Record(vec![(Arc::new("a".to_owned()), Value::Null)]);
 
         assert_eq!(
             to_value(test).unwrap(),
@@ -791,11 +793,14 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::Enum(0, "Double".to_owned())),
                 (
-                    "value".to_owned(),
+                    Arc::new("type".to_owned()),
+                    Value::Enum(0, Arc::new("Double".to_owned())),
+                ),
+                (
+                    Arc::new("value".to_owned()),
                     Value::Union(Box::new(Value::Double(64.0))),
                 ),
             ]),
@@ -819,10 +824,10 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("t".to_owned(), Value::String("Double".to_owned())),
-                ("v".to_owned(), Value::Double(64.0)),
+                (Arc::new("t".to_owned()), Value::String("Double".to_owned())),
+                (Arc::new("v".to_owned()), Value::Double(64.0)),
             ]),
         )]);
 
@@ -836,7 +841,7 @@ mod tests {
             a: SingleValueUntaggedEnum::Double(64.0),
         };
 
-        let expected = Value::Record(vec![("a".to_owned(), Value::Double(64.0))]);
+        let expected = Value::Record(vec![(Arc::new("a".to_owned()), Value::Double(64.0))]);
 
         assert_eq!(
             to_value(test).unwrap(),
@@ -851,14 +856,17 @@ mod tests {
             a: StructExternalEnum::Val1 { x: 1.0, y: 2.0 },
         };
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::Enum(0, "Val1".to_owned())),
                 (
-                    "value".to_owned(),
+                    Arc::new("type".to_owned()),
+                    Value::Enum(0, Arc::new("Val1".to_owned())),
+                ),
+                (
+                    Arc::new("value".to_owned()),
                     Value::Union(Box::new(Value::Record(vec![
-                        ("x".to_owned(), Value::Float(1.0)),
-                        ("y".to_owned(), Value::Float(2.0)),
+                        (Arc::new("x".to_owned()), Value::Float(1.0)),
+                        (Arc::new("y".to_owned()), Value::Float(2.0)),
                     ]))),
                 ),
             ]),
@@ -876,11 +884,14 @@ mod tests {
             a: StructInternalEnum::Val1 { x: 1.0, y: 2.0 },
         };
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::String("Val1".to_owned())),
-                ("x".to_owned(), Value::Float(1.0)),
-                ("y".to_owned(), Value::Float(2.0)),
+                (
+                    Arc::new("type".to_owned()),
+                    Value::String("Val1".to_owned()),
+                ),
+                (Arc::new("x".to_owned()), Value::Float(1.0)),
+                (Arc::new("y".to_owned()), Value::Float(2.0)),
             ]),
         )]);
 
@@ -894,14 +905,14 @@ mod tests {
             a: StructAdjacentEnum::Val1 { x: 1.0, y: 2.0 },
         };
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("t".to_owned(), Value::String("Val1".to_owned())),
+                (Arc::new("t".to_owned()), Value::String("Val1".to_owned())),
                 (
-                    "v".to_owned(),
+                    Arc::new("v".to_owned()),
                     Value::Record(vec![
-                        ("x".to_owned(), Value::Float(1.0)),
-                        ("y".to_owned(), Value::Float(2.0)),
+                        (Arc::new("x".to_owned()), Value::Float(1.0)),
+                        (Arc::new("y".to_owned()), Value::Float(2.0)),
                     ]),
                 ),
             ]),
@@ -917,10 +928,10 @@ mod tests {
             a: StructUntaggedEnum::Val1 { x: 1.0, y: 2.0 },
         };
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("x".to_owned(), Value::Float(1.0)),
-                ("y".to_owned(), Value::Float(2.0)),
+                (Arc::new("x".to_owned()), Value::Float(1.0)),
+                (Arc::new("y".to_owned()), Value::Float(2.0)),
             ]),
         )]);
 
@@ -938,11 +949,11 @@ mod tests {
             },
         };
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("x".to_owned(), Value::Float(1.0)),
-                ("y".to_owned(), Value::Float(2.0)),
-                ("z".to_owned(), Value::Float(3.0)),
+                (Arc::new("x".to_owned()), Value::Float(1.0)),
+                (Arc::new("y".to_owned()), Value::Float(2.0)),
+                (Arc::new("z".to_owned()), Value::Float(3.0)),
             ]),
         )]);
 
@@ -960,11 +971,14 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("type".to_owned(), Value::Enum(1, "Val2".to_owned())),
                 (
-                    "value".to_owned(),
+                    Arc::new("type".to_owned()),
+                    Value::Enum(1, Arc::new("Val2".to_owned())),
+                ),
+                (
+                    Arc::new("value".to_owned()),
                     Value::Array(vec![
                         Value::Union(Box::new(Value::Float(1.0))),
                         Value::Union(Box::new(Value::Float(2.0))),
@@ -985,11 +999,11 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Record(vec![
-                ("t".to_owned(), Value::String("Val1".to_owned())),
+                (Arc::new("t".to_owned()), Value::String("Val1".to_owned())),
                 (
-                    "v".to_owned(),
+                    Arc::new("v".to_owned()),
                     Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]),
                 ),
             ]),
@@ -1006,7 +1020,7 @@ mod tests {
         };
 
         let expected = Value::Record(vec![(
-            "a".to_owned(),
+            Arc::new("a".to_owned()),
             Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]),
         )]);
 

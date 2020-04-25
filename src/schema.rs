@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
+use std::sync::Arc;
 
 use digest::Digest;
 use failure::{Error, Fail};
@@ -97,7 +98,7 @@ pub enum Schema {
     Enum {
         name: Name,
         doc: Documentation,
-        symbols: Vec<String>,
+        symbols: Vec<Arc<String>>,
     },
     /// A `fixed` Avro schema.
     Fixed { name: Name, size: usize },
@@ -182,7 +183,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#names)
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Name {
-    pub name: String,
+    pub name: Arc<String>,
     pub namespace: Option<String>,
     pub aliases: Option<Vec<String>>,
 }
@@ -193,9 +194,9 @@ pub type Documentation = Option<String>;
 impl Name {
     /// Create a new `Name`.
     /// No `namespace` nor `aliases` will be defined.
-    pub fn new(name: &str) -> Name {
-        Name {
-            name: name.to_owned(),
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: Arc::new(name.to_owned()),
             namespace: None,
             aliases: None,
         }
@@ -206,22 +207,19 @@ impl Name {
         let name = complex
             .name()
             .ok_or_else(|| ParseSchemaError::new("No `name` field"))?;
-
         let namespace = complex.string("namespace");
-
-        let aliases: Option<Vec<String>> = complex
+        let aliases = complex
             .get("aliases")
             .and_then(|aliases| aliases.as_array())
             .and_then(|aliases| {
                 aliases
                     .iter()
-                    .map(|alias| alias.as_str())
-                    .map(|alias| alias.map(|a| a.to_string()))
-                    .collect::<Option<_>>()
+                    .map(|alias| alias.as_str().map(ToString::to_string))
+                    .collect()
             });
 
-        Ok(Name {
-            name,
+        Ok(Self {
+            name: Arc::new(name),
             namespace,
             aliases,
         })
@@ -233,7 +231,7 @@ impl Name {
     /// [Avro specification](https://avro.apache.org/docs/current/spec.html#names)
     pub fn fullname(&self, default_namespace: Option<&str>) -> String {
         if self.name.contains('.') {
-            self.name.clone()
+            self.name.as_str().to_string()
         } else {
             let namespace = self
                 .namespace
@@ -243,7 +241,7 @@ impl Name {
 
             match namespace {
                 Some(ref namespace) => format!("{}.{}", namespace, self.name),
-                None => self.name.clone(),
+                None => self.name.as_str().to_string(),
             }
         }
     }
@@ -253,7 +251,7 @@ impl Name {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecordField {
     /// Name of the field.
-    pub name: String,
+    pub name: Arc<String>,
     /// Documentation of the field.
     pub doc: Documentation,
     /// Default value of the field.
@@ -302,7 +300,7 @@ impl RecordField {
             .unwrap_or_else(|| RecordFieldOrder::Ascending);
 
         Ok(RecordField {
-            name,
+            name: Arc::new(name),
             doc: field.doc(),
             default,
             schema,
@@ -598,9 +596,7 @@ impl Schema {
     fn parse_record(complex: &Map<String, Value>) -> Result<Self, Error> {
         let name = Name::parse(complex)?;
 
-        let mut lookup = HashMap::new();
-
-        let fields: Vec<RecordField> = complex
+        let fields: Vec<_> = complex
             .get("fields")
             .and_then(|fields| fields.as_array())
             .ok_or_else(|| ParseSchemaError::new("No `fields` in record").into())
@@ -612,10 +608,10 @@ impl Schema {
                     .map(|(position, field)| RecordField::parse(field, position))
                     .collect::<Result<_, _>>()
             })?;
-
-        for field in &fields {
-            lookup.insert(field.name.clone(), field.position);
-        }
+        let lookup = fields
+            .iter()
+            .map(|field| ((*field.name).clone(), field.position))
+            .collect();
 
         Ok(Schema::Record {
             name,
@@ -637,7 +633,7 @@ impl Schema {
             .and_then(|symbols| {
                 symbols
                     .iter()
-                    .map(|symbol| symbol.as_str().map(|s| s.to_string()))
+                    .map(|symbol| symbol.as_str().map(|s| Arc::new(s.to_string())))
                     .collect::<Option<_>>()
                     .ok_or_else(|| ParseSchemaError::new("Unable to parse `symbols` in enum"))
             })?;
@@ -741,7 +737,7 @@ impl Serialize for Schema {
                 if let Some(ref n) = name.namespace {
                     map.serialize_entry("namespace", n)?;
                 }
-                map.serialize_entry("name", &name.name)?;
+                map.serialize_entry("name", name.name.as_str())?;
                 if let Some(ref docstr) = doc {
                     map.serialize_entry("doc", docstr)?;
                 }
@@ -758,14 +754,17 @@ impl Serialize for Schema {
             } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "enum")?;
-                map.serialize_entry("name", &name.name)?;
-                map.serialize_entry("symbols", symbols)?;
+                map.serialize_entry("name", name.name.as_str())?;
+                map.serialize_entry(
+                    "symbols",
+                    &symbols.iter().map(|sym| sym.as_str()).collect::<Vec<_>>(),
+                )?;
                 map.end()
             }
             Schema::Fixed { ref name, ref size } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "fixed")?;
-                map.serialize_entry("name", &name.name)?;
+                map.serialize_entry("name", name.name.as_str())?;
                 map.serialize_entry("size", size)?;
                 map.end()
             }
@@ -840,7 +839,7 @@ impl Serialize for RecordField {
         S: Serializer,
     {
         let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("name", &self.name)?;
+        map.serialize_entry("name", self.name.as_ref())?;
         map.serialize_entry("type", &self.schema)?;
 
         if let Some(ref default) = self.default {
@@ -1048,7 +1047,7 @@ mod tests {
             doc: None,
             fields: vec![
                 RecordField {
-                    name: "a".to_string(),
+                    name: Arc::new("a".to_owned()),
                     doc: None,
                     default: Some(Value::Number(42i64.into())),
                     schema: Schema::Long,
@@ -1056,7 +1055,7 @@ mod tests {
                     position: 0,
                 },
                 RecordField {
-                    name: "b".to_string(),
+                    name: Arc::new("b".to_owned()),
                     doc: None,
                     default: None,
                     schema: Schema::String,
@@ -1080,10 +1079,10 @@ mod tests {
             name: Name::new("Suit"),
             doc: None,
             symbols: vec![
-                "diamonds".to_owned(),
-                "spades".to_owned(),
-                "clubs".to_owned(),
-                "hearts".to_owned(),
+                Arc::new("diamonds".to_owned()),
+                Arc::new("spades".to_owned()),
+                Arc::new("clubs".to_owned()),
+                Arc::new("hearts".to_owned()),
             ],
         };
 

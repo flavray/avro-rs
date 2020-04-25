@@ -67,12 +67,12 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         }
         Value::Uuid(uuid) => encode_bytes(&uuid.to_string(), buffer),
         Value::Bytes(bytes) => encode_bytes(bytes, buffer),
-        Value::String(s) => match *schema {
+        Value::String(ref s) => match *schema {
             Schema::String => {
                 encode_bytes(s, buffer);
             }
             Schema::Enum { ref symbols, .. } => {
-                if let Some(index) = symbols.iter().position(|item| item == s) {
+                if let Some(index) = symbols.iter().position(|item| item.as_ref() == s) {
                     encode_int(index as i32, buffer);
                 }
             }

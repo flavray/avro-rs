@@ -1,5 +1,6 @@
 //! Port of https://github.com/apache/avro/blob/release-1.9.1/lang/py/test/test_io.py
 use std::io::Cursor;
+use std::sync::Arc;
 
 use avro_rs::{
     from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, ValidationError,
@@ -17,11 +18,11 @@ lazy_static! {
         (r#""float""#, Value::Float(1234.0)),
         (r#""double""#, Value::Double(1234.0)),
         (r#"{"type": "fixed", "name": "Test", "size": 1}"#, Value::Fixed(1, vec!['B' as u8])),
-        (r#"{"type": "enum", "name": "Test", "symbols": ["A", "B"]}"#, Value::Enum(1, "B".to_string())),
+        (r#"{"type": "enum", "name": "Test", "symbols": ["A", "B"]}"#, Value::Enum(1, Arc::new("B".to_string()))),
         (r#"{"type": "array", "items": "long"}"#, Value::Array(vec![Value::Long(1), Value::Long(3), Value::Long(2)])),
         (r#"{"type": "map", "values": "long"}"#, Value::Map([("a".to_string(), Value::Long(1i64)), ("b".to_string(), Value::Long(3i64)), ("c".to_string(), Value::Long(2i64))].iter().cloned().collect())),
         (r#"["string", "null", "long"]"#, Value::Union(Box::new(Value::Null))),
-        (r#"{"type": "record", "name": "Test", "fields": [{"name": "f", "type": "long"}]}"#, Value::Record(vec![("f".to_string(), Value::Long(1))]))
+        (r#"{"type": "record", "name": "Test", "fields": [{"name": "f", "type": "long"}]}"#, Value::Record(vec![(Arc::new("f".to_string()), Value::Long(1))]))
     ];
 
     static ref BINARY_ENCODINGS: Vec<(i64, Vec<u8>)> = vec![
@@ -48,11 +49,11 @@ lazy_static! {
         (r#""double""#, "1.1", Value::Double(1.1)),
         // TODO: (#96) investigate why this is failing
         //(r#"{"type": "fixed", "name": "F", "size": 2}"#, r#""\u00FF\u00FF""#, Value::Bytes(vec![0xff, 0xff])),
-        (r#"{"type": "enum", "name": "F", "symbols": ["FOO", "BAR"]}"#, r#""FOO""#, Value::Enum(0, "FOO".to_string())),
+        (r#"{"type": "enum", "name": "F", "symbols": ["FOO", "BAR"]}"#, r#""FOO""#, Value::Enum(0, Arc::new("FOO".to_string()))),
         (r#"{"type": "array", "items": "int"}"#, "[1, 2, 3]", Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])),
         (r#"{"type": "map", "values": "int"}"#, r#"{"a": 1, "b": 2}"#, Value::Map([("a".to_string(), Value::Int(1)), ("b".to_string(), Value::Int(2))].iter().cloned().collect())),
         (r#"["int", "null"]"#, "5", Value::Union(Box::new(Value::Int(5)))),
-        (r#"{"type": "record", "name": "F", "fields": [{"name": "A", "type": "int"}]}"#, r#"{"A": 5}"#,Value::Record(vec![("A".to_string(), Value::Int(5))])),
+        (r#"{"type": "record", "name": "F", "fields": [{"name": "A", "type": "int"}]}"#, r#"{"A": 5}"#,Value::Record(vec![(Arc::new("A".to_string()), Value::Int(5))])),
     ];
 
     static ref LONG_RECORD_SCHEMA: Schema = Schema::parse_str(r#"
@@ -72,13 +73,13 @@ lazy_static! {
     "#).unwrap();
 
     static ref LONG_RECORD_DATUM: Value = Value::Record(vec![
-        ("A".to_string(), Value::Int(1)),
-        ("B".to_string(), Value::Int(2)),
-        ("C".to_string(), Value::Int(3)),
-        ("D".to_string(), Value::Int(4)),
-        ("E".to_string(), Value::Int(5)),
-        ("F".to_string(), Value::Int(6)),
-        ("G".to_string(), Value::Int(7)),
+        (Arc::new("A".to_string()), Value::Int(1)),
+        (Arc::new("B".to_string()), Value::Int(2)),
+        (Arc::new("C".to_string()), Value::Int(3)),
+        (Arc::new("D".to_string()), Value::Int(4)),
+        (Arc::new("E".to_string()), Value::Int(5)),
+        (Arc::new("F".to_string()), Value::Int(6)),
+        (Arc::new("G".to_string()), Value::Int(7)),
     ]);
 }
 
@@ -158,7 +159,7 @@ fn test_unknown_symbol() {
     let reader_schema =
         Schema::parse_str(r#"{"type": "enum", "name": "Test", "symbols": ["BAR", "BAZ"]}"#)
             .unwrap();
-    let original_value = Value::Enum(0, "FOO".to_string());
+    let original_value = Value::Enum(0, Arc::new("FOO".to_string()));
     let encoded = to_avro_datum(&writer_schema, original_value).unwrap();
     let decoded = from_avro_datum(
         &writer_schema,
@@ -182,7 +183,7 @@ fn test_default_value() {
             field_type, default_json
         ))
         .unwrap();
-        let datum_to_read = Value::Record(vec![("H".to_string(), default_datum.clone())]);
+        let datum_to_read = Value::Record(vec![(Arc::new("H".to_string()), default_datum.clone())]);
         let encoded = to_avro_datum(&LONG_RECORD_SCHEMA, LONG_RECORD_DATUM.clone()).unwrap();
         let datum_read = from_avro_datum(
             &LONG_RECORD_SCHEMA,
@@ -241,8 +242,8 @@ fn test_projection() {
     )
     .unwrap();
     let datum_to_read = Value::Record(vec![
-        ("E".to_string(), Value::Int(5)),
-        ("F".to_string(), Value::Int(6)),
+        (Arc::new("E".to_string()), Value::Int(5)),
+        (Arc::new("F".to_string()), Value::Int(6)),
     ]);
     let encoded = to_avro_datum(&LONG_RECORD_SCHEMA, LONG_RECORD_DATUM.clone()).unwrap();
     let datum_read = from_avro_datum(
@@ -270,8 +271,8 @@ fn test_field_order() {
     )
     .unwrap();
     let datum_to_read = Value::Record(vec![
-        ("F".to_string(), Value::Int(6)),
-        ("E".to_string(), Value::Int(5)),
+        (Arc::new("F".to_string()), Value::Int(6)),
+        (Arc::new("E".to_string()), Value::Int(5)),
     ]);
     let encoded = to_avro_datum(&LONG_RECORD_SCHEMA, LONG_RECORD_DATUM.clone()).unwrap();
     let datum_read = from_avro_datum(
@@ -299,8 +300,11 @@ fn test_type_exception() -> Result<(), String> {
     )
     .unwrap();
     let datum_to_write = Value::Record(vec![
-        ("E".to_string(), Value::Int(5)),
-        ("F".to_string(), Value::String(String::from("Bad"))),
+        (Arc::new("E".to_string()), Value::Int(5)),
+        (
+            Arc::new("F".to_string()),
+            Value::String(String::from("Bad")),
+        ),
     ]);
     let encoded = to_avro_datum(&writer_schema, datum_to_write);
     match encoded {

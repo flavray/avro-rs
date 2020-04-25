@@ -613,6 +613,7 @@ mod tests {
     use crate::reader::Reader;
     use crate::schema::Schema;
     use crate::types::{Record, Value};
+    use std::sync::Arc;
 
     //TODO: move where it fits better
     #[test]
@@ -659,9 +660,12 @@ mod tests {
         assert_eq!(
             reader.next().unwrap().unwrap(),
             Value::Record(vec![
-                ("a".to_string(), Value::Long(27)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(1, "spades".to_string())),
+                (Arc::new("a".to_string()), Value::Long(27)),
+                (Arc::new("b".to_string()), Value::String("foo".to_string())),
+                (
+                    Arc::new("c".to_string()),
+                    Value::Enum(1, Arc::new("spades".to_string()))
+                ),
             ])
         );
         assert!(reader.next().is_none());
@@ -702,9 +706,12 @@ mod tests {
         assert_eq!(
             reader.next().unwrap().unwrap(),
             Value::Record(vec![
-                ("a".to_string(), Value::Long(27)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(2, "clubs".to_string())),
+                (Arc::new("a".to_string()), Value::Long(27)),
+                (Arc::new("b".to_string()), Value::String("foo".to_string())),
+                (
+                    Arc::new("c".to_string()),
+                    Value::Enum(2, Arc::new("clubs".to_string()))
+                ),
             ])
         );
         assert!(reader.next().is_none());
@@ -801,9 +808,12 @@ mod tests {
         assert_eq!(
             reader.next().unwrap().unwrap(),
             Value::Record(vec![
-                ("a".to_string(), Value::Long(27)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(2, "clubs".to_string())),
+                (Arc::new("a".to_string()), Value::Long(27)),
+                (Arc::new("b".to_string()), Value::String("foo".to_string())),
+                (
+                    Arc::new("c".to_string()),
+                    Value::Enum(2, Arc::new("clubs".to_string()))
+                ),
             ])
         );
     }
