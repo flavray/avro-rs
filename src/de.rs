@@ -50,13 +50,13 @@ struct SeqDeserializer<'de> {
 }
 
 struct MapDeserializer<'de> {
-    input_keys: Keys<'de, String, Value>,
-    input_values: Values<'de, String, Value>,
+    keys: Keys<'de, String, Value>,
+    values: Values<'de, String, Value>,
 }
 
 struct StructDeserializer<'de> {
     input: Iter<'de, (Arc<String>, Value)>,
-    value: Option<&'de Value>,
+    current_value: Option<&'de Value>,
 }
 
 pub struct EnumUnitDeserializer<'a> {
@@ -84,8 +84,8 @@ impl<'de> SeqDeserializer<'de> {
 impl<'de> MapDeserializer<'de> {
     pub fn new(input: &'de HashMap<String, Value>) -> Self {
         Self {
-            input_keys: input.keys(),
-            input_values: input.values(),
+            keys: input.keys(),
+            values: input.values(),
         }
     }
 }
@@ -94,7 +94,7 @@ impl<'de> StructDeserializer<'de> {
     pub fn new(input: &'de [(Arc<String>, Value)]) -> Self {
         StructDeserializer {
             input: input.iter(),
-            value: None,
+            current_value: None,
         }
     }
 }
@@ -500,7 +500,7 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
     where
         K: DeserializeSeed<'de>,
     {
-        self.input_keys
+        self.keys
             .next()
             .map(|input| seed.deserialize(BorrowedStringDeserializer { input }))
             .transpose()
@@ -511,7 +511,7 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
         V: DeserializeSeed<'de>,
     {
         let value = self
-            .input_values
+            .values
             .next()
             .ok_or_else(|| Error::custom("should not happen - too many values"))?;
         seed.deserialize(&Deserializer::new(value))
@@ -528,7 +528,7 @@ impl<'de> de::MapAccess<'de> for StructDeserializer<'de> {
         self.input
             .next()
             .map(|(input, value)| {
-                self.value = Some(value);
+                self.current_value = Some(value);
                 seed.deserialize(BorrowedStringDeserializer { input })
             })
             .transpose()
@@ -539,7 +539,7 @@ impl<'de> de::MapAccess<'de> for StructDeserializer<'de> {
         V: DeserializeSeed<'de>,
     {
         let value = self
-            .value
+            .current_value
             .take()
             .ok_or_else(|| Error::custom("should not happen - too many values"))?;
         seed.deserialize(&Deserializer::new(value))
