@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use failure::Error;
 use uuid::Uuid;
@@ -171,16 +172,17 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, Error> 
             // Benchmarks indicate ~10% improvement using this method.
             let mut items = Vec::with_capacity(fields.len());
             for field in fields.iter() {
-                items.push((field.name.clone(), decode(&field.schema, reader)?));
+                items.push((Arc::clone(&field.name), decode(&field.schema, reader)?));
             }
             Ok(Value::Record(items))
         }
         Schema::Enum { ref symbols, .. } => {
             if let Value::Int(index) = decode_int(reader)? {
-                let symbol = symbols
-                    .get(usize::try_from(index)?)
-                    .ok_or_else(|| DecodeError::new("enum symbol index out of bounds"))?
-                    .clone();
+                let symbol = Arc::clone(
+                    symbols
+                        .get(usize::try_from(index)?)
+                        .ok_or_else(|| DecodeError::new("enum symbol index out of bounds"))?,
+                );
                 Ok(Value::Enum(index, symbol))
             } else {
                 Err(DecodeError::new("enum symbol not found").into())
