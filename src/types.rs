@@ -202,7 +202,7 @@ pub struct Record<'a> {
     /// Ordered according to the fields in the schema given to create this
     /// `Record` object. Any unset field defaults to `Value::Null`.
     pub fields: Vec<(Arc<String>, Value)>,
-    schema_lookup: &'a HashMap<String, usize>,
+    lookup: &'a HashMap<String, usize>,
 }
 
 impl<'a> Record<'a> {
@@ -210,17 +210,13 @@ impl<'a> Record<'a> {
     ///
     /// If the `Schema` is not a `Schema::Record` variant, `None` will be returned.
     pub fn new(schema: &'a Schema) -> Option<Self> {
-        match *schema {
-            Schema::Record {
-                fields: ref schema_fields,
-                lookup: ref schema_lookup,
-                ..
-            } => Some(Self {
-                fields: schema_fields
+        match schema {
+            Schema::Record { fields, lookup, .. } => Some(Self {
+                fields: fields
                     .iter()
                     .map(|field| (field.name.clone(), Value::Null))
                     .collect(),
-                schema_lookup,
+                lookup,
             }),
             _ => None,
         }
