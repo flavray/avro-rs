@@ -65,6 +65,8 @@ pub enum Value {
     /// of its corresponding schema.
     /// This allows schema-less encoding, as well as schema resolution while
     /// reading values.
+    ///
+    /// The symbol's type is `Arc<String>` to allow shared ownership with the symbol in the schema.
     Enum(i32, Arc<String>),
     /// An `union` Avro value.
     Union(Box<Value>),
