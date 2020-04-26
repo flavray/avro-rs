@@ -120,9 +120,7 @@ impl<'de> de::EnumAccess<'de> for EnumUnitDeserializer<'de> {
         V: DeserializeSeed<'de>,
     {
         Ok((
-            seed.deserialize(StringDeserializer {
-                input: Arc::new(self.input.to_owned()),
-            })?,
+            seed.deserialize(BorrowedStringDeserializer { input: self.input })?,
             self,
         ))
     }
@@ -172,10 +170,8 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'de> {
         self.input.first().map_or(
             Err(Error::custom("A record must have a least one field")),
             |(key, value)| match (key.as_ref().as_str(), value) {
-                ("type", Value::String(s)) => Ok((
-                    seed.deserialize(StringDeserializer {
-                        input: Arc::new(s.to_owned()),
-                    })?,
+                ("type", Value::String(input)) => Ok((
+                    seed.deserialize(BorrowedStringDeserializer { input })?,
                     self,
                 )),
                 (field, Value::String(_)) => Err(Error::custom(format!(
@@ -490,10 +486,10 @@ impl<'de> de::SeqAccess<'de> for SeqDeserializer<'de> {
     where
         T: DeserializeSeed<'de>,
     {
-        match self.input.next() {
-            Some(item) => seed.deserialize(&Deserializer::new(&item)).map(Some),
-            None => Ok(None),
-        }
+        self.input
+            .next()
+            .map(|item| seed.deserialize(&Deserializer::new(&item)))
+            .transpose()
     }
 }
 
@@ -504,24 +500,21 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
     where
         K: DeserializeSeed<'de>,
     {
-        match self.input_keys.next() {
-            Some(input) => seed
-                .deserialize(StringDeserializer {
-                    input: Arc::new(input.clone()),
-                })
-                .map(Some),
-            None => Ok(None),
-        }
+        self.input_keys
+            .next()
+            .map(|input| seed.deserialize(BorrowedStringDeserializer { input }))
+            .transpose()
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
     where
         V: DeserializeSeed<'de>,
     {
-        match self.input_values.next() {
-            Some(ref value) => seed.deserialize(&Deserializer::new(value)),
-            None => Err(Error::custom("should not happen - too many values")),
-        }
+        let value = self
+            .input_values
+            .next()
+            .ok_or_else(|| Error::custom("should not happen - too many values"))?;
+        seed.deserialize(&Deserializer::new(value))
     }
 }
 
@@ -532,35 +525,32 @@ impl<'de> de::MapAccess<'de> for StructDeserializer<'de> {
     where
         K: DeserializeSeed<'de>,
     {
-        match self.input.next() {
-            Some((input, ref value)) => {
+        self.input
+            .next()
+            .map(|(input, value)| {
                 self.value = Some(value);
-                seed.deserialize(StringDeserializer {
-                    input: input.clone(),
-                })
-                .map(Some)
-            }
-            None => Ok(None),
-        }
+                seed.deserialize(BorrowedStringDeserializer { input })
+            })
+            .transpose()
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
     where
         V: DeserializeSeed<'de>,
     {
-        match self.value.take() {
-            Some(value) => seed.deserialize(&Deserializer::new(value)),
-            None => Err(Error::custom("should not happen - too many values")),
-        }
+        let value = self
+            .value
+            .take()
+            .ok_or_else(|| Error::custom("should not happen - too many values"))?;
+        seed.deserialize(&Deserializer::new(value))
     }
 }
 
-#[derive(Clone)]
-struct StringDeserializer {
-    input: Arc<String>,
+struct BorrowedStringDeserializer<'input> {
+    input: &'input str,
 }
 
-impl<'de> de::Deserializer<'de> for StringDeserializer {
+impl<'de> de::Deserializer<'de> for BorrowedStringDeserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
