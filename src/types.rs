@@ -231,7 +231,7 @@ impl<'a> Record<'a> {
     where
         V: ToAvro,
     {
-        if let Some(&position) = self.schema_lookup.get(field) {
+        if let Some(&position) = self.lookup.get(field) {
             self.fields[position].1 = value.avro()
         }
     }
