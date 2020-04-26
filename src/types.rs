@@ -99,7 +99,6 @@ pub enum Value {
     /// Avro Duration. An amount of time defined by months, days and milliseconds.
     Duration(Duration),
     /// Universally unique identifier.
-    /// Universally unique identifier.
     Uuid(Uuid),
 }
 
