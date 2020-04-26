@@ -183,7 +183,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#names)
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Name {
-    pub name: Arc<String>,
+    pub name: String,
     pub namespace: Option<String>,
     pub aliases: Option<Vec<String>>,
 }
@@ -196,7 +196,7 @@ impl Name {
     /// No `namespace` nor `aliases` will be defined.
     pub fn new(name: &str) -> Self {
         Self {
-            name: Arc::new(name.to_owned()),
+            name: name.to_owned(),
             namespace: None,
             aliases: None,
         }
@@ -219,7 +219,7 @@ impl Name {
             });
 
         Ok(Self {
-            name: Arc::new(name),
+            name,
             namespace,
             aliases,
         })
