@@ -2,11 +2,10 @@
 use std::io::{Read, Write};
 use std::str::FromStr;
 
-use failure::Error;
 use libflate::deflate::{Decoder, Encoder};
 
+use crate::errors::AvroError;
 use crate::types::Value;
-use crate::util::DecodeError;
 
 /// The compression codec used to compress blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,7 +39,7 @@ impl From<Codec> for Value {
 }
 
 impl FromStr for Codec {
-    type Err = DecodeError;
+    type Err = AvroError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -48,19 +47,20 @@ impl FromStr for Codec {
             "deflate" => Ok(Codec::Deflate),
             #[cfg(feature = "snappy")]
             "snappy" => Ok(Codec::Snappy),
-            _ => Err(DecodeError::new("unrecognized codec")),
+            _ => Err(AvroError::DecodeError("unrecognized codec".to_string())),
         }
     }
 }
 
 impl Codec {
     /// Compress a stream of bytes in-place.
-    pub fn compress(self, stream: &mut Vec<u8>) -> Result<(), Error> {
+    pub fn compress(self, stream: &mut Vec<u8>) -> Result<(), AvroError> {
         match self {
             Codec::Null => (),
             Codec::Deflate => {
                 let mut encoder = Encoder::new(Vec::new());
                 encoder.write_all(stream)?;
+                // Deflate errors seem to just be io::Error
                 *stream = encoder.finish().into_result()?;
             }
             #[cfg(feature = "snappy")]
@@ -83,7 +83,7 @@ impl Codec {
     }
 
     /// Decompress a stream of bytes in-place.
-    pub fn decompress(self, stream: &mut Vec<u8>) -> Result<(), Error> {
+    pub fn decompress(self, stream: &mut Vec<u8>) -> Result<(), AvroError> {
         *stream = match self {
             Codec::Null => return Ok(()),
             Codec::Deflate => {
@@ -104,7 +104,7 @@ impl Codec {
                 let actual_crc = crc::crc32::checksum_ieee(&decoded);
 
                 if expected_crc != actual_crc {
-                    return Err(DecodeError::new(format!(
+                    return Err(AvroError::DecodeError(format!(
                         "bad Snappy CRC32; expected {:x} but got {:x}",
                         expected_crc, actual_crc
                     ))

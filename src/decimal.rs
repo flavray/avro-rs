@@ -1,4 +1,4 @@
-use failure::{Error, Fail};
+use crate::errors::AvroError;
 use num_bigint::BigInt;
 
 #[derive(Debug, Clone)]
@@ -15,38 +15,33 @@ impl PartialEq for Decimal {
     }
 }
 
-#[derive(Fail, Debug)]
-#[fail(display = "Decimal sign extension error: {}", _0)]
-pub struct SignExtendError(&'static str, usize, usize);
-
 impl Decimal {
     pub(crate) fn len(&self) -> usize {
         self.len
     }
 
-    fn to_vec(&self) -> Result<Vec<u8>, Error> {
+    fn to_vec(&self) -> Result<Vec<u8>, AvroError> {
         self.to_sign_extended_bytes_with_len(self.len)
     }
 
-    pub(crate) fn to_sign_extended_bytes_with_len(&self, len: usize) -> Result<Vec<u8>, Error> {
+    pub(crate) fn to_sign_extended_bytes_with_len(&self, len: usize) -> Result<Vec<u8>, AvroError> {
         let sign_byte = 0xFF * u8::from(self.value.sign() == num_bigint::Sign::Minus);
         let mut decimal_bytes = vec![sign_byte; len];
         let raw_bytes = self.value.to_signed_bytes_be();
         let num_raw_bytes = raw_bytes.len();
-        let start_byte_index = len.checked_sub(num_raw_bytes).ok_or_else(|| {
-            SignExtendError(
-                "number of bytes requested for sign extension {} is less than the number of bytes needed to decode {}",
-                len,
-                num_raw_bytes,
-            )
-        })?;
+        let start_byte_index =
+            len.checked_sub(num_raw_bytes)
+                .ok_or_else(|| AvroError::SignExtendError {
+                    requested: len,
+                    needed: num_raw_bytes,
+                })?;
         decimal_bytes[start_byte_index..].copy_from_slice(&raw_bytes);
         Ok(decimal_bytes)
     }
 }
 
 impl std::convert::TryFrom<&Decimal> for Vec<u8> {
-    type Error = Error;
+    type Error = AvroError;
 
     fn try_from(decimal: &Decimal) -> Result<Self, Self::Error> {
         decimal.to_vec()

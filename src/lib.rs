@@ -409,8 +409,7 @@
 //! quick reference of the library interface:
 //!
 //! ```
-//! use avro_rs::{Codec, Reader, Schema, Writer, from_value, types::Record};
-//! use failure::Error;
+//! use avro_rs::{Codec, Reader, Schema, Writer, from_value, types::Record, AvroError};
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
@@ -419,7 +418,7 @@
 //!     b: String,
 //! }
 //!
-//! fn main() -> Result<(), Error> {
+//! fn main() -> Result<(), AvroError> {
 //!     let raw_schema = r#"
 //!         {
 //!             "type": "record",
@@ -475,12 +474,11 @@
 //! ```rust
 //! use avro_rs::{
 //!     types::Record, types::Value, Codec, Days, Decimal, Duration, Millis, Months, Reader, Schema,
-//!     Writer,
+//!     Writer, AvroError,
 //! };
 //! use num_bigint::ToBigInt;
-//! use failure::Error;
 //!
-//! fn main() -> Result<(), Error> {
+//! fn main() -> Result<(), AvroError> {
 //!     let raw_schema = r#"
 //!     {
 //!       "type": "record",
@@ -588,12 +586,11 @@
 //! An example of fingerprinting for the supported fingerprints:
 //!
 //! ```rust
-//! use avro_rs::Schema;
-//! use failure::Error;
+//! use avro_rs::{Schema, AvroError};
 //! use md5::Md5;
 //! use sha2::Sha256;
 //!
-//! fn main() -> Result<(), Error> {
+//! fn main() -> Result<(), AvroError> {
 //!     let raw_schema = r#"
 //!         {
 //!             "type": "record",
@@ -681,6 +678,7 @@ mod decimal;
 mod decode;
 mod duration;
 mod encode;
+mod errors;
 mod reader;
 mod ser;
 mod util;
@@ -694,12 +692,12 @@ pub use crate::codec::Codec;
 pub use crate::de::{from_value, Error as DeError};
 pub use crate::decimal::Decimal;
 pub use crate::duration::{Days, Duration, Millis, Months};
+pub use crate::errors::AvroError;
 pub use crate::reader::{from_avro_datum, Reader};
-pub use crate::schema::{ParseSchemaError, Schema};
+pub use crate::schema::Schema;
 pub use crate::ser::{to_value, Error as SerError};
-pub use crate::types::SchemaResolutionError;
-pub use crate::util::{max_allocation_bytes, DecodeError};
-pub use crate::writer::{to_avro_datum, ValidationError, Writer};
+pub use crate::util::max_allocation_bytes;
+pub use crate::writer::{to_avro_datum, Writer};
 
 #[cfg(test)]
 mod tests {
