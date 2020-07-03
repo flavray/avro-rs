@@ -102,7 +102,10 @@ pub enum Value {
 }
 /// Any structure implementing the [ToAvro](trait.ToAvro.html) trait will be usable
 /// from a [Writer](../writer/struct.Writer.html).
-#[deprecated(since = "0.11.0", note = "Please use Value::from instead")]
+#[deprecated(
+    since = "0.11.0",
+    note = "Please use Value::from, Into::into or value.into() instead"
+)]
 pub trait ToAvro {
     /// Transforms this value into an Avro-compatible [Value](enum.Value.html).
     fn avro(self) -> Value;
