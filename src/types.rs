@@ -125,7 +125,6 @@ macro_rules! to_value(
     );
 );
 
-to_value!((), |_| Value::Null);
 to_value!(bool, Value::Boolean);
 to_value!(i32, Value::Int);
 to_value!(i64, Value::Long);
@@ -136,6 +135,12 @@ to_value!(Vec<u8>, Value::Bytes);
 to_value!(uuid::Uuid, Value::Uuid);
 to_value!(Decimal, Value::Decimal);
 to_value!(Duration, Value::Duration);
+
+impl From<()> for Value {
+    fn from(value: ()) -> Self {
+        Self::Null
+    }
+}
 
 impl From<usize> for Value {
     fn from(value: usize) -> Self {
