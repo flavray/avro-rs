@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
+use std::str::FromStr;
 use strum_macros::EnumString;
 
 /// Describes errors happened while parsing Avro schemas.
@@ -297,8 +298,6 @@ pub enum RecordFieldOrder {
 impl RecordField {
     /// Parse a `serde_json::Value` into a `RecordField`.
     fn parse(field: &Map<String, Value>, position: usize) -> Result<Self, Error> {
-        use std::str::FromStr;
-
         let name = field
             .name()
             .ok_or_else(|| ParseSchemaError::new("No `name` in record field"))?;
