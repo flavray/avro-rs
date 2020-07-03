@@ -287,6 +287,7 @@ pub struct RecordField {
 
 /// Represents any valid order for a `field` in a `record` Avro schema.
 #[derive(Clone, Debug, PartialEq, EnumString)]
+#[strum(serialize_all = "kebab_case")]
 pub enum RecordFieldOrder {
     Ascending,
     Descending,
@@ -1205,5 +1206,24 @@ mod tests {
             schema,
             Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::TimestampMicros]).unwrap())
         );
+    }
+
+    #[test]
+    fn record_field_order_from_str() {
+        use std::str::FromStr;
+
+        assert_eq!(
+            RecordFieldOrder::from_str("ascending").unwrap(),
+            RecordFieldOrder::Ascending
+        );
+        assert_eq!(
+            RecordFieldOrder::from_str("descending").unwrap(),
+            RecordFieldOrder::Descending
+        );
+        assert_eq!(
+            RecordFieldOrder::from_str("ignore").unwrap(),
+            RecordFieldOrder::Ignore
+        );
+        assert!(RecordFieldOrder::from_str("not an ordering").is_err());
     }
 }
