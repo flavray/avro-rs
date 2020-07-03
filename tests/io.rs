@@ -218,13 +218,8 @@ fn test_no_default_value() -> Result<(), String> {
     );
     match decoded {
         Ok(_) => Err(String::from("Expected SchemaResolutionError, got Ok")),
-        Err(ref e) => {
-            if let AvroError::SchemaResolutionError(_) = e {
-                Ok(())
-            } else {
-                Err(format!("Expected SchemaResolutionError, got {}", e))
-            }
-        }
+        Err(AvroError::SchemaResolutionError(_)) => Ok(()),
+        Err(ref e) => Err(format!("Expected SchemaResolutionError, got {}", e)),
     }
 }
 
@@ -308,12 +303,7 @@ fn test_type_exception() -> Result<(), String> {
     let encoded = to_avro_datum(&writer_schema, datum_to_write);
     match encoded {
         Ok(_) => Err(String::from("Expected ValidationError, got Ok")),
-        Err(ref e) => {
-            if let AvroError::ValidationError(_) = e {
-                Ok(())
-            } else {
-                Err(format!("Expected ValidationError, got {}", e))
-            }
-        }
+        Err(AvroError::ValidationError(_)) => Ok(()),
+        Err(ref e) => Err(format!("Expected ValidationError, got {}", e)),
     }
 }
