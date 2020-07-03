@@ -137,7 +137,7 @@ to_value!(Decimal, Value::Decimal);
 to_value!(Duration, Value::Duration);
 
 impl From<()> for Value {
-    fn from(value: ()) -> Self {
+    fn from(_: ()) -> Self {
         Self::Null
     }
 }
