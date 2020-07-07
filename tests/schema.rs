@@ -1,6 +1,6 @@
 //! Port of https://github.com/apache/avro/blob/release-1.9.1/lang/py/test/test_schema.py
 use avro_rs::schema::Name;
-use avro_rs::AvroError;
+use avro_rs::Error;
 use avro_rs::Schema;
 use lazy_static::lazy_static;
 
@@ -731,7 +731,7 @@ fn test_root_error_is_not_swallowed_on_parse_error() -> Result<(), String> {
     let error = Schema::parse_str(raw_schema).unwrap_err();
 
     // TODO: (#82) this should be a ParseSchemaError wrapping the JSON error
-    if let AvroError::JSONError(e) = error {
+    if let Error::JSON(e) = error {
         assert!(
             e.to_string().contains("expected value at line 1 column 1"),
             e.to_string()

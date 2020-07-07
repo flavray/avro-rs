@@ -6,28 +6,28 @@ use uuid::Uuid;
 
 use crate::decimal::Decimal;
 use crate::duration::Duration;
-use crate::errors::AvroError;
+use crate::errors::{AvroResult, Error};
 use crate::schema::Schema;
 use crate::types::Value;
 use crate::util::{safe_len, zag_i32, zag_i64};
 
 #[inline]
-fn decode_long<R: Read>(reader: &mut R) -> Result<Value, AvroError> {
+fn decode_long<R: Read>(reader: &mut R) -> AvroResult<Value> {
     zag_i64(reader).map(Value::Long)
 }
 
 #[inline]
-fn decode_int<R: Read>(reader: &mut R) -> Result<Value, AvroError> {
+fn decode_int<R: Read>(reader: &mut R) -> AvroResult<Value> {
     zag_i32(reader).map(Value::Int)
 }
 
 #[inline]
-fn decode_len<R: Read>(reader: &mut R) -> Result<usize, AvroError> {
+fn decode_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
     zag_i64(reader).and_then(|len| safe_len(len as usize))
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroError> {
+pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> AvroResult<Value> {
     match *schema {
         Schema::Null => Ok(Value::Null),
         Schema::Boolean => {
@@ -37,23 +37,23 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroErr
             match buf[0] {
                 0u8 => Ok(Value::Boolean(false)),
                 1u8 => Ok(Value::Boolean(true)),
-                _ => Err(AvroError::DecodeError("not a bool".to_string())),
+                _ => Err(Error::Decode("not a bool".to_string())),
             }
         }
         Schema::Decimal { ref inner, .. } => match **inner {
             Schema::Fixed { .. } => match decode(inner, reader)? {
                 Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-                _ => Err(AvroError::DecodeError(
+                _ => Err(Error::Decode(
                     "not a fixed value, required for decimal with fixed schema".to_string(),
                 )),
             },
             Schema::Bytes => match decode(inner, reader)? {
                 Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-                _ => Err(AvroError::DecodeError(
+                _ => Err(Error::Decode(
                     "not a bytes value, required for decimal with bytes schema".to_string(),
                 )),
             },
-            _ => Err(AvroError::DecodeError(
+            _ => Err(Error::Decode(
                 "not a fixed or bytes type, required for decimal schema".to_string(),
             )),
         },
@@ -61,7 +61,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroErr
             match decode(&Schema::String, reader)? {
                 Value::String(ref s) => s,
                 _ => {
-                    return Err(AvroError::DecodeError(
+                    return Err(Error::Decode(
                         "not a string type, required for uuid".to_string(),
                     ))
                 }
@@ -102,7 +102,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroErr
 
             String::from_utf8(buf)
                 .map(Value::String)
-                .map_err(|_| AvroError::DecodeError("not a valid utf-8 string".to_string()))
+                .map_err(|_| Error::Decode("not a valid utf-8 string".to_string()))
         }
         Schema::Fixed { size, .. } => {
             let mut buf = vec![0u8; size as usize];
@@ -155,9 +155,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroErr
                         let value = decode(inner, reader)?;
                         items.insert(key, value);
                     } else {
-                        return Err(AvroError::DecodeError(
-                            "map key is not a string".to_string(),
-                        ));
+                        return Err(Error::Decode("map key is not a string".to_string()));
                     }
                 }
             }
@@ -169,7 +167,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroErr
             let variants = inner.variants();
             let variant = variants
                 .get(index as usize)
-                .ok_or_else(|| AvroError::DecodeError("Union index out of bounds".to_string()))?;
+                .ok_or_else(|| Error::Decode("Union index out of bounds".to_string()))?;
             let value = decode(variant, reader)?;
             Ok(Value::Union(Box::new(value)))
         }
@@ -188,12 +186,10 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> Result<Value, AvroErr
                     let symbol = symbols[index as usize].clone();
                     Ok(Value::Enum(index, symbol))
                 } else {
-                    Err(AvroError::DecodeError(
-                        "enum symbol index out of bounds".to_string(),
-                    ))
+                    Err(Error::Decode("enum symbol index out of bounds".to_string()))
                 }
             } else {
-                Err(AvroError::DecodeError("enum symbol not found".to_string()))
+                Err(Error::Decode("enum symbol not found".to_string()))
             }
         }
     }

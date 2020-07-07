@@ -4,7 +4,7 @@ use std::sync::Once;
 
 use serde_json::{Map, Value};
 
-use crate::errors::AvroError;
+use crate::errors::{AvroResult, Error};
 
 /// Maximum number of bytes that can be allocated when decoding
 /// Avro-encoded values. This is a protection against ill-formed
@@ -33,7 +33,7 @@ impl MapHelper for Map<String, Value> {
     }
 }
 
-pub fn read_long<R: Read>(reader: &mut R) -> Result<i64, AvroError> {
+pub fn read_long<R: Read>(reader: &mut R) -> AvroResult<i64> {
     zag_i64(reader)
 }
 
@@ -45,16 +45,16 @@ pub fn zig_i64(n: i64, buffer: &mut Vec<u8>) {
     encode_variable(((n << 1) ^ (n >> 63)) as u64, buffer)
 }
 
-pub fn zag_i32<R: Read>(reader: &mut R) -> Result<i32, AvroError> {
+pub fn zag_i32<R: Read>(reader: &mut R) -> AvroResult<i32> {
     let i = zag_i64(reader)?;
     if i < i64::from(i32::min_value()) || i > i64::from(i32::max_value()) {
-        Err(AvroError::DecodeError("int out of range".to_string()))
+        Err(Error::Decode("int out of range".to_string()))
     } else {
         Ok(i as i32)
     }
 }
 
-pub fn zag_i64<R: Read>(reader: &mut R) -> Result<i64, AvroError> {
+pub fn zag_i64<R: Read>(reader: &mut R) -> AvroResult<i64> {
     let z = decode_variable(reader)?;
     Ok(if z & 0x1 == 0 {
         (z >> 1) as i64
@@ -75,7 +75,7 @@ fn encode_variable(mut z: u64, buffer: &mut Vec<u8>) {
     }
 }
 
-fn decode_variable<R: Read>(reader: &mut R) -> Result<u64, AvroError> {
+fn decode_variable<R: Read>(reader: &mut R) -> AvroResult<u64> {
     let mut i = 0u64;
     let mut buf = [0u8; 1];
 
@@ -83,7 +83,7 @@ fn decode_variable<R: Read>(reader: &mut R) -> Result<u64, AvroError> {
     loop {
         if j > 9 {
             // if j * 7 > 64
-            return Err(AvroError::DecodeError(
+            return Err(Error::Decode(
                 "Overflow when decoding integer value".to_string(),
             ));
         }
@@ -115,13 +115,13 @@ pub fn max_allocation_bytes(num_bytes: usize) -> usize {
     }
 }
 
-pub fn safe_len(len: usize) -> Result<usize, AvroError> {
+pub fn safe_len(len: usize) -> AvroResult<usize> {
     let max_bytes = max_allocation_bytes(512 * 1024 * 1024);
 
     if len <= max_bytes {
         Ok(len)
     } else {
-        Err(AvroError::MemoryAllocationError {
+        Err(Error::MemoryAllocation {
             desired: len,
             maximum: max_bytes,
         })

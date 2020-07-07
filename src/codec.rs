@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use libflate::deflate::{Decoder, Encoder};
 
-use crate::errors::AvroError;
+use crate::errors::{AvroResult, Error};
 use crate::types::Value;
 
 /// The compression codec used to compress blocks.
@@ -39,7 +39,7 @@ impl From<Codec> for Value {
 }
 
 impl FromStr for Codec {
-    type Err = AvroError;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -47,14 +47,14 @@ impl FromStr for Codec {
             "deflate" => Ok(Codec::Deflate),
             #[cfg(feature = "snappy")]
             "snappy" => Ok(Codec::Snappy),
-            _ => Err(AvroError::DecodeError("unrecognized codec".to_string())),
+            _ => Err(Error::Decode("unrecognized codec".to_string())),
         }
     }
 }
 
 impl Codec {
     /// Compress a stream of bytes in-place.
-    pub fn compress(self, stream: &mut Vec<u8>) -> Result<(), AvroError> {
+    pub fn compress(self, stream: &mut Vec<u8>) -> AvroResult<()> {
         match self {
             Codec::Null => (),
             Codec::Deflate => {
@@ -83,7 +83,7 @@ impl Codec {
     }
 
     /// Decompress a stream of bytes in-place.
-    pub fn decompress(self, stream: &mut Vec<u8>) -> Result<(), AvroError> {
+    pub fn decompress(self, stream: &mut Vec<u8>) -> AvroResult<()> {
         *stream = match self {
             Codec::Null => return Ok(()),
             Codec::Deflate => {
@@ -104,11 +104,10 @@ impl Codec {
                 let actual_crc = crc::crc32::checksum_ieee(&decoded);
 
                 if expected_crc != actual_crc {
-                    return Err(AvroError::DecodeError(format!(
+                    return Err(Error::Decode(format!(
                         "bad Snappy CRC32; expected {:x} but got {:x}",
                         expected_crc, actual_crc
-                    ))
-                    .into());
+                    )));
                 }
                 decoded
             }

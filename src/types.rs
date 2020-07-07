@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::decimal::Decimal;
 use crate::duration::Duration;
-use crate::errors::AvroError;
+use crate::errors::{AvroResult, Error};
 use crate::schema::{Precision, RecordField, Scale, Schema, SchemaKind, UnionSchema};
 
 /// Compute the maximum decimal value precision of a byte array of length `len` could hold.
@@ -319,7 +319,7 @@ impl Value {
     /// See [Schema Resolution](https://avro.apache.org/docs/current/spec.html#Schema+Resolution)
     /// in the Avro specification for the full set of rules of schema
     /// resolution.
-    pub fn resolve(mut self, schema: &Schema) -> Result<Self, AvroError> {
+    pub fn resolve(mut self, schema: &Schema) -> AvroResult<Self> {
         // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
             && SchemaKind::from(schema) != SchemaKind::Union
@@ -361,23 +361,23 @@ impl Value {
         }
     }
 
-    fn resolve_uuid(self) -> Result<Self, AvroError> {
+    fn resolve_uuid(self) -> AvroResult<Self> {
         match self {
             uuid @ Value::Uuid(_) => Ok(uuid),
             Value::String(ref string) => Ok(Value::Uuid(Uuid::from_str(string)?)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "UUID expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_duration(self) -> Result<Self, AvroError> {
+    fn resolve_duration(self) -> AvroResult<Self> {
         match self {
             duration @ Value::Duration { .. } => Ok(duration),
             Value::Fixed(size, bytes) => {
                 if size != 12 {
-                    return Err(AvroError::SchemaResolutionError(format!(
+                    return Err(Error::SchemaResolution(format!(
                         "Fixed bytes of size 12 expected, got Fixed of size {}",
                         size
                     )));
@@ -387,7 +387,7 @@ impl Value {
                     bytes[8], bytes[9], bytes[10], bytes[11],
                 ])))
             }
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Duration expected, got {:?}",
                 other
             ))),
@@ -399,9 +399,9 @@ impl Value {
         precision: Precision,
         scale: Scale,
         inner: &Schema,
-    ) -> Result<Self, AvroError> {
+    ) -> AvroResult<Self> {
         if scale > precision {
-            return Err(AvroError::SchemaResolutionError(format!(
+            return Err(Error::SchemaResolution(format!(
                 "Scale {} is greater than precision {}",
                 scale, precision
             )));
@@ -409,7 +409,7 @@ impl Value {
         match inner {
             &Schema::Fixed { size, .. } => {
                 if max_prec_for_len(size)? < precision {
-                    return Err(AvroError::SchemaResolutionError(format!(
+                    return Err(Error::SchemaResolution(format!(
                         "Fixed size {} is not large enough to hold decimal values of precision {}",
                         size, precision,
                     )));
@@ -417,7 +417,7 @@ impl Value {
             }
             Schema::Bytes => (),
             _ => {
-                return Err(AvroError::SchemaResolutionError(format!(
+                return Err(Error::SchemaResolution(format!(
                     "Underlying decimal type must be fixed or bytes, got {:?}",
                     inner
                 )))
@@ -427,7 +427,7 @@ impl Value {
             Value::Decimal(num) => {
                 let num_bytes = num.len();
                 if max_prec_for_len(num_bytes)? > precision {
-                    Err(AvroError::SchemaResolutionError(format!(
+                    Err(Error::SchemaResolution(format!(
                         "Precision {} too small to hold decimal values with {} bytes",
                         precision, num_bytes,
                     )))
@@ -438,7 +438,7 @@ impl Value {
             }
             Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
                 if max_prec_for_len(bytes.len())? > precision {
-                    Err(AvroError::SchemaResolutionError(format!(
+                    Err(Error::SchemaResolution(format!(
                         "Precision {} too small to hold decimal values with {} bytes",
                         precision,
                         bytes.len(),
@@ -448,135 +448,135 @@ impl Value {
                     Ok(Value::Decimal(Decimal::from(bytes)))
                 }
             }
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Decimal expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_date(self) -> Result<Self, AvroError> {
+    fn resolve_date(self) -> AvroResult<Self> {
         match self {
             Value::Date(d) | Value::Int(d) => Ok(Value::Date(d)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Date expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_time_millis(self) -> Result<Self, AvroError> {
+    fn resolve_time_millis(self) -> AvroResult<Self> {
         match self {
             Value::TimeMillis(t) | Value::Int(t) => Ok(Value::TimeMillis(t)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "TimeMillis expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_time_micros(self) -> Result<Self, AvroError> {
+    fn resolve_time_micros(self) -> AvroResult<Self> {
         match self {
             Value::TimeMicros(t) | Value::Long(t) => Ok(Value::TimeMicros(t)),
             Value::Int(t) => Ok(Value::TimeMicros(i64::from(t))),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "TimeMicros expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_timestamp_millis(self) -> Result<Self, AvroError> {
+    fn resolve_timestamp_millis(self) -> AvroResult<Self> {
         match self {
             Value::TimestampMillis(ts) | Value::Long(ts) => Ok(Value::TimestampMillis(ts)),
             Value::Int(ts) => Ok(Value::TimestampMillis(i64::from(ts))),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "TimestampMillis expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_timestamp_micros(self) -> Result<Self, AvroError> {
+    fn resolve_timestamp_micros(self) -> AvroResult<Self> {
         match self {
             Value::TimestampMicros(ts) | Value::Long(ts) => Ok(Value::TimestampMicros(ts)),
             Value::Int(ts) => Ok(Value::TimestampMicros(i64::from(ts))),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "TimestampMicros expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_null(self) -> Result<Self, AvroError> {
+    fn resolve_null(self) -> AvroResult<Self> {
         match self {
             Value::Null => Ok(Value::Null),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Null expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_boolean(self) -> Result<Self, AvroError> {
+    fn resolve_boolean(self) -> AvroResult<Self> {
         match self {
             Value::Boolean(b) => Ok(Value::Boolean(b)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Boolean expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_int(self) -> Result<Self, AvroError> {
+    fn resolve_int(self) -> AvroResult<Self> {
         match self {
             Value::Int(n) => Ok(Value::Int(n)),
             Value::Long(n) => Ok(Value::Int(n as i32)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Int expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_long(self) -> Result<Self, AvroError> {
+    fn resolve_long(self) -> AvroResult<Self> {
         match self {
             Value::Int(n) => Ok(Value::Long(i64::from(n))),
             Value::Long(n) => Ok(Value::Long(n)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Long expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_float(self) -> Result<Self, AvroError> {
+    fn resolve_float(self) -> AvroResult<Self> {
         match self {
             Value::Int(n) => Ok(Value::Float(n as f32)),
             Value::Long(n) => Ok(Value::Float(n as f32)),
             Value::Float(x) => Ok(Value::Float(x)),
             Value::Double(x) => Ok(Value::Float(x as f32)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Float expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_double(self) -> Result<Self, AvroError> {
+    fn resolve_double(self) -> AvroResult<Self> {
         match self {
             Value::Int(n) => Ok(Value::Double(f64::from(n))),
             Value::Long(n) => Ok(Value::Double(n as f64)),
             Value::Float(x) => Ok(Value::Double(f64::from(x))),
             Value::Double(x) => Ok(Value::Double(x)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Double expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_bytes(self) -> Result<Self, AvroError> {
+    fn resolve_bytes(self) -> AvroResult<Self> {
         match self {
             Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
             Value::String(s) => Ok(Value::Bytes(s.into_bytes())),
@@ -586,49 +586,49 @@ impl Value {
                     .map(Value::try_u8)
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Bytes expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_string(self) -> Result<Self, AvroError> {
+    fn resolve_string(self) -> AvroResult<Self> {
         match self {
             Value::String(s) => Ok(Value::String(s)),
             Value::Bytes(bytes) => Ok(Value::String(String::from_utf8(bytes)?)),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "String expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_fixed(self, size: usize) -> Result<Self, AvroError> {
+    fn resolve_fixed(self, size: usize) -> AvroResult<Self> {
         match self {
             Value::Fixed(n, bytes) => {
                 if n == size {
                     Ok(Value::Fixed(n, bytes))
                 } else {
-                    Err(AvroError::SchemaResolutionError(format!(
+                    Err(Error::SchemaResolution(format!(
                         "Fixed size mismatch, {} expected, got {}",
                         size, n
                     )))
                 }
             }
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "String expected, got {:?}",
                 other
             ))),
         }
     }
 
-    fn resolve_enum(self, symbols: &[String]) -> Result<Self, AvroError> {
+    fn resolve_enum(self, symbols: &[String]) -> AvroResult<Self> {
         let validate_symbol = |symbol: String, symbols: &[String]| {
             if let Some(index) = symbols.iter().position(|ref item| item == &&symbol) {
                 Ok(Value::Enum(index as i32, symbol))
             } else {
-                Err(AvroError::SchemaResolutionError(format!(
+                Err(Error::SchemaResolution(format!(
                     "Enum default {} is not among allowed symbols {:?}",
                     symbol, symbols,
                 )))
@@ -640,7 +640,7 @@ impl Value {
                 if i >= 0 && i < symbols.len() as i32 {
                     validate_symbol(s, symbols)
                 } else {
-                    Err(AvroError::SchemaResolutionError(format!(
+                    Err(Error::SchemaResolution(format!(
                         "Enum value {} is out of bound {}",
                         i,
                         symbols.len() as i32
@@ -648,14 +648,14 @@ impl Value {
                 }
             }
             Value::String(s) => validate_symbol(s, symbols),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Enum({:?}) expected, got {:?}",
                 symbols, other
             ))),
         }
     }
 
-    fn resolve_union(self, schema: &UnionSchema) -> Result<Self, AvroError> {
+    fn resolve_union(self, schema: &UnionSchema) -> AvroResult<Self> {
         let v = match self {
             // Both are unions case.
             Value::Union(v) => *v,
@@ -664,12 +664,12 @@ impl Value {
         };
         // Find the first match in the reader schema.
         let (_, inner) = schema.find_schema(&v).ok_or_else(|| {
-            AvroError::SchemaResolutionError("Could not find matching type in union".to_string())
+            Error::SchemaResolution("Could not find matching type in union".to_string())
         })?;
         Ok(Value::Union(Box::new(v.resolve(inner)?)))
     }
 
-    fn resolve_array(self, schema: &Schema) -> Result<Self, AvroError> {
+    fn resolve_array(self, schema: &Schema) -> AvroResult<Self> {
         match self {
             Value::Array(items) => Ok(Value::Array(
                 items
@@ -677,14 +677,14 @@ impl Value {
                     .map(|item| item.resolve(schema))
                     .collect::<Result<_, _>>()?,
             )),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Array({:?}) expected, got {:?}",
                 schema, other
             ))),
         }
     }
 
-    fn resolve_map(self, schema: &Schema) -> Result<Self, AvroError> {
+    fn resolve_map(self, schema: &Schema) -> AvroResult<Self> {
         match self {
             Value::Map(items) => Ok(Value::Map(
                 items
@@ -692,18 +692,18 @@ impl Value {
                     .map(|(key, value)| value.resolve(schema).map(|value| (key, value)))
                     .collect::<Result<_, _>>()?,
             )),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Map({:?}) expected, got {:?}",
                 schema, other
             ))),
         }
     }
 
-    fn resolve_record(self, fields: &[RecordField]) -> Result<Self, AvroError> {
+    fn resolve_record(self, fields: &[RecordField]) -> AvroResult<Self> {
         let mut items = match self {
             Value::Map(items) => Ok(items),
             Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
-            other => Err(AvroError::SchemaResolutionError(format!(
+            other => Err(Error::SchemaResolution(format!(
                 "Record({:?}) expected, got {:?}",
                 fields, other
             ))),
@@ -733,7 +733,7 @@ impl Value {
                             _ => Value::from(value.clone()),
                         },
                         None => {
-                            return Err(AvroError::SchemaResolutionError(format!(
+                            return Err(Error::SchemaResolution(format!(
                                 "missing field {} in record",
                                 field.name
                             )));
@@ -749,7 +749,7 @@ impl Value {
         Ok(Value::Record(new_fields))
     }
 
-    fn try_u8(self) -> Result<u8, AvroError> {
+    fn try_u8(self) -> AvroResult<u8> {
         let int = self.resolve(&Schema::Int)?;
         if let Value::Int(n) = int {
             if n >= 0 && n <= i32::from(u8::MAX) {
@@ -757,7 +757,7 @@ impl Value {
             }
         }
 
-        Err(AvroError::SchemaResolutionError(format!(
+        Err(Error::SchemaResolution(format!(
             "Unable to convert to u8, got {:?}",
             int
         )))

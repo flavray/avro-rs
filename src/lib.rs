@@ -409,7 +409,7 @@
 //! quick reference of the library interface:
 //!
 //! ```
-//! use avro_rs::{Codec, Reader, Schema, Writer, from_value, types::Record, AvroError};
+//! use avro_rs::{Codec, Reader, Schema, Writer, from_value, types::Record, Error};
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
@@ -418,7 +418,7 @@
 //!     b: String,
 //! }
 //!
-//! fn main() -> Result<(), AvroError> {
+//! fn main() -> Result<(), Error> {
 //!     let raw_schema = r#"
 //!         {
 //!             "type": "record",
@@ -474,11 +474,11 @@
 //! ```rust
 //! use avro_rs::{
 //!     types::Record, types::Value, Codec, Days, Decimal, Duration, Millis, Months, Reader, Schema,
-//!     Writer, AvroError,
+//!     Writer, Error,
 //! };
 //! use num_bigint::ToBigInt;
 //!
-//! fn main() -> Result<(), AvroError> {
+//! fn main() -> Result<(), Error> {
 //!     let raw_schema = r#"
 //!     {
 //!       "type": "record",
@@ -586,11 +586,11 @@
 //! An example of fingerprinting for the supported fingerprints:
 //!
 //! ```rust
-//! use avro_rs::{Schema, AvroError};
+//! use avro_rs::{Schema, Error};
 //! use md5::Md5;
 //! use sha2::Sha256;
 //!
-//! fn main() -> Result<(), AvroError> {
+//! fn main() -> Result<(), Error> {
 //!     let raw_schema = r#"
 //!         {
 //!             "type": "record",
@@ -692,7 +692,7 @@ pub use crate::codec::Codec;
 pub use crate::de::{from_value, Error as DeError};
 pub use crate::decimal::Decimal;
 pub use crate::duration::{Days, Duration, Millis, Months};
-pub use crate::errors::AvroError;
+pub use crate::errors::Error;
 pub use crate::reader::{from_avro_datum, Reader};
 pub use crate::schema::Schema;
 pub use crate::ser::{to_value, Error as SerError};

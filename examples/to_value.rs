@@ -1,4 +1,4 @@
-use avro_rs::{to_value, AvroError};
+use avro_rs::{to_value, Error};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -7,7 +7,7 @@ struct Test {
     b: String,
 }
 
-fn main() -> Result<(), AvroError> {
+fn main() -> Result<(), Error> {
     let test = Test {
         a: 27,
         b: "foo".to_owned(),

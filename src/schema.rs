@@ -11,7 +11,7 @@ use serde::{
 };
 use serde_json::{Map, Value};
 
-use crate::errors::AvroError;
+use crate::errors::{AvroResult, Error};
 use crate::types;
 use crate::util::MapHelper;
 
@@ -204,10 +204,10 @@ impl Name {
     }
 
     /// Parse a `serde_json::Value` into a `Name`.
-    fn parse(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse(complex: &Map<String, Value>) -> AvroResult<Self> {
         let name = complex
             .name()
-            .ok_or_else(|| AvroError::ParseSchemaError("No `name` field".to_string()))?;
+            .ok_or_else(|| Error::Parse("No `name` field".to_string()))?;
 
         let namespace = complex.string("namespace");
 
@@ -282,10 +282,10 @@ pub enum RecordFieldOrder {
 
 impl RecordField {
     /// Parse a `serde_json::Value` into a `RecordField`.
-    fn parse(field: &Map<String, Value>, position: usize) -> Result<Self, AvroError> {
+    fn parse(field: &Map<String, Value>, position: usize) -> AvroResult<Self> {
         let name = field
             .name()
-            .ok_or_else(|| AvroError::ParseSchemaError("No `name` in record field".to_string()))?;
+            .ok_or_else(|| Error::Parse("No `name` in record field".to_string()))?;
 
         // TODO: "type" = "<record name>"
         let schema = Schema::parse_complex(field)?;
@@ -325,17 +325,17 @@ pub struct UnionSchema {
 }
 
 impl UnionSchema {
-    pub(crate) fn new(schemas: Vec<Schema>) -> Result<Self, AvroError> {
+    pub(crate) fn new(schemas: Vec<Schema>) -> AvroResult<Self> {
         let mut vindex = HashMap::new();
         for (i, schema) in schemas.iter().enumerate() {
             if let Schema::Union(_) = schema {
-                return Err(AvroError::ParseSchemaError(
+                return Err(Error::Parse(
                     "Unions may not directly contain a union".to_string(),
                 ));
             }
             let kind = SchemaKind::from(schema);
             if vindex.insert(kind, i).is_some() {
-                return Err(AvroError::ParseSchemaError(
+                return Err(Error::Parse(
                     "Unions cannot contain duplicate types".to_string(),
                 ));
             }
@@ -377,14 +377,12 @@ type DecimalMetadata = usize;
 pub(crate) type Precision = DecimalMetadata;
 pub(crate) type Scale = DecimalMetadata;
 
-fn parse_json_integer_for_decimal(
-    value: &serde_json::Number,
-) -> Result<DecimalMetadata, AvroError> {
+fn parse_json_integer_for_decimal(value: &serde_json::Number) -> AvroResult<DecimalMetadata> {
     if value.is_u64() {
         Ok(value
             .as_u64()
             .ok_or_else(|| {
-                AvroError::ParseSchemaError(format!(
+                Error::Parse(format!(
                     "JSON value {} claims to be u64 but cannot be converted",
                     value
                 ))
@@ -394,14 +392,14 @@ fn parse_json_integer_for_decimal(
         Ok(value
             .as_i64()
             .ok_or_else(|| {
-                AvroError::ParseSchemaError(format!(
+                Error::Parse(format!(
                     "JSON value {} claims to be i64 but cannot be converted",
                     value
                 ))
             })?
             .try_into()?)
     } else {
-        Err(AvroError::ParseSchemaError(format!(
+        Err(Error::Parse(format!(
             "Invalid JSON value for decimal precision/scale integer: {}",
             value
         )))
@@ -410,7 +408,7 @@ fn parse_json_integer_for_decimal(
 
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
-    pub fn parse_str(input: &str) -> Result<Self, AvroError> {
+    pub fn parse_str(input: &str) -> AvroResult<Self> {
         // TODO: (#82) this should be a ParseSchemaError wrapping the JSON error
         let value = serde_json::from_str(input)?;
         Self::parse(&value)
@@ -418,12 +416,12 @@ impl Schema {
 
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
     /// schema.
-    pub fn parse(value: &Value) -> Result<Self, AvroError> {
+    pub fn parse(value: &Value) -> AvroResult<Self> {
         match *value {
             Value::String(ref t) => Schema::parse_primitive(t.as_str()),
             Value::Object(ref data) => Schema::parse_complex(data),
             Value::Array(ref data) => Schema::parse_union(data),
-            _ => Err(AvroError::ParseSchemaError(
+            _ => Err(Error::Parse(
                 "Must be a JSON string, object or array".to_string(),
             )),
         }
@@ -454,7 +452,7 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a primitive Avro type into a
     /// `Schema`.
-    fn parse_primitive(primitive: &str) -> Result<Self, AvroError> {
+    fn parse_primitive(primitive: &str) -> AvroResult<Self> {
         match primitive {
             "null" => Ok(Schema::Null),
             "boolean" => Ok(Schema::Boolean),
@@ -464,27 +462,19 @@ impl Schema {
             "float" => Ok(Schema::Float),
             "bytes" => Ok(Schema::Bytes),
             "string" => Ok(Schema::String),
-            other => Err(AvroError::ParseSchemaError(format!(
-                "Unknown type: {}",
-                other
-            ))),
+            other => Err(Error::Parse(format!("Unknown type: {}", other))),
         }
     }
 
-    fn parse_precision_and_scale(
-        complex: &Map<String, Value>,
-    ) -> Result<(Precision, Scale), AvroError> {
+    fn parse_precision_and_scale(complex: &Map<String, Value>) -> AvroResult<(Precision, Scale)> {
         fn get_decimal_integer(
             complex: &Map<String, Value>,
             key: &str,
-        ) -> Result<DecimalMetadata, AvroError> {
+        ) -> AvroResult<DecimalMetadata> {
             match complex.get(key) {
                 Some(&Value::Number(ref value)) => parse_json_integer_for_decimal(value),
-                None => Err(AvroError::ParseSchemaError(format!(
-                    "{} missing for decimal type",
-                    key
-                ))),
-                precision => Err(AvroError::ParseSchemaError(format!(
+                None => Err(Error::Parse(format!("{} missing for decimal type", key))),
+                precision => Err(Error::Parse(format!(
                     "invalid JSON for {}: {:?}",
                     key, precision,
                 ))),
@@ -500,11 +490,11 @@ impl Schema {
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
-    fn parse_complex(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse_complex(complex: &Map<String, Value>) -> AvroResult<Self> {
         fn logical_verify_type(
             complex: &Map<String, Value>,
             kinds: &[SchemaKind],
-        ) -> Result<Schema, AvroError> {
+        ) -> AvroResult<Schema> {
             match complex.get("type") {
                 Some(value) => {
                     let ty = Schema::parse(value)?;
@@ -514,13 +504,13 @@ impl Schema {
                     {
                         Ok(ty)
                     } else {
-                        Err(AvroError::ParseSchemaError(format!(
+                        Err(Error::Parse(format!(
                             "Unexpected `type` ({}) variant for `logicalType`",
                             value
                         )))
                     }
                 }
-                None => Err(AvroError::ParseSchemaError(
+                None => Err(Error::Parse(
                     "No `type` field found for `logicalType`".to_string(),
                 )),
             }
@@ -576,11 +566,7 @@ impl Schema {
             // The spec says to ignore invalid logical types and just continue through to the
             // underlying type - It is unclear whether that applies to this case or not, where the
             // `logicalType` is not a string.
-            Some(_) => {
-                return Err(AvroError::ParseSchemaError(
-                    "logicalType must be a string".to_string(),
-                ))
-            }
+            Some(_) => return Err(Error::Parse("logicalType must be a string".to_string())),
             _ => {}
         }
         match complex.get("type") {
@@ -594,19 +580,17 @@ impl Schema {
             },
             Some(&Value::Object(ref data)) => Schema::parse_complex(data),
             Some(&Value::Array(ref variants)) => Schema::parse_union(variants),
-            Some(unknown) => Err(AvroError::ParseSchemaError(format!(
+            Some(unknown) => Err(Error::Parse(format!(
                 "Unknown complex type: {0:?}",
                 unknown
             ))),
-            None => Err(AvroError::ParseSchemaError(
-                "No `type` in complex type".to_string(),
-            )),
+            None => Err(Error::Parse("No `type` in complex type".to_string())),
         }
     }
 
     /// Parse a `serde_json::Value` representing a Avro record type into a
     /// `Schema`.
-    fn parse_record(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse_record(complex: &Map<String, Value>) -> AvroResult<Self> {
         let name = Name::parse(complex)?;
 
         let mut lookup = HashMap::new();
@@ -614,7 +598,7 @@ impl Schema {
         let fields: Vec<RecordField> = complex
             .get("fields")
             .and_then(|fields| fields.as_array())
-            .ok_or_else(|| AvroError::ParseSchemaError("No `fields` in record".to_string()))
+            .ok_or_else(|| Error::Parse("No `fields` in record".to_string()))
             .and_then(|fields| {
                 fields
                     .iter()
@@ -638,21 +622,19 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro enum type into a
     /// `Schema`.
-    fn parse_enum(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse_enum(complex: &Map<String, Value>) -> AvroResult<Self> {
         let name = Name::parse(complex)?;
 
         let symbols = complex
             .get("symbols")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| AvroError::ParseSchemaError("No `symbols` field in enum".to_string()))
+            .ok_or_else(|| Error::Parse("No `symbols` field in enum".to_string()))
             .and_then(|symbols| {
                 symbols
                     .iter()
                     .map(|symbol| symbol.as_str().map(|s| s.to_string()))
                     .collect::<Option<_>>()
-                    .ok_or_else(|| {
-                        AvroError::ParseSchemaError("Unable to parse `symbols` in enum".to_string())
-                    })
+                    .ok_or_else(|| Error::Parse("Unable to parse `symbols` in enum".to_string()))
             })?;
 
         Ok(Schema::Enum {
@@ -664,27 +646,27 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro array type into a
     /// `Schema`.
-    fn parse_array(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse_array(complex: &Map<String, Value>) -> AvroResult<Self> {
         complex
             .get("items")
-            .ok_or_else(|| AvroError::ParseSchemaError("No `items` in array".to_string()))
+            .ok_or_else(|| Error::Parse("No `items` in array".to_string()))
             .and_then(|items| Schema::parse(items))
             .map(|schema| Schema::Array(Box::new(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro map type into a
     /// `Schema`.
-    fn parse_map(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse_map(complex: &Map<String, Value>) -> AvroResult<Self> {
         complex
             .get("values")
-            .ok_or_else(|| AvroError::ParseSchemaError("No `values` in map".to_string()))
+            .ok_or_else(|| Error::Parse("No `values` in map".to_string()))
             .and_then(|items| Schema::parse(items))
             .map(|schema| Schema::Map(Box::new(schema)))
     }
 
     /// Parse a `serde_json::Value` representing a Avro union type into a
     /// `Schema`.
-    fn parse_union(items: &[Value]) -> Result<Self, AvroError> {
+    fn parse_union(items: &[Value]) -> AvroResult<Self> {
         items
             .iter()
             .map(Schema::parse)
@@ -694,13 +676,13 @@ impl Schema {
 
     /// Parse a `serde_json::Value` representing a Avro fixed type into a
     /// `Schema`.
-    fn parse_fixed(complex: &Map<String, Value>) -> Result<Self, AvroError> {
+    fn parse_fixed(complex: &Map<String, Value>) -> AvroResult<Self> {
         let name = Name::parse(complex)?;
 
         let size = complex
             .get("size")
             .and_then(|v| v.as_i64())
-            .ok_or_else(|| AvroError::ParseSchemaError("No `size` in fixed".to_string()))?;
+            .ok_or_else(|| Error::Parse("No `size` in fixed".to_string()))?;
 
         Ok(Schema::Fixed {
             name,
