@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Changed
+- Introduced custom Error enum to replace all existing erroros
+- Swapped failure for thiserror
 
 ## [0.10.0] - 2020-05-31
 ### Changed
