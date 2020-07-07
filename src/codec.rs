@@ -47,7 +47,7 @@ impl FromStr for Codec {
             "deflate" => Ok(Codec::Deflate),
             #[cfg(feature = "snappy")]
             "snappy" => Ok(Codec::Snappy),
-            _ => Err(Error::Decode("unrecognized codec".to_string())),
+            _ => Err(Error::Codec(s.to_string())),
         }
     }
 }
@@ -104,10 +104,7 @@ impl Codec {
                 let actual_crc = crc::crc32::checksum_ieee(&decoded);
 
                 if expected_crc != actual_crc {
-                    return Err(Error::Decode(format!(
-                        "bad Snappy CRC32; expected {:x} but got {:x}",
-                        expected_crc, actual_crc
-                    )));
+                    return Err(Error::SnappyCrcError(expected_crc, actual_crc));
                 }
                 decoded
             }

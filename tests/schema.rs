@@ -730,7 +730,6 @@ fn test_root_error_is_not_swallowed_on_parse_error() -> Result<(), String> {
     let raw_schema = r#"/not/a/real/file"#;
     let error = Schema::parse_str(raw_schema).unwrap_err();
 
-    // TODO: (#82) this should be a ParseSchemaError wrapping the JSON error
     if let Error::JSON(e) = error {
         assert!(
             e.to_string().contains("expected value at line 1 column 1"),
