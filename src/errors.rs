@@ -63,8 +63,8 @@ pub enum Error {
     FromUtf8(#[from] std::string::FromUtf8Error),
 
     /// Error happening when there is a mismatch of the snappy CRC
-    #[error("bad Snappy CRC32; expected {0:x} but got {1:x}")]
-    SnappyCrcError(u32, u32),
+    #[error("bad Snappy CRC32; expected {expected:x} but got {found:x}")]
+    SnappyCrcError { expected: u32, found: u32 },
 
     /// Errors coming from Snappy encoding and decoding
     #[cfg(feature = "snappy")]

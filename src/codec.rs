@@ -104,7 +104,10 @@ impl Codec {
                 let actual_crc = crc::crc32::checksum_ieee(&decoded);
 
                 if expected_crc != actual_crc {
-                    return Err(Error::SnappyCrcError(expected_crc, actual_crc));
+                    return Err(Error::SnappyCrcError {
+                        expected: expected_crc,
+                        found: actual_crc,
+                    });
                 }
                 decoded
             }
