@@ -49,6 +49,11 @@
 //! features = ["snappy"]
 //! ```
 //!
+//! # Upgrading to a newer minor version
+//!
+//! The library is still in beta, so there might be backward-incompatible changes between minor
+//! versions. If you have troubles upgrading, check the [version upgrade guide](migration_guide.md).
+//!
 //! # Defining a schema
 //!
 //! An Avro data cannot exist without an Avro schema. Schemas **must** be used while writing and

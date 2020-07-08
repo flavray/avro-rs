@@ -6,15 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 ### Changed
-- Introduced custom Error enum to replace all existing erroros
-- Swapped failure for thiserror
+- Introduce custom Error enum to replace all existing errors (backward-incompatible) (#135)
+- Swapped failure for thiserror (backward-incompatible) (#135)
+- Update digest crate and digest::Digest trait to 0.9 (backward-incompatible with digest::Digest 0.8) (#133)
+- Replace some manual from_str implementations with strum (#136)
+
+## Deprecated
+- Deprecate ToAvro in favor of From<T> for Value implementations (#137)
 
 ## [0.10.0] - 2020-05-31
 ### Changed
-- Writer::into_inner() now calls flush() and returns a Result
+- Writer::into_inner() now calls flush() and returns a Result (backward-incompatible)
 
 ### Added
-- Add utilited for schema compatibility check
+- Add utility for schema compatibility check
 
 ## [0.9.1] - 2020-05-02
 ### Changed
@@ -66,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.0]- 2018-08-11
 ### Added
-- impl Send+Sync for Schema (non-backwards compatible)
+- impl Send+Sync for Schema (backwards-incompatible)
 
 ## [0.5.0] - 2018-08-06
 ### Added
@@ -79,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.1] - 2018-06-17
 ### Changed
-- Implememented clippy suggestions
+- Implemented clippy suggestions
 
 ## [0.4.0] - 2018-06-17
 ### Changed
