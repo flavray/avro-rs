@@ -1,5 +1,5 @@
 //! Logic for all supported compression codecs in Avro.
-use crate::errors::{AvroResult, Error};
+use crate::errors::AvroResult;
 use crate::types::Value;
 use libflate::deflate::{Decoder, Encoder};
 use std::io::{Read, Write};
@@ -70,6 +70,7 @@ impl Codec {
             }
             #[cfg(feature = "snappy")]
             Codec::Snappy => {
+                use crate::Error;
                 use byteorder::ByteOrder;
 
                 let decompressed_size = snap::decompress_len(&stream[..stream.len() - 4])?;
