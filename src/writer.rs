@@ -256,10 +256,7 @@ impl<'a, W: Write> Writer<'a, W> {
     fn append_marker(&mut self) -> AvroResult<usize> {
         // using .writer.write directly to avoid mutable borrow of self
         // with ref borrowing of self.marker
-        Ok(self
-            .writer
-            .write(&self.marker)
-            .map_err(Error::WriteMarker)?)
+        self.writer.write(&self.marker).map_err(Error::WriteMarker)
     }
 
     /// Append a raw Avro Value to the payload avoiding to encode it again.
@@ -269,7 +266,7 @@ impl<'a, W: Write> Writer<'a, W> {
 
     /// Append pure bytes to the payload.
     fn append_bytes(&mut self, bytes: &[u8]) -> AvroResult<usize> {
-        Ok(self.writer.write(bytes).map_err(Error::WriteBytes)?)
+        self.writer.write(bytes).map_err(Error::WriteBytes)
     }
 
     /// Create an Avro header based on schema, codec and sync marker.
