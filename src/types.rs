@@ -567,8 +567,10 @@ impl Value {
         };
 
         match self {
-            Value::Enum(index, s) => {
-                if index >= 0 && index < symbols.len() as i32 {
+            Value::Enum(raw_index, s) => {
+                let index = usize::try_from(raw_index)
+                    .map_err(|e| Error::ConvertI32ToUsize(e, raw_index))?;
+                if (0..=symbols.len()).contains(&index) {
                     validate_symbol(s, symbols)
                 } else {
                     Err(Error::GetEnumValue {

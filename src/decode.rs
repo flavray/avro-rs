@@ -21,7 +21,8 @@ fn decode_int<R: Read>(reader: &mut R) -> AvroResult<Value> {
 
 #[inline]
 fn decode_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
-    safe_len(usize::try_from(zag_i64(reader)?)?)
+    let len = zag_i64(reader)?;
+    safe_len(usize::try_from(len).map_err(|e| Error::ConvertI64ToUsize(e, len))?)
 }
 
 /// Decode the length of a sequence.
@@ -30,14 +31,17 @@ fn decode_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
 /// the end of the map or array.
 fn decode_seq_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
     let raw_len = zag_i64(reader)?;
-    safe_len(usize::try_from(match raw_len.cmp(&0) {
-        std::cmp::Ordering::Equal => return Ok(0),
-        std::cmp::Ordering::Less => {
-            let _size = zag_i64(reader)?;
-            -raw_len
-        }
-        std::cmp::Ordering::Greater => raw_len,
-    })?)
+    safe_len(
+        usize::try_from(match raw_len.cmp(&0) {
+            std::cmp::Ordering::Equal => return Ok(0),
+            std::cmp::Ordering::Less => {
+                let _size = zag_i64(reader)?;
+                -raw_len
+            }
+            std::cmp::Ordering::Greater => raw_len,
+        })
+        .map_err(|e| Error::ConvertI64ToUsize(e, raw_len))?,
+    )
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
@@ -113,7 +117,8 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> AvroResult<Value> {
         }
         Schema::Fixed { size, .. } => {
             let mut buf = vec![0u8; size];
-            reader.read_exact(&mut buf)
+            reader
+                .read_exact(&mut buf)
                 .map_err(|e| Error::ReadFixed(e, size))?;
             Ok(Value::Fixed(size, buf))
         }
@@ -161,7 +166,7 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> AvroResult<Value> {
             let index = zag_i64(reader)?;
             let variants = inner.variants();
             let variant = variants
-                .get(usize::try_from(index)?)
+                .get(usize::try_from(index).map_err(|e| Error::ConvertI64ToUsize(e, index))?)
                 .ok_or_else(|| Error::GetUnionVariant {
                     index,
                     num_variants: variants.len(),
@@ -178,12 +183,13 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> AvroResult<Value> {
             }
             Ok(Value::Record(items))
         }
-        Schema::Enum { ref symbols, .. } => Ok(
-            if let Value::Int(raw_index) = decode_int(reader)? {
-                let index = usize::try_from(raw_index)?;
+        Schema::Enum { ref symbols, .. } => {
+            Ok(if let Value::Int(raw_index) = decode_int(reader)? {
+                let index = usize::try_from(raw_index)
+                    .map_err(|e| Error::ConvertI32ToUsize(e, raw_index))?;
                 if (0..=symbols.len()).contains(&index) {
                     let symbol = symbols[index].clone();
-                    Value::Enum(index, symbol)
+                    Value::Enum(raw_index, symbol)
                 } else {
                     return Err(Error::GetEnumValue {
                         index,
@@ -192,8 +198,8 @@ pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> AvroResult<Value> {
                 }
             } else {
                 return Err(Error::GetEnumSymbol);
-            }
-        ),
+            })
+        }
     }
 }
 

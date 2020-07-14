@@ -362,17 +362,17 @@ pub(crate) type Scale = DecimalMetadata;
 
 fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalMetadata, Error> {
     Ok(if value.is_u64() {
-        value
+        let num = value
             .as_u64()
-            .ok_or_else(|| Error::GetU64FromJson(value.clone()))?
-            .try_into()
-            .map_err(Error::ConvertU64ToUsize)?
+            .ok_or_else(|| Error::GetU64FromJson(value.clone()))?;
+        num.try_into()
+            .map_err(|e| Error::ConvertU64ToUsize(e, num))?
     } else if value.is_i64() {
-        value
+        let num = value
             .as_i64()
-            .ok_or_else(|| Error::GetI64FromJson(value.clone()))?
-            .try_into()
-            .map_err(Error::ConvertI64ToUsize)?
+            .ok_or_else(|| Error::GetI64FromJson(value.clone()))?;
+        num.try_into()
+            .map_err(|e| Error::ConvertI64ToUsize(e, num))?
     } else {
         return Err(Error::GetPrecisionOrScaleFromJson(value.clone()));
     })

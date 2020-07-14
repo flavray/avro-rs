@@ -158,7 +158,7 @@ pub enum Error {
     },
 
     #[error("Enum value index {index} is out of bounds {nsymbols}")]
-    GetEnumValue { index: i32, nsymbols: usize },
+    GetEnumValue { index: usize, nsymbols: usize },
 
     #[error("Key {0} not found in decimal metadata JSON")]
     GetDecimalMetadataFromJson(&'static str),
@@ -202,11 +202,14 @@ pub enum Error {
     #[error("JSON value {0} claims to be i64 but cannot be converted")]
     GetI64FromJson(serde_json::Number),
 
-    #[error("Cannot convert u64 to usize")]
-    ConvertU64ToUsize(#[source] std::num::TryFromIntError),
+    #[error("Cannot convert u64 to usize: {1}")]
+    ConvertU64ToUsize(#[source] std::num::TryFromIntError, u64),
 
-    #[error("Cannot convert i64 to usize")]
-    ConvertI64ToUsize(#[source] std::num::TryFromIntError),
+    #[error("Cannot convert i64 to usize: {1}")]
+    ConvertI64ToUsize(#[source] std::num::TryFromIntError, i64),
+
+    #[error("Cannot convert i32 to usize: {1}")]
+    ConvertI32ToUsize(#[source] std::num::TryFromIntError, i32),
 
     #[error("Invalid JSON value for decimal precision/scale integer: {0}")]
     GetPrecisionOrScaleFromJson(serde_json::Number),
