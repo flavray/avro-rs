@@ -6,6 +6,7 @@ use crate::{
     schema::{Precision, RecordField, Scale, Schema, SchemaKind, UnionSchema},
 };
 use serde_json::Value as JsonValue;
+use serde_json::Number;
 use std::{collections::HashMap, convert::TryFrom, hash::BuildHasher, str::FromStr, u8};
 use uuid::Uuid;
 
@@ -244,6 +245,49 @@ impl From<JsonValue> for Value {
                     .map(|(key, value)| (key, value.into()))
                     .collect(),
             ),
+        }
+    }
+}
+
+impl From<Value> for JsonValue {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Null => JsonValue::Null,
+            Value::Boolean(b) => JsonValue::Bool(b),
+            Value::Int(i) => JsonValue::Number(i.into()),
+            Value::Long(l) => JsonValue::Number(l.into()),
+            Value::Float(f) => JsonValue::Number(Number::from_f64(f.into()).unwrap()),
+            Value::Double(d) => JsonValue::Number(Number::from_f64(d).unwrap()),
+            Value::Bytes(bytes) => JsonValue::Array(bytes.into_iter().map(|b| b.into()).collect()),
+            Value::String(s) => JsonValue::String(s),
+            Value::Fixed(_size, items) => JsonValue::Array(items.into_iter().map(|v| v.into()).collect()),
+            Value::Enum(_i, s) => JsonValue::String(s),
+            Value::Union(b) => (*b).into(),
+            Value::Array(items) => JsonValue::Array(items.into_iter().map(JsonValue::from).collect()),
+            Value::Map(items) => JsonValue::Object(
+                items
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect()
+            ),
+            Value::Record(items) => JsonValue::Object(
+                items
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect()
+            ),
+            Value::Date(d) => JsonValue::Number(d.into()),
+            Value::Decimal(d) => JsonValue::Array(d.to_vec().unwrap().into_iter().map(|v| v.into()).collect()),
+            //Value::Decimal(d) => JsonValue::Array(<Vec<u8>>::try_from(d).unwrap().into_iter().map(|v| v.into()).collect()),
+            Value::TimeMillis(t) => JsonValue::Number(t.into()),
+            Value::TimeMicros(t) => JsonValue::Number(t.into()),
+            Value::TimestampMillis(t) => JsonValue::Number(t.into()),
+            Value::TimestampMicros(t) => JsonValue::Number(t.into()),
+            Value::Duration(d) => {
+                let vector: [u8; 12] = d.into();
+                JsonValue::Array(vector.iter().map(|&v| v.into()).collect())
+            },
+            Value::Uuid(uuid) => JsonValue::String(uuid.to_hyphenated().to_string()),
         }
     }
 }
