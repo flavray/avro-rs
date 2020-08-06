@@ -5,8 +5,7 @@ use crate::{
     errors::{AvroResult, Error},
     schema::{Precision, RecordField, Scale, Schema, SchemaKind, UnionSchema},
 };
-use serde_json::Number;
-use serde_json::Value as JsonValue;
+use serde_json::{Number, Value as JsonValue};
 use std::{collections::HashMap, convert::TryFrom, hash::BuildHasher, str::FromStr, u8};
 use uuid::Uuid;
 
