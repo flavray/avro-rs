@@ -248,6 +248,7 @@ impl From<JsonValue> for Value {
     }
 }
 
+/// Convert Avro values to Json values
 impl std::convert::TryFrom<Value> for JsonValue {
     type Error = crate::errors::Error;
     fn try_from(value: Value) -> AvroResult<Self> {
