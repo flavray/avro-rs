@@ -258,17 +258,11 @@ impl std::convert::TryFrom<Value> for JsonValue {
             Value::Int(i) => Ok(JsonValue::Number(i.into())),
             Value::Long(l) => Ok(JsonValue::Number(l.into())),
             Value::Float(f) => Number::from_f64(f.into())
-                .map(|n| JsonValue::Number(n))
-                .ok_or(Error::JsonTryFrom(
-                    "failed to convert f64 to json".to_string(),
-                )),
-            Value::Double(d) => {
-                Number::from_f64(d)
-                    .map(|n| JsonValue::Number(n))
-                    .ok_or(Error::JsonTryFrom(
-                        "failed to convert f64 to json".to_string(),
-                    ))
-            }
+                .map(JsonValue::Number)
+                .ok_or_else(|| Error::JsonTryFrom("failed to convert f64 to json".to_string())),
+            Value::Double(d) => Number::from_f64(d)
+                .map(JsonValue::Number)
+                .ok_or_else(|| Error::JsonTryFrom("failed to convert f64 to json".to_string())),
             Value::Bytes(bytes) => Ok(JsonValue::Array(
                 bytes.into_iter().map(|b| b.into()).collect(),
             )),
@@ -280,7 +274,7 @@ impl std::convert::TryFrom<Value> for JsonValue {
             Value::Union(b) => JsonValue::try_from(*b),
             Value::Array(items) => {
                 let results: Result<Vec<JsonValue>, Error> =
-                    items.into_iter().map(|v| JsonValue::try_from(v)).collect();
+                    items.into_iter().map(JsonValue::try_from).collect();
                 results.map(JsonValue::Array)
             }
             Value::Map(items) => {
