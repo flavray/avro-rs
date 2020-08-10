@@ -20,7 +20,7 @@ impl Decimal {
         self.len
     }
 
-    pub fn to_vec(&self) -> AvroResult<Vec<u8>> {
+    pub(crate) fn to_vec(&self) -> AvroResult<Vec<u8>> {
         self.to_sign_extended_bytes_with_len(self.len)
     }
 
