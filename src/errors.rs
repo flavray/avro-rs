@@ -73,5 +73,5 @@ pub enum Error {
 
     /// Error while converting to json value
     #[error("failed to convert avro to json: {0}")]
-    JsonTryFrom(String)
+    JsonTryFrom(String),
 }

@@ -256,43 +256,50 @@ impl std::convert::TryFrom<Value> for JsonValue {
             Value::Boolean(b) => Ok(JsonValue::Bool(b)),
             Value::Int(i) => Ok(JsonValue::Number(i.into())),
             Value::Long(l) => Ok(JsonValue::Number(l.into())),
-            Value::Float(f) => {
-                Number::from_f64(f.into()).map(|n| JsonValue::Number(n)).ok_or(Error::JsonTryFrom("failed to convert f64 to json".to_string()))
-            },
+            Value::Float(f) => Number::from_f64(f.into())
+                .map(|n| JsonValue::Number(n))
+                .ok_or(Error::JsonTryFrom(
+                    "failed to convert f64 to json".to_string(),
+                )),
             Value::Double(d) => {
-                Number::from_f64(d).map(|n| JsonValue::Number(n)).ok_or(Error::JsonTryFrom("failed to convert f64 to json".to_string()))
-            },
-            Value::Bytes(bytes) => Ok(JsonValue::Array(bytes.into_iter().map(|b| b.into()).collect())),
-            Value::String(s) => Ok(JsonValue::String(s)),
-            Value::Fixed(_size, items) => {
-                Ok(JsonValue::Array(items.into_iter().map(|v| v.into()).collect()))
+                Number::from_f64(d)
+                    .map(|n| JsonValue::Number(n))
+                    .ok_or(Error::JsonTryFrom(
+                        "failed to convert f64 to json".to_string(),
+                    ))
             }
+            Value::Bytes(bytes) => Ok(JsonValue::Array(
+                bytes.into_iter().map(|b| b.into()).collect(),
+            )),
+            Value::String(s) => Ok(JsonValue::String(s)),
+            Value::Fixed(_size, items) => Ok(JsonValue::Array(
+                items.into_iter().map(|v| v.into()).collect(),
+            )),
             Value::Enum(_i, s) => Ok(JsonValue::String(s)),
             Value::Union(b) => JsonValue::try_from(*b),
             Value::Array(items) => {
-                let results: Result<Vec<JsonValue>, Error> = items.into_iter().map(|v| JsonValue::try_from(v)).collect();
+                let results: Result<Vec<JsonValue>, Error> =
+                    items.into_iter().map(|v| JsonValue::try_from(v)).collect();
                 results.map(JsonValue::Array)
             }
             Value::Map(items) => {
                 let results: Result<Vec<(String, JsonValue)>, Error> = items
                     .into_iter()
-                    .map(|(key, value)| {
-                    JsonValue::try_from(value).map(|v| (key, v))
-                }).collect();
+                    .map(|(key, value)| JsonValue::try_from(value).map(|v| (key, v)))
+                    .collect();
                 results.map(|v| JsonValue::Object(v.into_iter().collect()))
-            },
+            }
             Value::Record(items) => {
                 let results: Result<Vec<(String, JsonValue)>, Error> = items
                     .into_iter()
-                    .map(|(key, value)| {
-                        JsonValue::try_from(value).map(|v| (key, v))
-                    }).collect();
+                    .map(|(key, value)| JsonValue::try_from(value).map(|v| (key, v)))
+                    .collect();
                 results.map(|v| JsonValue::Object(v.into_iter().collect()))
-            },
-            Value::Date(d) => Ok(JsonValue::Number(d.into())),
-            Value::Decimal(d) => {
-                d.to_vec().map(|vec| JsonValue::Array(vec.into_iter().map(|v| v.into()).collect()))
             }
+            Value::Date(d) => Ok(JsonValue::Number(d.into())),
+            Value::Decimal(d) => d
+                .to_vec()
+                .map(|vec| JsonValue::Array(vec.into_iter().map(|v| v.into()).collect())),
             Value::TimeMillis(t) => Ok(JsonValue::Number(t.into())),
             Value::TimeMicros(t) => Ok(JsonValue::Number(t.into())),
             Value::TimestampMillis(t) => Ok(JsonValue::Number(t.into())),
