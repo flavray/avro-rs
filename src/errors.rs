@@ -70,4 +70,8 @@ pub enum Error {
     #[cfg(feature = "snappy")]
     #[error(transparent)]
     Snappy(#[from] snap::Error),
+
+    /// Error while converting to json value
+    #[error("failed to convert avro to json: {0}")]
+    JsonTryFrom(String)
 }

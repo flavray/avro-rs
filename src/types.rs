@@ -248,51 +248,60 @@ impl From<JsonValue> for Value {
     }
 }
 
-impl From<Value> for JsonValue {
-    fn from(value: Value) -> Self {
+impl std::convert::TryFrom<Value> for JsonValue {
+    type Error = crate::errors::Error;
+    fn try_from(value: Value) -> AvroResult<Self> {
         match value {
-            Value::Null => JsonValue::Null,
-            Value::Boolean(b) => JsonValue::Bool(b),
-            Value::Int(i) => JsonValue::Number(i.into()),
-            Value::Long(l) => JsonValue::Number(l.into()),
-            Value::Float(f) => JsonValue::Number(Number::from_f64(f.into()).unwrap()),
-            Value::Double(d) => JsonValue::Number(Number::from_f64(d).unwrap()),
-            Value::Bytes(bytes) => JsonValue::Array(bytes.into_iter().map(|b| b.into()).collect()),
-            Value::String(s) => JsonValue::String(s),
+            Value::Null => Ok(JsonValue::Null),
+            Value::Boolean(b) => Ok(JsonValue::Bool(b)),
+            Value::Int(i) => Ok(JsonValue::Number(i.into())),
+            Value::Long(l) => Ok(JsonValue::Number(l.into())),
+            Value::Float(f) => {
+                Number::from_f64(f.into()).map(|n| JsonValue::Number(n)).ok_or(Error::JsonTryFrom("failed to convert f64 to json".to_string()))
+            },
+            Value::Double(d) => {
+                Number::from_f64(d).map(|n| JsonValue::Number(n)).ok_or(Error::JsonTryFrom("failed to convert f64 to json".to_string()))
+            },
+            Value::Bytes(bytes) => Ok(JsonValue::Array(bytes.into_iter().map(|b| b.into()).collect())),
+            Value::String(s) => Ok(JsonValue::String(s)),
             Value::Fixed(_size, items) => {
-                JsonValue::Array(items.into_iter().map(|v| v.into()).collect())
+                Ok(JsonValue::Array(items.into_iter().map(|v| v.into()).collect()))
             }
-            Value::Enum(_i, s) => JsonValue::String(s),
-            Value::Union(b) => (*b).into(),
+            Value::Enum(_i, s) => Ok(JsonValue::String(s)),
+            Value::Union(b) => JsonValue::try_from(*b),
             Value::Array(items) => {
-                JsonValue::Array(items.into_iter().map(JsonValue::from).collect())
+                let results: Result<Vec<JsonValue>, Error> = items.into_iter().map(|v| JsonValue::try_from(v)).collect();
+                results.map(JsonValue::Array)
             }
-            Value::Map(items) => JsonValue::Object(
-                items
+            Value::Map(items) => {
+                let results: Result<Vec<(String, JsonValue)>, Error> = items
                     .into_iter()
-                    .map(|(key, value)| (key, value.into()))
-                    .collect(),
-            ),
-            Value::Record(items) => JsonValue::Object(
-                items
+                    .map(|(key, value)| {
+                    JsonValue::try_from(value).map(|v| (key, v))
+                }).collect();
+                results.map(|v| JsonValue::Object(v.into_iter().collect()))
+            },
+            Value::Record(items) => {
+                let results: Result<Vec<(String, JsonValue)>, Error> = items
                     .into_iter()
-                    .map(|(key, value)| (key, value.into()))
-                    .collect(),
-            ),
-            Value::Date(d) => JsonValue::Number(d.into()),
+                    .map(|(key, value)| {
+                        JsonValue::try_from(value).map(|v| (key, v))
+                    }).collect();
+                results.map(|v| JsonValue::Object(v.into_iter().collect()))
+            },
+            Value::Date(d) => Ok(JsonValue::Number(d.into())),
             Value::Decimal(d) => {
-                JsonValue::Array(d.to_vec().unwrap().into_iter().map(|v| v.into()).collect())
+                d.to_vec().map(|vec| JsonValue::Array(vec.into_iter().map(|v| v.into()).collect()))
             }
-            //Value::Decimal(d) => JsonValue::Array(<Vec<u8>>::try_from(d).unwrap().into_iter().map(|v| v.into()).collect()),
-            Value::TimeMillis(t) => JsonValue::Number(t.into()),
-            Value::TimeMicros(t) => JsonValue::Number(t.into()),
-            Value::TimestampMillis(t) => JsonValue::Number(t.into()),
-            Value::TimestampMicros(t) => JsonValue::Number(t.into()),
+            Value::TimeMillis(t) => Ok(JsonValue::Number(t.into())),
+            Value::TimeMicros(t) => Ok(JsonValue::Number(t.into())),
+            Value::TimestampMillis(t) => Ok(JsonValue::Number(t.into())),
+            Value::TimestampMicros(t) => Ok(JsonValue::Number(t.into())),
             Value::Duration(d) => {
                 let vector: [u8; 12] = d.into();
-                JsonValue::Array(vector.iter().map(|&v| v.into()).collect())
+                Ok(JsonValue::Array(vector.iter().map(|&v| v.into()).collect()))
             }
-            Value::Uuid(uuid) => JsonValue::String(uuid.to_hyphenated().to_string()),
+            Value::Uuid(uuid) => Ok(JsonValue::String(uuid.to_hyphenated().to_string())),
         }
     }
 }
