@@ -71,7 +71,7 @@ pub enum Error {
     #[error(transparent)]
     Snappy(#[from] snap::Error),
 
-    /// Error while converting to json value
-    #[error("failed to convert avro to json: {0}")]
-    JsonTryFrom(String),
+    /// Error while converting float to json value
+    #[error("failed to convert avro float to json: {0}")]
+    ConvertF64ToJson(f64),
 }
