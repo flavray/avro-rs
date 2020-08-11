@@ -286,17 +286,15 @@ impl std::convert::TryFrom<Value> for JsonValue {
                 .collect::<Result<Vec<_>, _>>()
                 .map(|v| Self::Object(v.into_iter().collect())),
             Value::Date(d) => Ok(Self::Number(d.into())),
-            Value::Decimal(d) => d
-                .to_vec()
+            Value::Decimal(ref d) => <Vec<u8>>::try_from(d)
                 .map(|vec| Self::Array(vec.into_iter().map(|v| v.into()).collect())),
             Value::TimeMillis(t) => Ok(Self::Number(t.into())),
             Value::TimeMicros(t) => Ok(Self::Number(t.into())),
             Value::TimestampMillis(t) => Ok(Self::Number(t.into())),
             Value::TimestampMicros(t) => Ok(Self::Number(t.into())),
-            Value::Duration(d) => {
-                let vector: [u8; 12] = d.into();
-                Ok(Self::Array(vector.iter().map(|&v| v.into()).collect()))
-            }
+            Value::Duration(d) => Ok(Self::Array(
+                <[u8; 12]>::from(d).iter().map(|&v| v.into()).collect(),
+            )),
             Value::Uuid(uuid) => Ok(Self::String(uuid.to_hyphenated().to_string())),
         }
     }
