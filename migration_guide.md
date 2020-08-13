@@ -11,19 +11,15 @@
   ```rust
   match decoded {
       Ok(msg) => Ok(msg.to_string()),
-      Err(ref e) => match e.downcast_ref::<SchemaResolutionError>() {
-          Some(_) => Ok("default".to_string()),
-          None => Err(format!("Unexpected error: {}", e)),
-      },
+      Err(Error::Decode(_)) => Ok("default".to_string()),
   }
   ```
-
   now becomes:
   ```rust
   match decoded {
       Ok(msg) => Ok(msg.to_string()),
-      Err(Error::SchemaResolution(_)) => Ok("default".to_string()),
-      Err(ref e) => Err(format!("Unexpected error: {}", e)),
+      Err(Error::ReadDuration(_)) => Ok("default".to_string()),
+      Err(e) => Err(format!("Unexpected error: {}", e)),
   }
   ```
 
