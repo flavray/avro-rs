@@ -1116,66 +1116,97 @@ mod tests {
 
     #[test]
     fn json_from_avro() {
-        assert!(JsonValue::try_from(Value::Null).map_or(false, |x| x == JsonValue::Null));
-        assert!(
-            JsonValue::try_from(Value::Boolean(true)).map_or(false, |x| x == JsonValue::Bool(true))
+        assert_eq!(JsonValue::try_from(Value::Null).unwrap(), JsonValue::Null);
+        assert_eq!(
+            JsonValue::try_from(Value::Boolean(true)).unwrap(),
+            JsonValue::Bool(true)
         );
-        assert!(
-            JsonValue::try_from(Value::Int(1)).map_or(false, |x| x == JsonValue::Number(1.into()))
+        assert_eq!(
+            JsonValue::try_from(Value::Int(1)).unwrap(),
+            JsonValue::Number(1.into())
         );
-        assert!(
-            JsonValue::try_from(Value::Long(1)).map_or(false, |x| x == JsonValue::Number(1.into()))
+        assert_eq!(
+            JsonValue::try_from(Value::Long(1)).unwrap(),
+            JsonValue::Number(1.into())
         );
-        assert!(JsonValue::try_from(Value::Float(1.0)).map_or(false, |x| x
-            == JsonValue::Number(Number::from_f64(1.0).unwrap())));
-        assert!(JsonValue::try_from(Value::Double(1.0)).map_or(false, |x| x
-            == JsonValue::Number(Number::from_f64(1.0).unwrap())));
-        assert!(
-            JsonValue::try_from(Value::Bytes(vec![1, 2, 3])).map_or(false, |x| x
-                == JsonValue::Array(vec![
-                    JsonValue::Number(1.into()),
-                    JsonValue::Number(2.into()),
-                    JsonValue::Number(3.into())
-                ]))
+        assert_eq!(
+            JsonValue::try_from(Value::Float(1.0)).unwrap(),
+            JsonValue::Number(Number::from_f64(1.0).unwrap())
         );
-        assert!(JsonValue::try_from(Value::String("test".into()))
-            .map_or(false, |x| x == JsonValue::String("test".into())));
-        assert!(
-            JsonValue::try_from(Value::Fixed(3, vec![1, 2, 3])).map_or(false, |x| x
-                == JsonValue::Array(vec![
-                    JsonValue::Number(1.into()),
-                    JsonValue::Number(2.into()),
-                    JsonValue::Number(3.into())
-                ]))
+        assert_eq!(
+            JsonValue::try_from(Value::Double(1.0)).unwrap(),
+            JsonValue::Number(Number::from_f64(1.0).unwrap())
         );
-        assert!(JsonValue::try_from(Value::Enum(1, "test_enum".into()))
-            .map_or(false, |x| x == JsonValue::String("test_enum".into())));
-        assert!(
-            JsonValue::try_from(Value::Union(Box::new(Value::String("test_enum".into()))))
-                .map_or(false, |x| x == JsonValue::String("test_enum".into()))
-        );
-        assert!(JsonValue::try_from(Value::Array(vec![
-            Value::Int(1),
-            Value::Int(2),
-            Value::Int(3)
-        ]))
-        .map_or(false, |x| x
-            == JsonValue::Array(vec![
+        assert_eq!(
+            JsonValue::try_from(Value::Bytes(vec![1, 2, 3])).unwrap(),
+            JsonValue::Array(vec![
                 JsonValue::Number(1.into()),
                 JsonValue::Number(2.into()),
                 JsonValue::Number(3.into())
-            ])));
-        assert!(JsonValue::try_from(Value::Map(
-            vec![
+            ])
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::String("test".into())).unwrap(),
+            JsonValue::String("test".into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Fixed(3, vec![1, 2, 3])).unwrap(),
+            JsonValue::Array(vec![
+                JsonValue::Number(1.into()),
+                JsonValue::Number(2.into()),
+                JsonValue::Number(3.into())
+            ])
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Enum(1, "test_enum".into())).unwrap(),
+            JsonValue::String("test_enum".into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Union(Box::new(Value::String("test_enum".into())))).unwrap(),
+            JsonValue::String("test_enum".into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Array(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3)
+            ]))
+            .unwrap(),
+            JsonValue::Array(vec![
+                JsonValue::Number(1.into()),
+                JsonValue::Number(2.into()),
+                JsonValue::Number(3.into())
+            ])
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Map(
+                vec![
+                    ("v1".to_string(), Value::Int(1)),
+                    ("v2".to_string(), Value::Int(2)),
+                    ("v3".to_string(), Value::Int(3))
+                ]
+                .into_iter()
+                .collect()
+            ))
+            .unwrap(),
+            JsonValue::Object(
+                vec![
+                    ("v1".to_string(), JsonValue::Number(1.into())),
+                    ("v2".to_string(), JsonValue::Number(2.into())),
+                    ("v3".to_string(), JsonValue::Number(3.into()))
+                ]
+                .into_iter()
+                .collect()
+            )
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Record(vec![
                 ("v1".to_string(), Value::Int(1)),
                 ("v2".to_string(), Value::Int(2)),
                 ("v3".to_string(), Value::Int(3))
-            ]
-            .into_iter()
-            .collect()
-        ))
-        .map_or(false, |x| x
-            == JsonValue::Object(
+            ]))
+            .unwrap(),
+            JsonValue::Object(
                 vec![
                     ("v1".to_string(), JsonValue::Number(1.into())),
                     ("v2".to_string(), JsonValue::Number(2.into())),
@@ -1183,46 +1214,42 @@ mod tests {
                 ]
                 .into_iter()
                 .collect()
-            )));
-        assert!(JsonValue::try_from(Value::Record(vec![
-            ("v1".to_string(), Value::Int(1)),
-            ("v2".to_string(), Value::Int(2)),
-            ("v3".to_string(), Value::Int(3))
-        ]))
-        .map_or(false, |x| x
-            == JsonValue::Object(
-                vec![
-                    ("v1".to_string(), JsonValue::Number(1.into())),
-                    ("v2".to_string(), JsonValue::Number(2.into())),
-                    ("v3".to_string(), JsonValue::Number(3.into()))
-                ]
-                .into_iter()
-                .collect()
-            )));
-        assert!(
-            JsonValue::try_from(Value::Date(1)).map_or(false, |x| x == JsonValue::Number(1.into()))
+            )
         );
-        assert!(
-            JsonValue::try_from(Value::Decimal(vec![1, 2, 3].into())).map_or(false, |x| x
-                == JsonValue::Array(vec![
-                    JsonValue::Number(1.into()),
-                    JsonValue::Number(2.into()),
-                    JsonValue::Number(3.into())
-                ]))
+        assert_eq!(
+            JsonValue::try_from(Value::Date(1)).unwrap(),
+            JsonValue::Number(1.into())
         );
-        assert!(JsonValue::try_from(Value::TimeMillis(1))
-            .map_or(false, |x| x == JsonValue::Number(1.into())));
-        assert!(JsonValue::try_from(Value::TimeMicros(1))
-            .map_or(false, |x| x == JsonValue::Number(1.into())));
-        assert!(JsonValue::try_from(Value::TimestampMillis(1))
-            .map_or(false, |x| x == JsonValue::Number(1.into())));
-        assert!(JsonValue::try_from(Value::TimestampMicros(1))
-            .map_or(false, |x| x == JsonValue::Number(1.into())));
-        assert!(JsonValue::try_from(Value::Duration(
-            [1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8, 12u8].into()
-        ))
-        .map_or(false, |x| x
-            == JsonValue::Array(vec![
+        assert_eq!(
+            JsonValue::try_from(Value::Decimal(vec![1, 2, 3].into())).unwrap(),
+            JsonValue::Array(vec![
+                JsonValue::Number(1.into()),
+                JsonValue::Number(2.into()),
+                JsonValue::Number(3.into())
+            ])
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::TimeMillis(1)).unwrap(),
+            JsonValue::Number(1.into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::TimeMicros(1)).unwrap(),
+            JsonValue::Number(1.into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::TimestampMillis(1)).unwrap(),
+            JsonValue::Number(1.into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::TimestampMicros(1)).unwrap(),
+            JsonValue::Number(1.into())
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Duration(
+                [1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8, 12u8].into()
+            ))
+            .unwrap(),
+            JsonValue::Array(vec![
                 JsonValue::Number(1.into()),
                 JsonValue::Number(2.into()),
                 JsonValue::Number(3.into()),
@@ -1235,11 +1262,14 @@ mod tests {
                 JsonValue::Number(10.into()),
                 JsonValue::Number(11.into()),
                 JsonValue::Number(12.into()),
-            ])));
-        assert!(JsonValue::try_from(Value::Uuid(
-            Uuid::parse_str("936DA01F-9ABD-4D9D-80C7-02AF85C822A8").unwrap()
-        ))
-        .map_or(false, |x| x
-            == JsonValue::String("936da01f-9abd-4d9d-80c7-02af85c822a8".into())));
+            ])
+        );
+        assert_eq!(
+            JsonValue::try_from(Value::Uuid(
+                Uuid::parse_str("936DA01F-9ABD-4D9D-80C7-02AF85C822A8").unwrap()
+            ))
+            .unwrap(),
+            JsonValue::String("936da01f-9abd-4d9d-80c7-02af85c822a8".into())
+        );
     }
 }
