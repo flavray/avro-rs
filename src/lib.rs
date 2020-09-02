@@ -680,6 +680,7 @@ mod decode;
 mod duration;
 mod encode;
 mod error;
+mod rabin;
 mod reader;
 mod ser;
 mod util;
