@@ -1,7 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
-use digest::consts::U8;
-use digest::generic_array::GenericArray;
-use digest::{FixedOutput, Reset, Update};
+use digest::{consts::U8, generic_array::GenericArray, FixedOutput, Reset, Update};
 use lazy_static::lazy_static;
 
 const EMPTY: i64 = -4513414715797952619;
