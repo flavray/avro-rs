@@ -1,3 +1,4 @@
+//! Implementation of the Rabin fingerprint algorithm
 use byteorder::{ByteOrder, LittleEndian};
 use digest::{consts::U8, generic_array::GenericArray, FixedOutput, Reset, Update};
 use lazy_static::lazy_static;
@@ -18,7 +19,37 @@ lazy_static! {
     };
 }
 
-/// Implementation of the Rabin fingerprint algorithm
+/// Implementation of the Rabin fingerprint algorithm using the Digest trait as described in [schema_fingerprints](https://avro.apache.org/docs/current/spec.html#schema_fingerprints).
+///
+/// The digest is returned as the 8-byte little-endian encoding of the Rabin hash.
+/// This is what is used for avro [single object encoding](https://avro.apache.org/docs/current/spec.html#single_object_encoding)
+///
+/// ```rust
+/// use avro_rs::rabin::Rabin;
+/// use digest::Digest;
+/// use hex_literal::hex;
+///
+/// // create the Rabin hasher
+/// let mut hasher = Rabin::new();
+///
+/// // add the data
+/// hasher.update(b"hello world");
+///
+/// // read hash digest and consume hasher
+/// let result = hasher.finalize();
+///
+/// assert_eq!(result[..], hex!("60335ba6d0415528"));
+/// ```
+///
+/// To convert the digest to the commonly used 64-bit integer value, you can use the byteorder crate:
+///
+/// ```rust
+/// use byteorder::{ByteOrder, LittleEndian};
+///
+/// let i = LittleEndian::read_i64(&result.to_vec())
+///
+/// assert_eq!(i, 2906301498937520992)
+/// ```
 #[derive(Clone)]
 pub struct Rabin {
     result: i64,
