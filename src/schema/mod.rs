@@ -25,6 +25,7 @@ use {
         collections::{HashMap, HashSet},
         fmt,
         rc::Rc,
+        std::convert::TryInto,
     },
     string_interner::{DefaultStringInterner, Sym as RawNameSym},
     wyhash::{self, WyHash},
@@ -105,9 +106,9 @@ impl Schema {
     /// https://avro.apache.org/docs/current/spec.html#schema_fingerprints
     pub fn fingerprint<D: Digest>(&self) -> SchemaFingerprint {
         let mut d = D::new();
-        d.input(self.canonical_form());
+        d.update(self.canonical_form());
         SchemaFingerprint {
-            bytes: d.result().to_vec(),
+            bytes: d.finalize().to_vec(),
         }
     }
 
@@ -225,7 +226,7 @@ impl fmt::Display for SchemaFingerprint {
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum SchemaType<'schema> {
     /// A `null` Avro schema.
     Null,
@@ -269,12 +270,12 @@ pub enum SchemaType<'schema> {
     ///
     /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
     /// integer greater than 0.
-    Decimal {
-        precision: DecimalMetadata,
-        scale: DecimalMetadata,
-        // TODO: Do we have to box it? If so then we cannot derive copy anymore
-        inner: Box<SchemaType<'schema>>,
-    },
+    // Decimal {
+    //     precision: DecimalMetadata,
+    //     scale: DecimalMetadata,
+    //     // TODO: Do we have to box it? If so then we cannot derive copy anymore
+    //     inner: SchemaType<'schema>,
+    // },
     /// A universally unique identifier, annotating a string.
     Uuid,
     /// Logical type which represents the number of days since the unix epoch.
@@ -401,7 +402,7 @@ macro_rules! match_lookup {
 ///
 /// More information about `vixed` can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#schema_fixed)
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct FixedSchema<'s>(&'s Schema, NameRef);
 
 impl<'s> FixedSchema<'s> {
@@ -418,7 +419,7 @@ impl<'s> FixedSchema<'s> {
 ///
 /// More information about `enum` can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#schema_enum)
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct EnumSchema<'s>(&'s Schema, NameRef);
 
 impl<'s> EnumSchema<'s> {
@@ -443,7 +444,7 @@ impl<'s> EnumSchema<'s> {
 ///
 /// More information about `records` can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#schema_record)
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct RecordSchema<'s>(&'s Schema, NameRef);
 
 impl<'s> RecordSchema<'s> {
@@ -488,7 +489,7 @@ impl<'s> RecordSchema<'s> {
 /// More information about `vixed` can be found in the
 /// [Avro specification (arrays)](https://avro.apache.org/docs/current/spec.html#schema_arrays)
 /// [Avro specification (maps)](https://avro.apache.org/docs/current/spec.html#schema_maps)
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Aggregate<'s>(&'s Schema, NameRef);
 
 impl<'s> Aggregate<'s> {
@@ -508,7 +509,7 @@ impl<'s> Aggregate<'s> {
 ///
 /// More information about `unions` can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#schema_union)
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct UnionSchema<'s>(&'s Schema, NameRef);
 
 impl<'s> UnionSchema<'s> {
@@ -595,7 +596,7 @@ impl From<SchemaType<'_>> for SchemaKind {
             SchemaType::Record(_) => SchemaKind::Record,
             SchemaType::Enum(_) => SchemaKind::Enum,
             SchemaType::Fixed(_) => SchemaKind::Fixed,
-            SchemaType::Decimal { .. } => SchemaKind::Decimal,
+            // SchemaType::Decimal { .. } => SchemaKind::Decimal,
             SchemaType::Uuid => SchemaKind::Uuid,
             SchemaType::Date => SchemaKind::Date,
             SchemaType::TimeMillis => SchemaKind::TimeMillis,

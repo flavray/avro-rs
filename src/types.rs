@@ -317,31 +317,31 @@ impl Value {
             (&Value::Null, SchemaType::Null) => true,
             (&Value::Boolean(_), SchemaType::Boolean) => true,
             (&Value::Int(_), SchemaType::Int) => true,
-            (&Value::Int(_), &Schema::Date) => true,
-            (&Value::Int(_), &Schema::TimeMillis) => true,
-            (&Value::Long(_), &Schema::Long) => true,
-            (&Value::Long(_), &Schema::TimeMicros) => true,
-            (&Value::Long(_), SchemaType::TimestampMillis) => true,
-            (&Value::Long(_), &Schema::TimestampMicros) => true,
-            (&Value::TimestampMicros(_), &Schema::TimestampMicros) => true,
-            (&Value::TimestampMillis(_), &Schema::TimestampMillis) => true,
-            (&Value::TimeMicros(_), &Schema::TimeMicros) => true,
-            (&Value::TimeMillis(_), &Schema::TimeMillis) => true,
-            (&Value::Date(_), &Schema::Date) => true,
-            (&Value::Decimal(_), &Schema::Decimal { .. }) => true,
-            (&Value::Duration(_), &Schema::Duration) => true,
-            (&Value::Uuid(_), &Schema::Uuid) => true,
+            (&Value::Int(_), SchemaType::Date) => true,
+            (&Value::Int(_), SchemaType::TimeMillis) => true,
+            (&Value::Long(_), SchemaType::Long) => true,
+            (&Value::Long(_), SchemaType::TimeMicros) => true,
+            (&Value::Long(_), chemaType::TimestampMillis) => true,
+            (&Value::Long(_), SchemaType::TimestampMicros) => true,
+            (&Value::TimestampMicros(_), SchemaType::TimestampMicros) => true,
+            (&Value::TimestampMillis(_), SchemaType::TimestampMillis) => true,
+            (&Value::TimeMicros(_), SchemaType::TimeMicros) => true,
+            (&Value::TimeMillis(_), SchemaType::TimeMillis) => true,
+            (&Value::Date(_), SchemaType::Date) => true,
+            // (&Value::Decimal(_), &SchemaType::Decimal { .. }) => true,
+            (&Value::Duration(_), SchemaType::Duration) => true,
+            (&Value::Uuid(_), SchemaType::Uuid) => true,
             (&Value::Float(_), SchemaType::Float) => true,
             (&Value::Double(_), SchemaType::Double) => true,
             (&Value::Bytes(_), SchemaType::Bytes) => true,
-            (&Value::Bytes(_), &Schema::Decimal { .. }) => true,
+            // (&Value::Bytes(_), &SchemaType::Decimal { .. }) => true,
             (&Value::String(_), SchemaType::String) => true,
-            (&Value::String(_), &Schema::Uuid) => true,
+            (&Value::String(_), SchemaType::Uuid) => true,
             //TODO: do we need to use name here for the fixed?
             (&Value::Fixed(n, _), SchemaType::Fixed(fixed)) => n == fixed.size(),
-            (&Value::Fixed(n, _), &Schema::Duration) => n == 12,
+            (&Value::Fixed(n, _), SchemaType::Duration) => n == 12,
             // TODO: check precision against n
-            (&Value::Fixed(_n, _), &Schema::Decimal { .. }) => true,
+            // (&Value::Fixed(_n, _), &Schema::Decimal { .. }) => true,
             (&Value::String(ref s), SchemaType::Enum(enum_)) => {
                 enum_.symbols().contains(&s.as_ref())
             }
@@ -405,18 +405,18 @@ impl Value {
             SchemaType::Array(array) => self.resolve_array(&array),
             SchemaType::Map(map) => self.resolve_map(&map),
             SchemaType::Record(record) => self.resolve_record(&record),
-            Schema::Decimal {
-                scale,
-                precision,
-                ref inner,
-            } => self.resolve_decimal(precision, scale, inner),
-            Schema::Date => self.resolve_date(),
-            Schema::TimeMillis => self.resolve_time_millis(),
-            Schema::TimeMicros => self.resolve_time_micros(),
-            Schema::TimestampMillis => self.resolve_timestamp_millis(),
-            Schema::TimestampMicros => self.resolve_timestamp_micros(),
-            Schema::Duration => self.resolve_duration(),
-            Schema::Uuid => self.resolve_uuid(),
+            // Schema::Decimal {
+            //     scale,
+            //     precision,
+            //     ref inner,
+            // } => self.resolve_decimal(precision, scale, inner),
+            SchemaType::Date => self.resolve_date(),
+            SchemaType::TimeMillis => self.resolve_time_millis(),
+            SchemaType::TimeMicros => self.resolve_time_micros(),
+            SchemaType::TimestampMillis => self.resolve_timestamp_millis(),
+            SchemaType::TimestampMicros => self.resolve_timestamp_micros(),
+            SchemaType::Duration => self.resolve_duration(),
+            SchemaType::Uuid => self.resolve_uuid(),
         }
     }
 
@@ -465,7 +465,7 @@ impl Value {
                 }
             }
             SchemaType::Bytes => (),
-            _ => return Err(Error::ResolveDecimalSchema(inner.into())),
+            _ => return Err(Error::ResolveDecimalSchema(SchemaKind::from(*inner))),
         };
         match self {
             Value::Decimal(num) => {
@@ -627,7 +627,7 @@ impl Value {
             } else {
                 Err(Error::GetEnumDefault {
                     symbol,
-                    symbols: symbols.into(),
+                    symbols: symbols.iter().map(|symbol| symbol.to_string()).collect(),
                 })
             }
         };
@@ -690,7 +690,7 @@ impl Value {
                     .collect::<Result<HashMap<_, _>, _>>()?,
             )),
             other => Err(Error::GetMap {
-                other,
+                other: other.into(),
                 expected: elem_type.into(),
             }),
         }
@@ -704,7 +704,7 @@ impl Value {
             other => Err(Error::GetRecord {
                 expected: fields
                     .iter()
-                    .map(|field| (field.name.clone(), field.schema.clone().into()))
+                    .map(|field| (field.name().to_owned(), SchemaKind::from(field.schema())))
                     .collect(),
                 other: other.into(),
             }),
@@ -715,12 +715,14 @@ impl Value {
             .map(|field| {
                 let value = match items.remove(field.name()) {
                     Some(value) => value,
-                    None => match field.default {
-                        Some(ref value) => match field.schema {
-                            Schema::Enum { ref symbols, .. } => {
-                                Value::from(value.clone()).resolve_enum(symbols)?
+                    None => match field.default() {
+                        Some(value) => {
+                            let value = value.clone().avro();
+                            match field.schema() {
+                                SchemaType::Enum(enum_) => value.resolve_enum(&enum_.symbols())?,
+                                _ => value,
                             }
-                        },
+                        }
                         _ => return Err(Error::GetField(field.name().to_owned())),
                     },
                 };

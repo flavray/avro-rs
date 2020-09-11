@@ -1,5 +1,5 @@
 //! Logic for checking schema compatibility
-use crate::schema::{Schema, SchemaKind};
+use crate::schema::{SchemaKind, SchemaType};
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     hash::Hasher,
@@ -255,8 +255,8 @@ impl SchemaCompatibility {
                     }
                 }
                 SchemaKind::Array => {
-                    if let Schema::Array(w_a) = writers_schema {
-                        if let Schema::Array(r_a) = readers_schema {
+                    if let SchemaType::Array(w_a) = writers_schema {
+                        if let SchemaType::Array(r_a) = readers_schema {
                             return SchemaCompatibility::match_schemas(w_a, r_a);
                         } else {
                             unreachable!("readers_schema should have been Schema::Array")

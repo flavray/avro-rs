@@ -449,7 +449,7 @@ impl SchemaBuilder {
 
         match errors.is_empty() {
             true => Ok(()),
-            false => Err(Error::SchemaBuilderInvalidationFail(errors)),
+            false => Err(Error::SchemaBuilderValidationFail(errors)),
         }
     }
 }
