@@ -117,12 +117,16 @@ impl Serialize for OnceSchemaCell<SchemaType<'_>> {
         match self.actual {
             SchemaType::Null => serializer.serialize_str("null"),
             SchemaType::Boolean => serializer.serialize_str("boolean"),
-            SchemaType::Int => serializer.serialize_str("int"),
-            SchemaType::Long => serializer.serialize_str("long"),
+            SchemaType::Int | SchemaType::Date => serializer.serialize_str("int"),
+            SchemaType::Long
+            | SchemaType::TimeMillis
+            | SchemaType::TimeMicros
+            | SchemaType::TimestampMillis
+            | SchemaType::TimestampMicros => serializer.serialize_str("long"),
             SchemaType::Float => serializer.serialize_str("float"),
             SchemaType::Double => serializer.serialize_str("double"),
             SchemaType::Bytes => serializer.serialize_str("bytes"),
-            SchemaType::String => serializer.serialize_str("string"),
+            SchemaType::String | SchemaType::Uuid => serializer.serialize_str("string"),
             SchemaType::Array(array) => {
                 serialize_aggregate!(self, array, "items", "array", serializer)
             }
@@ -157,15 +161,12 @@ impl Serialize for OnceSchemaCell<SchemaType<'_>> {
             SchemaType::Enum(enum_) => self.map(enum_).serialize(serializer),
             SchemaType::Fixed(fixed) => self.map(fixed).serialize(serializer),
             //TODO: I have no frickking idea what to do here
-            SchemaType::Decimal{  precision, scale, inner} => (),
-            SchemaType::Uuid => (),
-            SchemaType::Date => (),
-            SchemaType::TimeMillis => (),
-            SchemaType::TimeMicros => (),
-            SchemaType::TimestampMillis => (),
-            SchemaType::TimestampMicros => (),
-            SchemaType::Duration => (),
-            _ => (),
+            SchemaType::Decimal {
+                precision,
+                scale,
+                inner,
+            } => (),
+            SchemaType::Duration => serializer.serialize_str("long"),
         }
     }
 }

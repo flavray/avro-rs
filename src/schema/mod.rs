@@ -225,7 +225,7 @@ impl fmt::Display for SchemaFingerprint {
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum SchemaType<'schema> {
     /// A `null` Avro schema.
     Null,
@@ -273,7 +273,7 @@ pub enum SchemaType<'schema> {
         precision: DecimalMetadata,
         scale: DecimalMetadata,
         // TODO: Do we have to box it? If so then we cannot derive copy anymore
-        inner: SchemaType<'schema>,
+        inner: Box<SchemaType<'schema>>,
     },
     /// A universally unique identifier, annotating a string.
     Uuid,
