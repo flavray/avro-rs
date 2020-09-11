@@ -321,7 +321,7 @@ impl Value {
             (&Value::Int(_), SchemaType::TimeMillis) => true,
             (&Value::Long(_), SchemaType::Long) => true,
             (&Value::Long(_), SchemaType::TimeMicros) => true,
-            (&Value::Long(_), chemaType::TimestampMillis) => true,
+            (&Value::Long(_), SchemaType::TimestampMillis) => true,
             (&Value::Long(_), SchemaType::TimestampMicros) => true,
             (&Value::TimestampMicros(_), SchemaType::TimestampMicros) => true,
             (&Value::TimestampMillis(_), SchemaType::TimestampMillis) => true,

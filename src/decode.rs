@@ -11,7 +11,6 @@ use uuid::Uuid;
 // use std::collections::HashMap;
 // use std::io::Read;
 
-
 // use crate::schema::SchemaType;
 // use crate::types::Value;
 // use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
@@ -74,17 +73,17 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
             reader.read_exact(&mut buf[..]).map_err(Error::ReadFloat)?;
             Ok(Value::Float(f32::from_le_bytes(buf)))
         }
-        SchemaType::Decimal { ref inner, .. } => match &**inner {
-            SchemaType::Fixed { .. } => match decode(*inner, reader)? {
-                Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-                value => Err(Error::FixedValue(value.into())),
-            },
-            SchemaType::Bytes => match decode(*inner, reader)? {
-                Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-                value => Err(Error::BytesValue(value.into())),
-            },
-            schema => Err(Error::ResolveDecimalSchema(schema.into())),
-        },
+        // SchemaType::Decimal { ref inner, .. } => match &**inner {
+        //     SchemaType::Fixed { .. } => match decode(*inner, reader)? {
+        //         Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+        //         value => Err(Error::FixedValue(value.into())),
+        //     },
+        //     SchemaType::Bytes => match decode(*inner, reader)? {
+        //         Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+        //         value => Err(Error::BytesValue(value.into())),
+        //     },
+        //     schema => Err(Error::ResolveDecimalSchema(schema.into())),
+        // },
         SchemaType::Uuid => Ok(Value::Uuid(
             Uuid::from_str(match decode(SchemaType::String, reader)? {
                 Value::String(ref s) => s,
@@ -123,7 +122,7 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
             ))
         }
         //TODO: what about name?
-        SchemaType::Fixed(_name, fixed) => {
+        SchemaType::Fixed(fixed) => {
             let mut buf = vec![0u8; fixed.size() as usize];
             reader.read_exact(&mut buf)?;
             Ok(Value::Fixed(fixed.size(), buf))
@@ -214,10 +213,15 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
 
 #[cfg(test)]
 mod tests {
-    use crate::{decode::decode, schema::Schema, types::{
-        Value,
-        Value::{Array, Int, Map},
-    }, Decimal, SchemaType};
+    use crate::{
+        decode::decode,
+        schema::Schema,
+        types::{
+            Value,
+            Value::{Array, Int, Map},
+        },
+        Decimal, SchemaType,
+    };
     use std::collections::HashMap;
 
     #[test]
