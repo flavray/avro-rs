@@ -1,27 +1,31 @@
-use failure::{Error, Fail};
-
-use super::*;
-use crate::schema::builder::{
-    ArrayBuilder, BuilderError, EnumBuilder, FixedBuilder, MapBuilder, NamedBuilder, RecordBuilder,
-    SchemaBuilder, UnionBuilder,
+use crate::AvroResult;
+use {
+    super::*,
+    crate::{
+        error::Error,
+        schema::builder::{
+            ArrayBuilder, EnumBuilder, FixedBuilder, MapBuilder, NamedBuilder, RecordBuilder,
+            SchemaBuilder, UnionBuilder,
+        },
+    },
 };
 
-/// Describes errors happened while parsing Avro schemas.
-#[derive(Fail, Debug)]
-#[fail(display = "Failed to parse schema: {}", _0)]
-pub struct ParseSchemaError(pub(crate) String);
+// /// Describes errors happened while parsing Avro schemas.
+// #[derive(Fail, Debug)]
+// #[fail(display = "Failed to parse schema: {}", _0)]
+// pub struct ParseSchemaError(pub(crate) String);
 
-impl ParseSchemaError {
-    pub fn new<S: Into<String>>(msg: S) -> ParseSchemaError {
-        ParseSchemaError(msg.into())
-    }
-}
-
-impl From<BuilderError> for ParseSchemaError {
-    fn from(err: BuilderError) -> Self {
-        Self(err.0)
-    }
-}
+// impl ParseSchemaError {
+//     pub fn new<S: Into<String>>(msg: S) -> ParseSchemaError {
+//         ParseSchemaError(msg.into())
+//     }
+// }
+//
+// impl From<BuilderError> for ParseSchemaError {
+//     fn from(err: BuilderError) -> Self {
+//         Self(err.0)
+//     }
+// }
 
 pub(super) struct SchemaParser<'s> {
     current_ns: Option<&'s str>,
@@ -35,18 +39,21 @@ impl<'s> SchemaParser<'s> {
             builder: SchemaBuilder::new(),
         };
         let root = parser.parse_schema(value)?;
-        parser.builder.build(root).map_err(|e| e.into())
+        parser
+            .builder
+            .build(root)
+            .map_err(|e| Error::SchemaResolution(e.to_string()))
     }
 
     /// Create a `AvroSchema` from a `serde_json::Value` representing a JSON Avro schema.
-    pub(super) fn parse_schema(&mut self, value: &'s Value) -> Result<NameRef, Error> {
+    pub(super) fn parse_schema(&mut self, value: &'s Value) -> AvroResult<NameRef> {
         let curr_ns = self.current_ns.clone();
 
         let name_ref = match *value {
             Value::String(ref t) => self.parse_typeref(t.as_str()),
             Value::Object(ref data) => self.parse_complex(data),
             Value::Array(ref data) => self.parse_union(data),
-            _ => Err(ParseSchemaError::new("Must be a JSON string, object or array").into()),
+            _ => Err(Error::ParseSchemaFromValidJson),
         };
 
         if self.current_ns != curr_ns {
@@ -59,19 +66,14 @@ impl<'s> SchemaParser<'s> {
     fn parse_typeref(&mut self, name: &str) -> Result<NameRef, Error> {
         self.builder
             .primitive_or_forward_declaration(name, self.current_ns.as_ref().map(|x| x.as_ref()))
-            .map_err(|e| e.into())
     }
 
     /// Parse a bare named item and add to the string index if needed
-    fn parse_name<'b, B>(&mut self, complex: &'s JsonMap) -> Result<B, Error>
+    fn parse_name<'b, B>(&mut self, complex: &'s JsonMap) -> AvroResult<B>
     where
         B: NamedBuilder<'s>,
     {
-        let mut builder = B::name(
-            complex
-                .name()
-                .ok_or_else(|| ParseSchemaError::new("No `name` field"))?,
-        );
+        let mut builder = B::name(complex.name().ok_or_else(|| Error::GetNameField)?);
 
         if let namespace @ Some(_) = complex.string("namespace") {
             if namespace != self.current_ns {
@@ -99,7 +101,7 @@ impl<'s> SchemaParser<'s> {
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
-    fn parse_complex(&mut self, complex: &'s JsonMap) -> Result<NameRef, Error> {
+    fn parse_complex(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
         match complex.get("type") {
             Some(&Value::String(ref t)) => match t.as_str() {
                 "record" => self.parse_record(complex),
@@ -112,33 +114,35 @@ impl<'s> SchemaParser<'s> {
             Some(&Value::Object(ref data)) => match data.get("type") {
                 Some(ref value) => self.parse_schema(value),
                 None => Err(
-                    ParseSchemaError::new(format!("Unknown complex type: {:?}", complex)).into(),
+                    // Error::new(format!("Unknown complex type: {:?}", complex)).into(),
+                    Error::GetComplexTypeField,
                 ),
             },
-            _ => Err(ParseSchemaError::new("No `type` in complex type").into()),
+            _ => Err(
+                //ParseSchemaError::new("No `type` in complex type").into()),
+                Error::GetComplexTypeField,
+            ),
         }
     }
 
     /// Parse a `serde_json::Value` representing a Avro record type into a `Schema`.
-    fn parse_record(&mut self, complex: &'s JsonMap) -> Result<NameRef, Error> {
+    fn parse_record(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
         let mut record = self.parse_name::<RecordBuilder>(complex)?;
         record.doc(complex.doc());
 
         let items = complex
             .get("fields")
             .and_then(|fields| fields.as_array())
-            .ok_or_else::<Error, _>(|| ParseSchemaError::new("No `fields` in record").into())?
+            .ok_or_else::<Error, _>(|| Error::GetRecordFieldsJson)?
             .iter()
             .filter_map(|field| field.as_object());
 
         for item in items {
-            let name = item
-                .name()
-                .ok_or_else(|| ParseSchemaError::new("No `name` in record field"))?;
+            let name = item.name().ok_or_else(|| Error::GetNameFieldFromRecord)?;
 
             let schema = item
                 .get("type")
-                .ok_or_else(|| ParseSchemaError::new("No `type` in record field").into())
+                .ok_or_else(|| Error::GetTypeFieldFromRecord)
                 .and_then(|type_| self.parse_schema(type_))?;
 
             let order = item
@@ -162,76 +166,66 @@ impl<'s> SchemaParser<'s> {
     }
 
     /// Parse a `serde_json::Value` representing a Avro enum type into a `Schema`.
-    fn parse_enum(&mut self, complex: &'s JsonMap) -> Result<NameRef, Error> {
+    fn parse_enum(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
         let mut enum_builder = self.parse_name::<EnumBuilder>(complex)?;
         enum_builder.doc(complex.doc());
 
         let mut symbols = complex
             .get("symbols")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| ParseSchemaError::new("No `symbols` field in enum"))
+            .ok_or_else(|| Error::GetEnumSymbolsField)
             .map(|syms| syms.iter().filter_map(|sym| sym.as_str()).peekable())?;
-        symbols
-            .peek()
-            .ok_or_else(|| ParseSchemaError::new("Unable to parse `symbols` in enum"))?;
+        symbols.peek().ok_or_else(|| Error::GetEnumSymbols)?;
 
-        enum_builder
-            .symbols(symbols, &mut self.builder)
-            .map_err(|e| e.into())
+        enum_builder.symbols(symbols, &mut self.builder)
     }
 
     /// Parse a `serde_json::Value` representing a Avro array type into a `Schema`.
-    fn parse_array(&mut self, complex: &'s JsonMap) -> Result<NameRef, Error> {
+    fn parse_array(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
         let array_builder = self
             .parse_name::<ArrayBuilder>(complex)
-            .unwrap_or_else(|_e| ArrayBuilder::new());
+            .unwrap_or_else(|_| ArrayBuilder::new());
 
         let items = complex
             .get("items")
-            .ok_or_else(|| ParseSchemaError::new("No `items` in array").into())
+            .ok_or_else(|| Error::GetArrayItemsField)
             .and_then(|items| self.parse_schema(items))?;
 
-        array_builder
-            .items(items, &mut self.builder)
-            .map_err(|e| e.into())
+        array_builder.items(items, &mut self.builder)
     }
 
     /// Parse a `serde_json::Value` representing a Avro map type into a `Schema`.
-    fn parse_map(&mut self, complex: &'s JsonMap) -> Result<NameRef, Error> {
+    fn parse_map(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
         let map_builder = self
             .parse_name::<MapBuilder>(complex)
-            .unwrap_or_else(|_e| MapBuilder::new());
+            .unwrap_or_else(|_| MapBuilder::new());
 
         let values = complex
             .get("values")
-            .ok_or_else(|| ParseSchemaError::new("No `values` in map").into())
+            .ok_or_else(|| Error::GetMapValuesField)
             .and_then(|items| self.parse_schema(items))?;
 
-        map_builder
-            .values(values, &mut self.builder)
-            .map_err(|e| e.into())
+        map_builder.values(values, &mut self.builder)
     }
 
     /// Parse a `serde_json::Value` representing a Avro union type into a `Schema`.
-    fn parse_union(&mut self, items: &'s [Value]) -> Result<NameRef, Error> {
+    fn parse_union(&mut self, items: &'s [Value]) -> AvroResult<NameRef> {
         let mut union_builder = UnionBuilder::new();
         for item in items {
             union_builder.variant(self.parse_schema(item)?);
         }
-        union_builder.build(&mut self.builder).map_err(|e| e.into())
+        union_builder.build(&mut self.builder)
     }
 
     /// Parse a `serde_json::Value` representing a Avro fixed type into a `Schema`.
-    fn parse_fixed(&mut self, complex: &'s JsonMap) -> Result<NameRef, Error> {
+    fn parse_fixed(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
         let fixed_builder = self.parse_name::<FixedBuilder>(complex)?;
 
         let size = complex
             .get("size")
             .and_then(|v| v.as_i64().map(|x| x as usize))
-            .ok_or_else(|| ParseSchemaError::new("No `size` in fixed"))?;
+            .ok_or_else(|| Error::GetFixedSizeField)?;
 
-        fixed_builder
-            .size(size, &mut self.builder)
-            .map_err(|e| e.into())
+        fixed_builder.size(size, &mut self.builder)
     }
 }

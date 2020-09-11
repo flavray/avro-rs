@@ -1,10 +1,9 @@
-use std::time::{Duration, Instant};
-
 use avro_rs::{
     schema::Schema,
-    types::{Record, ToAvro, Value},
+    types::{Record, Value},
     Reader, Writer,
 };
+use std::time::{Duration, Instant};
 
 fn nanos(duration: Duration) -> u64 {
     duration.as_secs() * 1_000_000_000 + duration.subsec_nanos() as u64
@@ -39,7 +38,7 @@ fn benchmark(schema: &Schema, record: &Value, s: &str, count: usize, runs: usize
         let duration = Instant::now().duration_since(start);
         durations.push(duration);
 
-        bytes = Some(writer.into_inner());
+        bytes = Some(writer.into_inner().unwrap());
     }
 
     let total_duration_write = durations.into_iter().fold(0u64, |a, b| a + nanos(b));
@@ -90,7 +89,7 @@ fn main() {
 
     let mut small_record = Record::new(&small_schema).unwrap();
     small_record.put("field", "foo");
-    let small_record = small_record.avro();
+    let small_record = small_record.into();
 
     let raw_address_schema = r#"{"fields": [{"default": "NONE", "type": "string", "name": "street"}, {"default": "NONE", "type": "string", "name": "city"}, {"default": "NONE", "type": "string", "name": "state_prov"}, {"default": "NONE", "type": "string", "name": "country"}, {"default": "NONE", "type": "string", "name": "zip"}], "type": "record", "name": "mailing_address"}"#;
     let address_schema = Schema::parse_str(raw_address_schema).unwrap();
@@ -107,16 +106,16 @@ fn main() {
     big_record.put("phone", "000000000");
     big_record.put("housenum", "0000");
     big_record.put("address", address);
-    let big_record = big_record.avro();
+    let big_record = big_record.into();
 
-    benchmark(&small_schema, &small_record, "S", 10000, 1);
-    benchmark(&big_schema, &big_record, "B", 10000, 1);
+    benchmark(&small_schema, &small_record, "S", 10_000, 1);
+    benchmark(&big_schema, &big_record, "B", 10_000, 1);
 
-    benchmark(&small_schema, &small_record, "S", 1, 100000);
+    benchmark(&small_schema, &small_record, "S", 1, 100_000);
     benchmark(&small_schema, &small_record, "S", 100, 1000);
-    benchmark(&small_schema, &small_record, "S", 10000, 10);
+    benchmark(&small_schema, &small_record, "S", 10_000, 10);
 
-    benchmark(&big_schema, &big_record, "B", 1, 100000);
+    benchmark(&big_schema, &big_record, "B", 1, 100_000);
     benchmark(&big_schema, &big_record, "B", 100, 1000);
-    benchmark(&big_schema, &big_record, "B", 10000, 10);
+    benchmark(&big_schema, &big_record, "B", 10_000, 10);
 }

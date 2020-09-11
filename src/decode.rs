@@ -1,76 +1,129 @@
-use std::collections::HashMap;
-use std::io::Read;
-use std::mem::transmute;
+use crate::{
+    decimal::Decimal,
+    duration::Duration,
+    schema::SchemaType,
+    types::Value,
+    util::{safe_len, zag_i32, zag_i64},
+    AvroResult, Error,
+};
+use std::{collections::HashMap, convert::TryFrom, io::Read, str::FromStr};
+use uuid::Uuid;
+// use std::collections::HashMap;
+// use std::io::Read;
 
-use failure::Error;
 
-use crate::schema::SchemaType;
-use crate::types::Value;
-use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
+// use crate::schema::SchemaType;
+// use crate::types::Value;
+// use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
 
 #[inline]
-fn decode_long<R: Read>(reader: &mut R) -> Result<Value, Error> {
+fn decode_long<R: Read>(reader: &mut R) -> AvroResult<Value> {
     zag_i64(reader).map(Value::Long)
 }
 
 #[inline]
-fn decode_int<R: Read>(reader: &mut R) -> Result<Value, Error> {
+fn decode_int<R: Read>(reader: &mut R) -> AvroResult<Value> {
     zag_i32(reader).map(Value::Int)
 }
 
 #[inline]
-fn decode_len<R: Read>(reader: &mut R) -> Result<usize, Error> {
-    zag_i64(reader).and_then(|len| safe_len(len as usize))
+fn decode_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
+    let len = zag_i64(reader)?;
+    safe_len(usize::try_from(len).map_err(|e| Error::ConvertI64ToUsize(e, len))?)
+}
+
+/// Decode the length of a sequence.
+///
+/// Maps and arrays are 0-terminated, 0i64 is also encoded as 0 in Avro reading a length of 0 means
+/// the end of the map or array.
+fn decode_seq_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
+    let raw_len = zag_i64(reader)?;
+    safe_len(
+        usize::try_from(match raw_len.cmp(&0) {
+            std::cmp::Ordering::Equal => return Ok(0),
+            std::cmp::Ordering::Less => {
+                let _size = zag_i64(reader)?;
+                -raw_len
+            }
+            std::cmp::Ordering::Greater => raw_len,
+        })
+        .map_err(|e| Error::ConvertI64ToUsize(e, raw_len))?,
+    )
 }
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> Result<Value, Error> {
+pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> {
     match schema {
         SchemaType::Null => Ok(Value::Null),
         SchemaType::Boolean => {
             let mut buf = [0u8; 1];
-            reader.read_exact(&mut buf[..])?;
+            reader
+                .read_exact(&mut buf[..])
+                .map_err(Error::ReadBoolean)?;
 
             match buf[0] {
                 0u8 => Ok(Value::Boolean(false)),
                 1u8 => Ok(Value::Boolean(true)),
-                _ => Err(DecodeError::new("not a bool").into()),
+                _ => Err(Error::BoolValue(buf[0])),
             }
         }
         SchemaType::Int => decode_int(reader),
         SchemaType::Long => decode_long(reader),
         SchemaType::Float => {
-            let mut buf = [0u8; 4];
-            reader.read_exact(&mut buf[..])?;
-            Ok(Value::Float(unsafe { transmute::<[u8; 4], f32>(buf) }))
+            let mut buf = [0u8; std::mem::size_of::<f32>()];
+            reader.read_exact(&mut buf[..]).map_err(Error::ReadFloat)?;
+            Ok(Value::Float(f32::from_le_bytes(buf)))
+        }
+        SchemaType::Decimal { ref inner, .. } => match &**inner {
+            SchemaType::Fixed { .. } => match decode(*inner, reader)? {
+                Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+                value => Err(Error::FixedValue(value.into())),
+            },
+            SchemaType::Bytes => match decode(*inner, reader)? {
+                Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+                value => Err(Error::BytesValue(value.into())),
+            },
+            schema => Err(Error::ResolveDecimalSchema(schema.into())),
+        },
+        SchemaType::Uuid => Ok(Value::Uuid(
+            Uuid::from_str(match decode(SchemaType::String, reader)? {
+                Value::String(ref s) => s,
+                value => return Err(Error::GetUuidFromStringValue(value.into())),
+            })
+            .map_err(Error::ConvertStrToUuid)?,
+        )),
+        SchemaType::Date => zag_i32(reader).map(Value::Date),
+        SchemaType::TimeMillis => zag_i32(reader).map(Value::TimeMillis),
+        SchemaType::TimeMicros => zag_i64(reader).map(Value::TimeMicros),
+        SchemaType::TimestampMillis => zag_i64(reader).map(Value::TimestampMillis),
+        SchemaType::TimestampMicros => zag_i64(reader).map(Value::TimestampMicros),
+        SchemaType::Duration => {
+            let mut buf = [0u8; 12];
+            reader.read_exact(&mut buf).map_err(Error::ReadDuration)?;
+            Ok(Value::Duration(Duration::from(buf)))
         }
         SchemaType::Double => {
-            let mut buf = [0u8; 8];
-            reader.read_exact(&mut buf[..])?;
-            Ok(Value::Double(unsafe { transmute::<[u8; 8], f64>(buf) }))
+            let mut buf = [0u8; std::mem::size_of::<f64>()];
+            reader.read_exact(&mut buf[..]).map_err(Error::ReadDouble)?;
+            Ok(Value::Double(f64::from_le_bytes(buf)))
         }
         SchemaType::Bytes => {
             let len = decode_len(reader)?;
-            let mut buf = Vec::with_capacity(len);
-            unsafe {
-                buf.set_len(len);
-            }
-            reader.read_exact(&mut buf)?;
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf).map_err(Error::ReadBytes)?;
             Ok(Value::Bytes(buf))
         }
         SchemaType::String => {
             let len = decode_len(reader)?;
-            let mut buf = Vec::with_capacity(len);
-            unsafe {
-                buf.set_len(len);
-            }
-            reader.read_exact(&mut buf)?;
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf).map_err(Error::ReadString)?;
 
-            String::from_utf8(buf)
-                .map(Value::String)
-                .map_err(|_| DecodeError::new("not a valid utf-8 string").into())
+            Ok(Value::String(
+                String::from_utf8(buf).map_err(Error::ConvertToUtf8)?,
+            ))
         }
-        SchemaType::Fixed(fixed) => {
+        //TODO: what about name?
+        SchemaType::Fixed(_name, fixed) => {
             let mut buf = vec![0u8; fixed.size() as usize];
             reader.read_exact(&mut buf)?;
             Ok(Value::Fixed(fixed.size(), buf))
@@ -79,14 +132,12 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> Result<Value, Erro
             let mut items = Vec::new();
 
             loop {
-                let len = decode_len(reader)?;
-                // arrays are 0-terminated, 0i64 is also encoded as 0 in Avro
-                // reading a length of 0 means the end of the array
+                let len = decode_seq_len(reader)?;
                 if len == 0 {
                     break;
                 }
 
-                items.reserve(len as usize);
+                items.reserve(len);
                 for _ in 0..len {
                     items.push(decode(array.items(), reader)?);
                 }
@@ -98,20 +149,19 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> Result<Value, Erro
             let mut items = HashMap::new();
 
             loop {
-                let len = decode_len(reader)?;
-                // maps are 0-terminated, 0i64 is also encoded as 0 in Avro
-                // reading a length of 0 means the end of the map
+                let len = decode_seq_len(reader)?;
                 if len == 0 {
                     break;
                 }
 
-                items.reserve(len as usize);
+                items.reserve(len);
                 for _ in 0..len {
-                    if let Value::String(key) = decode(SchemaType::String, reader)? {
-                        let value = decode(map.items(), reader)?;
-                        items.insert(key, value);
-                    } else {
-                        return Err(DecodeError::new("map key is not a string").into());
+                    match decode(SchemaType::String, reader)? {
+                        Value::String(key) => {
+                            let value = decode(map.items(), reader)?;
+                            items.insert(key, value);
+                        }
+                        value => return Err(Error::MapKeyType(value.into())),
                     }
                 }
             }
@@ -121,38 +171,132 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> Result<Value, Erro
         SchemaType::Union(union) => {
             let index = zag_i64(reader)?;
             let variants = union.variants();
-            match variants.get(index as usize) {
-                Some(variant) => decode(*variant, reader).map(|x| Value::Union(Box::new(x))),
-                None => Err(DecodeError::new("Union index out of bounds").into()),
-            }
+            let variant = variants
+                .get(usize::try_from(index).map_err(|e| Error::ConvertI64ToUsize(e, index))?)
+                .ok_or_else(|| Error::GetUnionVariant {
+                    index,
+                    num_variants: variants.len(),
+                })?;
+            let value = decode(*variant, reader)?;
+            Ok(Value::Union(Box::new(value)))
         }
         SchemaType::Record(record) => {
             // Benchmarks indicate ~10% improvement using this method.
-            let mut items = Vec::new();
+            // let mut items = Vec::with_capacity(fields.len());
+            let mut items = Vec::with_capacity(record.len());
             for field in record.fields() {
-                // This clone is also expensive. See if we can do away with it...
+                // TODO: This clone is also expensive. See if we can do away with it...
                 items.push((field.name().to_string(), decode(field.schema(), reader)?));
             }
             Ok(Value::Record(items))
-            // fields
-            // .iter()
-            // .map(|field| decode(&field.schema, reader).map(|value| (field.name.clone(), value)))
-            // .collect::<Result<Vec<(String, Value)>, _>>()
-            // .map(|items| Value::Record(items))
         }
         SchemaType::Enum(enum_) => {
             let symbols = enum_.symbols();
-            if let Value::Int(index) = decode_int(reader)? {
-                if index >= 0 && (index as usize) <= symbols.len() {
-                    let symbol = &symbols[index as usize];
+            Ok(if let Value::Int(raw_index) = decode_int(reader)? {
+                let index = usize::try_from(raw_index)
+                    .map_err(|e| Error::ConvertI32ToUsize(e, raw_index))?;
+                if (0..=symbols.len()).contains(&index) {
+                    let symbol = &symbols[index];
                     // TODO: Can this alloc be removed?
-                    Ok(Value::Enum(index, symbol.to_string()))
+                    Value::Enum(raw_index, symbol.to_string())
                 } else {
-                    Err(DecodeError::new("enum symbol index out of bounds").into())
+                    return Err(Error::GetEnumValue {
+                        index,
+                        nsymbols: symbols.len(),
+                    });
                 }
             } else {
-                Err(DecodeError::new("enum symbol not found").into())
-            }
+                return Err(Error::GetEnumSymbol);
+            })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{decode::decode, schema::Schema, types::{
+        Value,
+        Value::{Array, Int, Map},
+    }, Decimal, SchemaType};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_decode_array_without_size() {
+        let mut input: &[u8] = &[6, 2, 4, 6, 0];
+        let result = decode(SchemaType::Int, &mut input);
+        assert_eq!(Array(vec!(Int(1), Int(2), Int(3))), result.unwrap());
+    }
+
+    #[test]
+    fn test_decode_array_with_size() {
+        let mut input: &[u8] = &[5, 6, 2, 4, 6, 0];
+        let result = decode(SchemaType::Int, &mut input);
+        assert_eq!(Array(vec!(Int(1), Int(2), Int(3))), result.unwrap());
+    }
+
+    #[test]
+    fn test_decode_map_without_size() {
+        let mut input: &[u8] = &[0x02, 0x08, 0x74, 0x65, 0x73, 0x74, 0x02, 0x00];
+        let result = decode(SchemaType::Int, &mut input);
+        let mut expected = HashMap::new();
+        expected.insert(String::from("test"), Int(1));
+        assert_eq!(Map(expected), result.unwrap());
+    }
+
+    #[test]
+    fn test_decode_map_with_size() {
+        let mut input: &[u8] = &[0x01, 0x0C, 0x08, 0x74, 0x65, 0x73, 0x74, 0x02, 0x00];
+        let result = decode(SchemaType::Int, &mut input);
+        let mut expected = HashMap::new();
+        expected.insert(String::from("test"), Int(1));
+        assert_eq!(Map(expected), result.unwrap());
+    }
+
+    #[test]
+    fn test_negative_decimal_value() {
+        use crate::{encode::encode, schema::Name};
+        use num_bigint::ToBigInt;
+        let inner = SchemaType::Fixed {
+            size: 2,
+            name: Name::new("decimal"),
+        };
+        let schema = SchemaType::Decimal {
+            inner,
+            precision: 4,
+            scale: 2,
+        };
+        let bigint = -423.to_bigint().unwrap();
+        let value = Value::Decimal(Decimal::from(bigint.to_signed_bytes_be()));
+
+        let mut buffer = Vec::new();
+        encode(&value, schema.clone(), &mut buffer);
+
+        let mut bytes = &buffer[..];
+        let result = decode(schema, &mut bytes).unwrap();
+        assert_eq!(result, value);
+    }
+
+    #[test]
+    fn test_decode_decimal_with_bigger_than_necessary_size() {
+        use crate::{encode::encode, schema::Name};
+        use num_bigint::ToBigInt;
+        let inner = Schema::Fixed {
+            size: 13,
+            name: Name::new("decimal"),
+        };
+        let schema = SchemaType::Decimal {
+            inner,
+            precision: 4,
+            scale: 2,
+        };
+        let value = Value::Decimal(Decimal::from(
+            (-423.to_bigint().unwrap()).to_signed_bytes_be(),
+        ));
+        let mut buffer = Vec::<u8>::new();
+
+        encode(&value, schema.clone(), &mut buffer);
+        let mut bytes: &[u8] = &buffer[..];
+        let result = decode(schema, &mut bytes).unwrap();
+        assert_eq!(result, value);
     }
 }

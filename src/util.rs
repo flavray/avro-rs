@@ -1,44 +1,13 @@
-use std::i64;
-use std::io::Read;
-use std::sync::{Once, ONCE_INIT};
-
-use failure::{Error, Fail};
+use crate::{AvroResult, Error};
 use serde_json::{Map, Value};
+use std::{convert::TryFrom, i64, io::Read, sync::Once};
 
 /// Maximum number of bytes that can be allocated when decoding
 /// Avro-encoded values. This is a protection against ill-formed
 /// data, whose length field might be interpreted as enourmous.
 /// See max_allocation_bytes to change this limit.
 pub static mut MAX_ALLOCATION_BYTES: usize = 512 * 1024 * 1024;
-static MAX_ALLOCATION_BYTES_ONCE: Once = ONCE_INIT;
-
-/// Describes errors happened trying to allocate too many bytes
-#[derive(Fail, Debug)]
-#[fail(display = "Allocation error: {}", _0)]
-pub struct AllocationError(String);
-
-impl AllocationError {
-    pub fn new<S>(msg: S) -> AllocationError
-    where
-        S: Into<String>,
-    {
-        AllocationError(msg.into())
-    }
-}
-
-/// Describes errors happened while decoding Avro data.
-#[derive(Fail, Debug)]
-#[fail(display = "Decoding error: {}", _0)]
-pub struct DecodeError(String);
-
-impl DecodeError {
-    pub fn new<S>(msg: S) -> DecodeError
-    where
-        S: Into<String>,
-    {
-        DecodeError(msg.into())
-    }
-}
+static MAX_ALLOCATION_BYTES_ONCE: Once = Once::new();
 
 pub trait MapHelper {
     fn string(&self, key: &str) -> Option<&str>;
@@ -58,7 +27,7 @@ impl MapHelper for Map<String, Value> {
     }
 }
 
-pub fn read_long<R: Read>(reader: &mut R) -> Result<i64, Error> {
+pub fn read_long<R: Read>(reader: &mut R) -> AvroResult<i64> {
     zag_i64(reader)
 }
 
@@ -70,16 +39,12 @@ pub fn zig_i64(n: i64, buffer: &mut Vec<u8>) {
     encode_variable(((n << 1) ^ (n >> 63)) as u64, buffer)
 }
 
-pub fn zag_i32<R: Read>(reader: &mut R) -> Result<i32, Error> {
+pub fn zag_i32<R: Read>(reader: &mut R) -> AvroResult<i32> {
     let i = zag_i64(reader)?;
-    if i < i64::from(i32::min_value()) || i > i64::from(i32::max_value()) {
-        Err(DecodeError::new("int out of range").into())
-    } else {
-        Ok(i as i32)
-    }
+    i32::try_from(i).map_err(|e| Error::ZagI32(e, i))
 }
 
-pub fn zag_i64<R: Read>(reader: &mut R) -> Result<i64, Error> {
+pub fn zag_i64<R: Read>(reader: &mut R) -> AvroResult<i64> {
     let z = decode_variable(reader)?;
     Ok(if z & 0x1 == 0 {
         (z >> 1) as i64
@@ -100,7 +65,7 @@ fn encode_variable(mut z: u64, buffer: &mut Vec<u8>) {
     }
 }
 
-fn decode_variable<R: Read>(reader: &mut R) -> Result<u64, Error> {
+fn decode_variable<R: Read>(reader: &mut R) -> AvroResult<u64> {
     let mut i = 0u64;
     let mut buf = [0u8; 1];
 
@@ -108,9 +73,11 @@ fn decode_variable<R: Read>(reader: &mut R) -> Result<u64, Error> {
     loop {
         if j > 9 {
             // if j * 7 > 64
-            return Err(DecodeError::new("Overflow when decoding integer value").into());
+            return Err(Error::IntegerOverflow);
         }
-        reader.read_exact(&mut buf[..])?;
+        reader
+            .read_exact(&mut buf[..])
+            .map_err(Error::ReadVariableIntegerBytes)?;
         i |= (u64::from(buf[0] & 0x7F)) << (j * 7);
         if (buf[0] >> 7) == 0 {
             break;
@@ -138,17 +105,16 @@ pub fn max_allocation_bytes(num_bytes: usize) -> usize {
     }
 }
 
-pub fn safe_len(len: usize) -> Result<usize, Error> {
+pub fn safe_len(len: usize) -> AvroResult<usize> {
     let max_bytes = max_allocation_bytes(512 * 1024 * 1024);
 
     if len <= max_bytes {
         Ok(len)
     } else {
-        Err(AllocationError::new(format!(
-            "Unable to allocate {} bytes (Maximum allowed: {})",
-            len, max_bytes
-        ))
-        .into())
+        Err(Error::MemoryAllocation {
+            desired: len,
+            maximum: max_bytes,
+        })
     }
 }
 
@@ -168,19 +134,19 @@ mod tests {
     #[test]
     fn test_zig_i64() {
         let mut s = Vec::new();
-        zig_i64(2147483647i64, &mut s);
+        zig_i64(std::i32::MAX as i64, &mut s);
         assert_eq!(s, [254, 255, 255, 255, 15]);
 
         s.clear();
-        zig_i64(2147483648i64, &mut s);
+        zig_i64(std::i32::MAX as i64 + 1, &mut s);
         assert_eq!(s, [128, 128, 128, 128, 16]);
 
         s.clear();
-        zig_i64(-2147483648i64, &mut s);
+        zig_i64(std::i32::MIN as i64, &mut s);
         assert_eq!(s, [255, 255, 255, 255, 15]);
 
         s.clear();
-        zig_i64(-2147483649i64, &mut s);
+        zig_i64(std::i32::MIN as i64 - 1, &mut s);
         assert_eq!(s, [129, 128, 128, 128, 16]);
 
         s.clear();
@@ -195,27 +161,27 @@ mod tests {
     #[test]
     fn test_zig_i32() {
         let mut s = Vec::new();
-        zig_i32(1073741823i32, &mut s);
+        zig_i32(std::i32::MAX / 2, &mut s);
         assert_eq!(s, [254, 255, 255, 255, 7]);
 
         s.clear();
-        zig_i32(-1073741824i32, &mut s);
+        zig_i32(std::i32::MIN / 2, &mut s);
         assert_eq!(s, [255, 255, 255, 255, 7]);
 
         s.clear();
-        zig_i32(1073741824i32, &mut s);
+        zig_i32(-(std::i32::MIN / 2), &mut s);
         assert_eq!(s, [128, 128, 128, 128, 8]);
 
         s.clear();
-        zig_i32(-1073741825i32, &mut s);
+        zig_i32(std::i32::MIN / 2 - 1, &mut s);
         assert_eq!(s, [129, 128, 128, 128, 8]);
 
         s.clear();
-        zig_i32(2147483647i32, &mut s);
+        zig_i32(std::i32::MAX, &mut s);
         assert_eq!(s, [254, 255, 255, 255, 15]);
 
         s.clear();
-        zig_i32(-2147483648i32, &mut s);
+        zig_i32(std::i32::MIN, &mut s);
         assert_eq!(s, [255, 255, 255, 255, 15]);
     }
 

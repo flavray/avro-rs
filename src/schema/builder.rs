@@ -1,22 +1,22 @@
-use failure::Fail;
-use std::collections::HashSet;
+use {
+    super::*,
+    crate::{error::Error, schema::data::*, AvroResult},
+    std::collections::HashSet,
+};
 
-use super::*;
-use crate::schema::data::*;
-
-#[derive(Fail, Debug)]
-#[fail(display = "Invalid schema construction: {}", _0)]
-pub struct BuilderError(pub String);
-
-#[derive(Fail, Debug)]
-#[fail(display = "Schema validation failed: [{:?}]", _0)]
-pub struct BuilderErrors(pub Vec<BuilderError>);
-
-impl BuilderError {
-    pub fn new<S: ToString>(msg: S) -> Self {
-        Self(msg.to_string())
-    }
-}
+// #[derive(Debug)]
+// #[fail(display = "Invalid schema construction: {}", _0)]
+// pub struct BuilderError(pub String);
+//
+// #[derive(Fail, Debug)]
+// #[fail(display = "Schema validation failed: [{:?}]", _0)]
+// pub struct BuilderErrors(pub Vec<BuilderError>);
+//
+// impl BuilderError {
+//     pub fn new<S: ToString>(msg: S) -> Self {
+//         Self(msg.to_string())
+//     }
+// }
 
 /// Builder that allows the creation of new schemas in a programmatic fashion
 #[derive(Default)]
@@ -59,7 +59,7 @@ impl<'s> Naming<'s> {
         }
     }
 
-    fn into_ref(self, builder: &mut SchemaBuilder) -> Result<NameRef, BuilderError> {
+    fn into_ref(self, builder: &mut SchemaBuilder) -> AvroResult<NameRef> {
         builder.name_ref_alised(self.raw_name, self.namespace, self.aliases)
     }
 }
@@ -114,7 +114,7 @@ impl<'s> RecordBuilder<'s> {
         RecordFieldBuilder(self.fields.last_mut().unwrap())
     }
 
-    pub fn build(self, builder: &mut SchemaBuilder) -> Result<NameRef, BuilderError> {
+    pub fn build(self, builder: &mut SchemaBuilder) -> Result<NameRef, Error> {
         let name_ref = self.name.into_ref(builder)?;
         builder.add_type(
             name_ref,
@@ -168,7 +168,7 @@ impl<'s> FixedBuilder<'s> {
         FixedBuilder { name }
     }
 
-    pub fn size(self, size: usize, builder: &mut SchemaBuilder) -> Result<NameRef, BuilderError> {
+    pub fn size(self, size: usize, builder: &mut SchemaBuilder) -> AvroResult<NameRef> {
         let name_ref = self.name.into_ref(builder)?;
         builder.add_type(name_ref, SchemaData::Fixed(size))
     }
@@ -191,11 +191,7 @@ impl<'s> EnumBuilder<'s> {
         self
     }
 
-    pub fn symbols<I, S>(
-        self,
-        syms: I,
-        builder: &mut SchemaBuilder,
-    ) -> Result<NameRef, BuilderError>
+    pub fn symbols<I, S>(self, syms: I, builder: &mut SchemaBuilder) -> AvroResult<NameRef>
     where
         I: IntoIterator<Item = S>,
         S: ToString,
@@ -221,7 +217,7 @@ macro_rules! impl_aggregated_builder {
                 self,
                 $setter: NameRef,
                 builder: &mut SchemaBuilder,
-            ) -> Result<NameRef, BuilderError> {
+            ) -> AvroResult<NameRef> {
                 match self.name {
                     Some(name) => {
                         let name_ref = name.into_ref(builder)?;
@@ -268,7 +264,7 @@ impl UnionBuilder {
         UnionBuilder(vec![])
     }
 
-    pub fn build(self, builder: &mut SchemaBuilder) -> Result<NameRef, BuilderError> {
+    pub fn build(self, builder: &mut SchemaBuilder) -> AvroResult<NameRef> {
         builder.add_anon_type(SchemaData::Union(self.0))
     }
 
@@ -282,7 +278,7 @@ macro_rules! primitive_type_lookup {
         pub fn $name(&self) -> NameRef {
             *self.primitive_types.get(stringify!($name)).unwrap()
         }
-    }
+    };
 }
 
 impl SchemaBuilder {
@@ -322,7 +318,7 @@ impl SchemaBuilder {
         &mut self,
         name: &str,
         namespace: Option<&str>,
-    ) -> Result<NameRef, BuilderError> {
+    ) -> Result<NameRef, Error> {
         self.primitive_types
             .get(name)
             .map(|name_ref| Ok(*name_ref))
@@ -361,7 +357,7 @@ impl SchemaBuilder {
         MapBuilder::name(name)
     }
 
-    pub fn build(self, root: NameRef) -> Result<Schema, BuilderErrors> {
+    pub fn build(self, root: NameRef) -> Result<Schema, Error> {
         self.validate(&root)?;
         Ok(Schema {
             namespace_names: self.namespace_names,
@@ -377,7 +373,7 @@ impl SchemaBuilder {
 /// Validations performed during schema construction
 impl SchemaBuilder {
     /// Validate the type was actually defined in the end
-    fn validate_exists(&self, name: &NameRef) -> Result<NameRef, BuilderError> {
+    fn validate_exists(&self, name: &NameRef) -> AvroResult<NameRef> {
         let mut cname = name.clone();
         while let Some(aliased) = self.aliases.get(&cname) {
             cname = *aliased;
@@ -385,17 +381,11 @@ impl SchemaBuilder {
 
         match self.types.contains_key(&cname) {
             true => Ok(cname),
-            false => {
-                let msg = format!(
-                    "`{}` declared as a forward reference, but is not defined",
-                    self.basic_name(name)
-                );
-                Err(BuilderError::new(msg))
-            }
+            false => Err(Error::UndefinedReference(self.basic_name(name))),
         }
     }
 
-    fn validate_union(&self, name: &NameRef, variants: &Vec<NameRef>) -> Vec<BuilderError> {
+    fn validate_union(&self, name: &NameRef, variants: &Vec<NameRef>) -> Vec<Error> {
         let mut errors = vec![];
         let mut uniq = HashSet::new();
 
@@ -406,15 +396,14 @@ impl SchemaBuilder {
                     let variant_type = self.types.get(cname).unwrap();
 
                     if let SchemaData::Union(_) = variant_type {
-                        errors.push(BuilderError::new("Unions may not directly contain a union"));
+                        errors.push(Error::GetNestedUnion);
                     }
 
                     if !uniq.insert(variant) {
-                        let msg =
-                            format!(
-                            "Unions cannot contain duplicate types, but union `{}` duplicates `{}`",
-                            self.basic_name(name), self.basic_name(variant));
-                        errors.push(BuilderError::new(msg));
+                        errors.push(Error::GetUnionDuplicate(
+                            self.basic_name(name),
+                            self.basic_name(variant),
+                        ));
                     }
                 }
             }
@@ -424,7 +413,7 @@ impl SchemaBuilder {
     }
 
     /// Validate the schema, reporting errors in construction
-    pub fn validate(&self, root: &NameRef) -> Result<(), BuilderErrors> {
+    pub fn validate(&self, root: &NameRef) -> Result<(), Error> {
         let mut errors = vec![];
 
         if !self.types.contains_key(root) {
@@ -432,14 +421,14 @@ impl SchemaBuilder {
                 "Given root `{:?}` for schema does not resolve to a type",
                 self.basic_name(root)
             );
-            errors.push(BuilderError::new(msg));
+            errors.push(Error::SchemaBuilderInvalidSchema(msg));
         }
 
         for (name, schema_type) in self.types.iter() {
             match schema_type {
                 SchemaData::Array(elem_name) | SchemaData::Map(elem_name) => {
                     if let Err(err) = self.validate_exists(elem_name) {
-                        errors.push(err)
+                        errors.push(Error::SchemaBuilderInvalidSchema(err.to_string()))
                     }
                 }
                 SchemaData::Record(_, fields) => {
@@ -447,7 +436,11 @@ impl SchemaBuilder {
                         .iter()
                         .map(|field| self.validate_exists(&field.schema))
                         .filter(|validation| validation.is_err())
-                        .for_each(|err| errors.push(err.unwrap_err()));
+                        .for_each(|err| {
+                            errors.push(Error::SchemaBuilderInvalidSchema(
+                                err.unwrap_err().to_string(),
+                            ))
+                        });
                 }
                 SchemaData::Union(vars) => errors.append(&mut self.validate_union(name, vars)),
                 _ => (),
@@ -456,13 +449,13 @@ impl SchemaBuilder {
 
         match errors.is_empty() {
             true => Ok(()),
-            false => Err(BuilderErrors(errors)),
+            false => Err(Error::SchemaBuilderInvalidationFail(errors)),
         }
     }
 }
 
 impl SchemaBuilder {
-    fn add_anon_type(&mut self, data: SchemaData) -> Result<NameRef, BuilderError> {
+    fn add_anon_type(&mut self, data: SchemaData) -> AvroResult<NameRef> {
         let anon_name = self.next_anon_id();
         let name = self.name_ref(&anon_name, None)?;
         self.add_type(name, data)
@@ -475,9 +468,9 @@ impl SchemaBuilder {
     }
 
     /// Register a type with the schema, returning an error if it already is defined
-    fn add_type(&mut self, name: NameRef, value: SchemaData) -> Result<NameRef, BuilderError> {
+    fn add_type(&mut self, name: NameRef, value: SchemaData) -> Result<NameRef, Error> {
         if let Some(other) = self.types.insert(name, value) {
-            // Check if we are seeing the same type in parsing in case its canoical form
+            // Check if we are seeing the same type in parsing in case its canonical form
             let value = self.types.get(&name).unwrap();
             if &other != value {
                 let msg = format!(
@@ -486,17 +479,20 @@ impl SchemaBuilder {
                     other,
                     value
                 );
-                return Err(BuilderError::new(msg));
+                return Err(Error::SchemaBuilderInvalidSchema(msg));
             }
         }
         Ok(name)
     }
 
-    fn name_ref(&mut self, name: &str, namespace: Option<&str>) -> Result<NameRef, BuilderError> {
+    fn name_ref(&mut self, name: &str, namespace: Option<&str>) -> AvroResult<NameRef> {
         let (name, namespace) = match name.rfind(".") {
             Some(pos) => {
                 if name.len() == pos {
-                    return Err(BuilderError::new(format!("Invalid name `{}`", name)));
+                    return Err(Error::SchemaBuilderInvalidSchema(format!(
+                        "Invalid name `{}`",
+                        name
+                    )));
                 }
                 (&name[pos + 1..name.len()], Some(&name[0..pos]))
             }
@@ -514,7 +510,7 @@ impl SchemaBuilder {
         name: &str,
         namespace: Option<&str>,
         aliases: Vec<&str>,
-    ) -> Result<NameRef, BuilderError> {
+    ) -> AvroResult<NameRef> {
         let name_ref = self.name_ref(name, namespace)?;
 
         for alias in aliases {
@@ -528,7 +524,7 @@ impl SchemaBuilder {
                     self.basic_name(&existing),
                     self.basic_name(&alias_name)
                 );
-                return Err(BuilderError::new(msg));
+                return Err(Error::SchemaBuilderInvalidSchema(msg));
             }
 
             // Now deal with the reverse mapping

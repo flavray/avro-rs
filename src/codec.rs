@@ -1,19 +1,12 @@
 //! Logic for all supported compression codecs in Avro.
-use std::io::{Read, Write};
-use std::str::FromStr;
-
-#[cfg(feature = "snappy")]
-use byteorder;
-#[cfg(feature = "snappy")]
-use crc;
-use failure::Error;
+use crate::{types::Value, AvroResult, Error};
 use libflate::deflate::{Decoder, Encoder};
-
-use crate::types::{ToAvro, Value};
-use crate::util::DecodeError;
+use std::io::{Read, Write};
+use strum_macros::{EnumString, IntoStaticStr};
 
 /// The compression codec used to compress blocks.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, EnumString, IntoStaticStr)]
+#[strum(serialize_all = "kebab_case")]
 pub enum Codec {
     /// The `Null` codec simply passes through data uncompressed.
     Null,
@@ -28,52 +21,34 @@ pub enum Codec {
     Snappy,
 }
 
-impl ToAvro for Codec {
-    fn avro(self) -> Value {
-        Value::Bytes(
-            match self {
-                Codec::Null => "null",
-                Codec::Deflate => "deflate",
-                #[cfg(feature = "snappy")]
-                Codec::Snappy => "snappy",
-            }
-            .to_owned()
-            .into_bytes(),
-        )
-    }
-}
-
-impl FromStr for Codec {
-    type Err = DecodeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "null" => Ok(Codec::Null),
-            "deflate" => Ok(Codec::Deflate),
-            #[cfg(feature = "snappy")]
-            "snappy" => Ok(Codec::Snappy),
-            _ => Err(DecodeError::new("unrecognized codec")),
-        }
+impl From<Codec> for Value {
+    fn from(value: Codec) -> Self {
+        Self::Bytes(<&str>::from(value).as_bytes().to_vec())
     }
 }
 
 impl Codec {
     /// Compress a stream of bytes in-place.
-    pub fn compress(&self, stream: &mut Vec<u8>) -> Result<(), Error> {
-        match *self {
+    pub fn compress(self, stream: &mut Vec<u8>) -> AvroResult<()> {
+        match self {
             Codec::Null => (),
             Codec::Deflate => {
                 let mut encoder = Encoder::new(Vec::new());
-                encoder.write_all(stream)?;
-                *stream = encoder.finish().into_result()?;
+                encoder.write_all(stream).map_err(Error::DeflateCompress)?;
+                // Deflate errors seem to just be io::Error
+                *stream = encoder
+                    .finish()
+                    .into_result()
+                    .map_err(Error::DeflateCompressFinish)?;
             }
             #[cfg(feature = "snappy")]
             Codec::Snappy => {
                 use byteorder::ByteOrder;
 
                 let mut encoded: Vec<u8> = vec![0; snap::max_compress_len(stream.len())];
-                let compressed_size =
-                    snap::Encoder::new().compress(&stream[..], &mut encoded[..])?;
+                let compressed_size = snap::Encoder::new()
+                    .compress(&stream[..], &mut encoded[..])
+                    .map_err(Error::SnappyCompress)?;
 
                 let crc = crc::crc32::checksum_ieee(&stream[..]);
                 byteorder::BigEndian::write_u32(&mut encoded[compressed_size..], crc);
@@ -87,40 +62,37 @@ impl Codec {
     }
 
     /// Decompress a stream of bytes in-place.
-    pub fn decompress(&self, stream: &mut Vec<u8>) -> Result<(), Error> {
-        match *self {
-            Codec::Null => (),
+    pub fn decompress(self, stream: &mut Vec<u8>) -> AvroResult<()> {
+        *stream = match self {
+            Codec::Null => return Ok(()),
             Codec::Deflate => {
                 let mut decoded = Vec::new();
-                {
-                    // either the compiler or I is dumb
-                    let mut decoder = Decoder::new(&stream[..]);
-                    decoder.read_to_end(&mut decoded)?;
-                }
-                *stream = decoded;
+                let mut decoder = Decoder::new(&stream[..]);
+                decoder
+                    .read_to_end(&mut decoded)
+                    .map_err(Error::DeflateDecompress)?;
+                decoded
             }
             #[cfg(feature = "snappy")]
             Codec::Snappy => {
                 use byteorder::ByteOrder;
 
-                let decompressed_size = snap::decompress_len(&stream[..stream.len() - 4])?;
+                let decompressed_size = snap::decompress_len(&stream[..stream.len() - 4])
+                    .map_err(Error::GetSnappyDecompressLen)?;
                 let mut decoded = vec![0; decompressed_size];
-                snap::Decoder::new().decompress(&stream[..stream.len() - 4], &mut decoded[..])?;
+                snap::Decoder::new()
+                    .decompress(&stream[..stream.len() - 4], &mut decoded[..])
+                    .map_err(Error::SnappyDecompress)?;
 
-                let expected_crc = byteorder::BigEndian::read_u32(&stream[stream.len() - 4..]);
-                let actual_crc = crc::crc32::checksum_ieee(&decoded);
+                let expected = byteorder::BigEndian::read_u32(&stream[stream.len() - 4..]);
+                let actual = crc::crc32::checksum_ieee(&decoded);
 
-                if expected_crc != actual_crc {
-                    return Err(DecodeError::new(format!(
-                        "bad Snappy CRC32; expected {:x} but got {:x}",
-                        expected_crc, actual_crc
-                    ))
-                    .into());
+                if expected != actual {
+                    return Err(Error::SnappyCrc32 { expected, actual });
                 }
-                *stream = decoded;
+                decoded
             }
         };
-
         Ok(())
     }
 }
@@ -129,7 +101,7 @@ impl Codec {
 mod tests {
     use super::*;
 
-    static INPUT: &'static [u8] = b"theanswertolifetheuniverseandeverythingis42theanswertolifetheuniverseandeverythingis4theanswertolifetheuniverseandeverythingis2";
+    const INPUT: &[u8] = b"theanswertolifetheuniverseandeverythingis42theanswertolifetheuniverseandeverythingis4theanswertolifetheuniverseandeverythingis2";
 
     #[test]
     fn null_compress_and_decompress() {
@@ -162,5 +134,27 @@ mod tests {
         assert!(INPUT.len() > stream.len());
         codec.decompress(&mut stream).unwrap();
         assert_eq!(INPUT, stream.as_slice());
+    }
+
+    #[test]
+    fn codec_to_str() {
+        assert_eq!(<&str>::from(Codec::Null), "null");
+        assert_eq!(<&str>::from(Codec::Deflate), "deflate");
+
+        #[cfg(feature = "snappy")]
+        assert_eq!(<&str>::from(Codec::Snappy), "snappy");
+    }
+
+    #[test]
+    fn codec_from_str() {
+        use std::str::FromStr;
+
+        assert_eq!(Codec::from_str("null").unwrap(), Codec::Null);
+        assert_eq!(Codec::from_str("deflate").unwrap(), Codec::Deflate);
+
+        #[cfg(feature = "snappy")]
+        assert_eq!(Codec::from_str("snappy").unwrap(), Codec::Snappy);
+
+        assert!(Codec::from_str("not a codec").is_err());
     }
 }

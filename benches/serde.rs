@@ -1,13 +1,12 @@
-#![feature(test)]
-extern crate test;
-
 use avro_rs::{
     schema::Schema,
-    types::{Record, ToAvro, Value},
+    types::{Record, Value},
     Reader, Writer,
 };
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::time::Duration;
 
-static RAW_SMALL_SCHEMA: &'static str = r#"
+const RAW_SMALL_SCHEMA: &str = r#"
 {
   "namespace": "test",
   "type": "record",
@@ -23,7 +22,7 @@ static RAW_SMALL_SCHEMA: &'static str = r#"
 }
 "#;
 
-static RAW_BIG_SCHEMA: &'static str = r#"
+const RAW_BIG_SCHEMA: &str = r#"
 {
   "namespace": "my.example",
   "type": "record",
@@ -88,7 +87,7 @@ static RAW_BIG_SCHEMA: &'static str = r#"
 }
 "#;
 
-static RAW_ADDRESS_SCHEMA: &'static str = r#"
+const RAW_ADDRESS_SCHEMA: &str = r#"
 {
   "fields": [
     {
@@ -127,7 +126,7 @@ fn make_small_record() -> (Schema, Value) {
     let small_record = {
         let mut small_record = Record::new(&small_schema).unwrap();
         small_record.put("field", "foo");
-        small_record.avro()
+        small_record.into()
     };
     (small_schema, small_record)
 }
@@ -149,24 +148,20 @@ fn make_big_record() -> (Schema, Value) {
         big_record.put("phone", "000000000");
         big_record.put("housenum", "0000");
         big_record.put("address", address);
-        big_record.avro()
+        big_record.into()
     };
 
     (big_schema, big_record)
 }
 
-fn make_records(record: &Value, count: usize) -> Vec<Value> {
-    let mut records = Vec::new();
-    for _ in 0..count {
-        records.push(record.clone());
-    }
-    records
+fn make_records(record: Value, count: usize) -> Vec<Value> {
+    std::iter::repeat(record).take(count).collect()
 }
 
 fn write(schema: &Schema, records: &[Value]) -> Vec<u8> {
     let mut writer = Writer::new(&schema, Vec::new());
     writer.extend_from_slice(records).unwrap();
-    writer.into_inner()
+    writer.into_inner().unwrap()
 }
 
 fn read(schema: &Schema, bytes: &[u8]) {
@@ -185,98 +180,142 @@ fn read_schemaless(bytes: &[u8]) {
     }
 }
 
-fn bench_write(b: &mut test::Bencher, make_record: &Fn() -> (Schema, Value), n_records: usize) {
+fn bench_write(
+    c: &mut Criterion,
+    make_record: impl Fn() -> (Schema, Value),
+    n_records: usize,
+    name: &str,
+) {
     let (schema, record) = make_record();
-    let records = make_records(&record, n_records);
-    b.iter(|| write(&schema, &records));
+    let records = make_records(record, n_records);
+    c.bench_function(name, |b| b.iter(|| write(&schema, &records)));
 }
 
-fn bench_read(b: &mut test::Bencher, make_record: &Fn() -> (Schema, Value), n_records: usize) {
+fn bench_read(
+    c: &mut Criterion,
+    make_record: impl Fn() -> (Schema, Value),
+    n_records: usize,
+    name: &str,
+) {
     let (schema, record) = make_record();
-    let records = make_records(&record, n_records);
+    let records = make_records(record, n_records);
     let bytes = write(&schema, &records);
-    println!("bytes.len() = {}", bytes.len());
-    println!("records.len() = {}", records.len());
-    b.iter(|| read(&schema, &bytes));
+    c.bench_function(name, |b| b.iter(|| read(&schema, &bytes)));
 }
 
-fn bench_from_file(b: &mut test::Bencher, file_path: &str) {
-    use std::fs;
-    let bytes = fs::read(file_path).unwrap();
-    println!("{} had {} bytes", file_path, bytes.len());
-    b.iter(|| read_schemaless(&bytes));
+fn bench_from_file(c: &mut Criterion, file_path: &str, name: &str) {
+    let bytes = std::fs::read(file_path).unwrap();
+    c.bench_function(name, |b| b.iter(|| read_schemaless(&bytes)));
 }
 
-#[bench]
-fn bench_small_schema_write_1_record(b: &mut test::Bencher) {
-    bench_write(b, &make_small_record, 1);
+fn bench_small_schema_write_1_record(c: &mut Criterion) {
+    bench_write(c, &make_small_record, 1, "small schema, write 1 record");
 }
 
-#[bench]
-fn bench_small_schema_write_100_record(b: &mut test::Bencher) {
-    bench_write(b, &make_small_record, 100);
+fn bench_small_schema_write_100_record(c: &mut Criterion) {
+    bench_write(
+        c,
+        &make_small_record,
+        100,
+        "small schema, write 100 records",
+    );
 }
 
-#[bench]
-fn bench_small_schema_write_10000_record(b: &mut test::Bencher) {
-    bench_write(b, &make_small_record, 10000);
+fn bench_small_schema_write_10_000_record(c: &mut Criterion) {
+    bench_write(
+        c,
+        &make_small_record,
+        10_000,
+        "small schema, write 10k records",
+    );
 }
 
-#[bench]
-fn bench_small_schema_read_1_record(b: &mut test::Bencher) {
-    bench_read(b, &make_small_record, 1);
+fn bench_small_schema_read_1_record(c: &mut Criterion) {
+    bench_read(c, &make_small_record, 1, "small schema, read 1 record");
 }
 
-#[bench]
-fn bench_small_schema_read_100_record(b: &mut test::Bencher) {
-    bench_read(b, &make_small_record, 100);
+fn bench_small_schema_read_100_record(c: &mut Criterion) {
+    bench_read(c, &make_small_record, 100, "small schema, read 100 records");
 }
 
-#[bench]
-fn bench_small_schema_read_10000_record(b: &mut test::Bencher) {
-    bench_read(b, &make_small_record, 10000);
+fn bench_small_schema_read_10_000_record(c: &mut Criterion) {
+    bench_read(
+        c,
+        &make_small_record,
+        10_000,
+        "small schema, read 10k records",
+    );
 }
 
-#[bench]
-fn bench_big_schema_write_1_record(b: &mut test::Bencher) {
-    bench_write(b, &make_big_record, 1);
+fn bench_big_schema_write_1_record(c: &mut Criterion) {
+    bench_write(c, &make_big_record, 1, "big schema, write 1 record");
 }
 
-#[bench]
-fn bench_big_schema_write_100_record(b: &mut test::Bencher) {
-    bench_write(b, &make_big_record, 100);
+fn bench_big_schema_write_100_record(c: &mut Criterion) {
+    bench_write(c, &make_big_record, 100, "big schema, write 100 records");
 }
 
-#[bench]
-fn bench_big_schema_write_10000_record(b: &mut test::Bencher) {
-    bench_write(b, &make_big_record, 10000);
+fn bench_big_schema_write_10_000_record(c: &mut Criterion) {
+    bench_write(c, &make_big_record, 10_000, "big schema, write 10k records");
 }
 
-#[bench]
-fn bench_big_schema_read_1_record(b: &mut test::Bencher) {
-    bench_read(b, &make_big_record, 1);
+fn bench_big_schema_read_1_record(c: &mut Criterion) {
+    bench_read(c, &make_big_record, 1, "big schema, read 1 record");
 }
 
-#[bench]
-fn bench_big_schema_read_100_record(b: &mut test::Bencher) {
-    bench_read(b, &make_big_record, 100);
+fn bench_big_schema_read_100_record(c: &mut Criterion) {
+    bench_read(c, &make_big_record, 100, "big schema, read 100 records");
 }
 
-#[bench]
-fn bench_big_schema_read_10000_record(b: &mut test::Bencher) {
-    bench_read(b, &make_big_record, 10000);
+fn bench_big_schema_read_10_000_record(c: &mut Criterion) {
+    bench_read(c, &make_big_record, 10_000, "big schema, read 10k records");
 }
 
-#[bench]
-fn bench_big_schema_read_100000_record(b: &mut test::Bencher) {
-    bench_read(b, &make_big_record, 100000);
+fn bench_big_schema_read_100_000_record(c: &mut Criterion) {
+    bench_read(
+        c,
+        &make_big_record,
+        100_000,
+        "big schema, read 100k records",
+    );
 }
 
 // This benchmark reads from the `benches/quickstop-null.avro` file, which was pulled from
 // the `goavro` project benchmarks:
 // https://github.com/linkedin/goavro/blob/master/fixtures/quickstop-null.avro
 // This was done for the sake of comparing this crate against the `goavro` implementation.
-#[bench]
-fn bench_file_quickstop_null(b: &mut test::Bencher) {
-    bench_from_file(b, "benches/quickstop-null.avro");
+fn bench_file_quickstop_null(c: &mut Criterion) {
+    bench_from_file(c, "benches/quickstop-null.avro", "quickstop null file");
 }
+
+criterion_group!(
+    benches,
+    bench_small_schema_write_1_record,
+    bench_small_schema_write_100_record,
+    bench_small_schema_read_1_record,
+    bench_small_schema_read_100_record,
+    bench_big_schema_write_1_record,
+    bench_big_schema_write_100_record,
+    bench_big_schema_read_1_record,
+    bench_big_schema_read_100_record,
+);
+
+criterion_group!(
+    name = long_benches;
+    config = Criterion::default().sample_size(20).measurement_time(Duration::from_secs(10));
+    targets =
+        bench_file_quickstop_null,
+        bench_small_schema_write_10_000_record,
+        bench_small_schema_read_10_000_record,
+        bench_big_schema_read_10_000_record,
+        bench_big_schema_write_10_000_record
+);
+
+criterion_group!(
+    name = very_long_benches;
+    config = Criterion::default().sample_size(10).measurement_time(Duration::from_secs(20));
+    targets =
+        bench_big_schema_read_100_000_record,
+);
+
+criterion_main!(benches, long_benches, very_long_benches);

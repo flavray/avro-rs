@@ -5,7 +5,9 @@ use avro_rs::{
     from_avro_datum, to_avro_datum, types::Value, Schema, SchemaResolutionError, SchemaType,
     ValidationError,
 };
+use avro_rs::{from_avro_datum, to_avro_datum, types::Value, Error, Schema};
 use lazy_static::lazy_static;
+use std::io::Cursor;
 
 lazy_static! {
     static ref SCHEMAS_TO_VALIDATE: Vec<(&'static str, Value)> = vec![
@@ -17,7 +19,7 @@ lazy_static! {
         (r#""long""#, Value::Long(1234)),
         (r#""float""#, Value::Float(1234.0)),
         (r#""double""#, Value::Double(1234.0)),
-        (r#"{"type": "fixed", "name": "Test", "size": 1}"#, Value::Fixed(1, vec!['B' as u8])),
+        (r#"{"type": "fixed", "name": "Test", "size": 1}"#, Value::Fixed(1, vec![b'B'])),
         (r#"{"type": "enum", "name": "Test", "symbols": ["A", "B"]}"#, Value::Enum(1, "B".to_string())),
         (r#"{"type": "array", "items": "long"}"#, Value::Array(vec![Value::Long(1), Value::Long(3), Value::Long(2)])),
         (r#"{"type": "map", "values": "long"}"#, Value::Map([("a".to_string(), Value::Long(1i64)), ("b".to_string(), Value::Long(3i64)), ("c".to_string(), Value::Long(2i64))].iter().cloned().collect())),
@@ -49,12 +51,10 @@ lazy_static! {
         (r#""double""#, "1.1", Value::Double(1.1)),
         // TODO: (#96) investigate why this is failing
         //(r#"{"type": "fixed", "name": "F", "size": 2}"#, r#""\u00FF\u00FF""#, Value::Bytes(vec![0xff, 0xff])),
-        // TODO: (#96) investigate why this is failing
-        //(r#"{"type": "enum", "name": "F", "symbols": ["FOO", "BAR"]}"#, r#""FOO""#, Value::Enum(0, "FOO".to_string())),
+        (r#"{"type": "enum", "name": "F", "symbols": ["FOO", "BAR"]}"#, r#""FOO""#, Value::Enum(0, "FOO".to_string())),
         (r#"{"type": "array", "items": "int"}"#, "[1, 2, 3]", Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])),
         (r#"{"type": "map", "values": "int"}"#, r#"{"a": 1, "b": 2}"#, Value::Map([("a".to_string(), Value::Int(1)), ("b".to_string(), Value::Int(2))].iter().cloned().collect())),
-        // TODO: (#96) investigate why this is failing
-        //(r#"["int", "null"]"#, "5", Value::Union(Box::new(Value::Int(5)))),
+        (r#"["int", "null"]"#, "5", Value::Union(Box::new(Value::Int(5)))),
         (r#"{"type": "record", "name": "F", "fields": [{"name": "A", "type": "int"}]}"#, r#"{"A": 5}"#,Value::Record(vec![("A".to_string(), Value::Int(5))])),
     ];
 
@@ -156,10 +156,12 @@ fn test_schema_promotion() {
                 &mut Cursor::new(encoded),
                 Some(&reader_schema),
             )
-            .expect(&format!(
-                "failed to decode {:?} with schema: {:?}",
-                original_value, reader_raw_schema
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "failed to decode {:?} with schema: {:?}",
+                    original_value, reader_raw_schema,
+                )
+            });
             assert_eq!(decoded, promotable_values[j]);
         }
     }
@@ -214,7 +216,7 @@ fn test_default_value() {
 }
 
 #[test]
-fn test_no_default_value() -> Result<(), String> {
+fn test_no_default_value() -> Result<(), Error> {
     let reader_schema = Schema::parse_str(
         r#"{
             "type": "record",
@@ -226,18 +228,13 @@ fn test_no_default_value() -> Result<(), String> {
     )
     .unwrap();
     let encoded = to_avro_datum(&LONG_RECORD_SCHEMA, LONG_RECORD_DATUM.clone()).unwrap();
-    let decoded = from_avro_datum(
+    let result = from_avro_datum(
         &LONG_RECORD_SCHEMA,
         &mut Cursor::new(encoded),
         Some(&reader_schema),
     );
-    match decoded {
-        Ok(_) => Err(String::from("Expected SchemaResolutionError, got Ok")),
-        Err(ref e) => match e.downcast_ref::<SchemaResolutionError>() {
-            Some(_) => Ok(()),
-            None => Err(format!("Expected SchemaResolutionError, got {}", e)),
-        },
-    }
+    assert!(result.is_err());
+    Ok(())
 }
 
 #[test]
@@ -320,9 +317,7 @@ fn test_type_exception() -> Result<(), String> {
     let encoded = to_avro_datum(&writer_schema, datum_to_write);
     match encoded {
         Ok(_) => Err(String::from("Expected ValidationError, got Ok")),
-        Err(ref e) => match e.downcast_ref::<ValidationError>() {
-            Some(_) => Ok(()),
-            None => Err(format!("Expected ValidationError, got {}", e)),
-        },
+        Err(Error::Validation) => Ok(()),
+        Err(ref e) => Err(format!("Expected ValidationError, got {}", e)),
     }
 }

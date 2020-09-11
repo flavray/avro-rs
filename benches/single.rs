@@ -1,13 +1,11 @@
-#![feature(test)]
-extern crate test;
-
 use avro_rs::{
     schema::Schema,
     to_avro_datum,
-    types::{Record, ToAvro, Value},
+    types::{Record, Value},
 };
+use criterion::{criterion_group, criterion_main, Criterion};
 
-static RAW_SMALL_SCHEMA: &'static str = r#"
+const RAW_SMALL_SCHEMA: &str = r#"
 {
   "namespace": "test",
   "type": "record",
@@ -23,7 +21,7 @@ static RAW_SMALL_SCHEMA: &'static str = r#"
 }
 "#;
 
-static RAW_BIG_SCHEMA: &'static str = r#"
+const RAW_BIG_SCHEMA: &str = r#"
 {
   "namespace": "my.example",
   "type": "record",
@@ -88,7 +86,7 @@ static RAW_BIG_SCHEMA: &'static str = r#"
 }
 "#;
 
-static RAW_ADDRESS_SCHEMA: &'static str = r#"
+const RAW_ADDRESS_SCHEMA: &str = r#"
 {
   "fields": [
     {
@@ -127,7 +125,7 @@ fn make_small_record() -> (Schema, Value) {
     let small_record = {
         let mut small_record = Record::new(&small_schema).unwrap();
         small_record.put("field", "foo");
-        small_record.avro()
+        small_record.into()
     };
 
     (small_schema, small_record)
@@ -150,23 +148,29 @@ fn make_big_record() -> (Schema, Value) {
         big_record.put("phone", "000000000");
         big_record.put("housenum", "0000");
         big_record.put("address", address);
-        big_record.avro()
+        big_record.into()
     };
 
     (big_schema, big_record)
 }
 
-fn bench_write(b: &mut test::Bencher, make_record: &Fn() -> (Schema, Value)) {
-    let (schema, record) = make_record();
-    b.iter(|| to_avro_datum(&schema, record.clone()));
+fn bench_small_schema_write_record(c: &mut Criterion) {
+    let (schema, record) = make_small_record();
+    c.bench_function("small record", |b| {
+        b.iter(|| to_avro_datum(&schema, record.clone()))
+    });
 }
 
-#[bench]
-fn bench_small_schema_write_record(b: &mut test::Bencher) {
-    bench_write(b, &make_small_record);
+fn bench_big_schema_write_record(c: &mut Criterion) {
+    let (schema, record) = make_big_record();
+    c.bench_function("big record", |b| {
+        b.iter(|| to_avro_datum(&schema, record.clone()))
+    });
 }
 
-#[bench]
-fn bench_big_schema_write_record(b: &mut test::Bencher) {
-    bench_write(b, &make_big_record);
-}
+criterion_group!(
+    benches,
+    bench_small_schema_write_record,
+    bench_big_schema_write_record
+);
+criterion_main!(benches);

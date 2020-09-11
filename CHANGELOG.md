@@ -4,7 +4,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
+### Added
+- Added support for the Rabin fingerprint (#157)
+
+## [0.11.0] - 2020-08-13
+### Changed
+- Introduce custom Error enum to replace all existing errors (backward-incompatible) (#135)
+- Swapped failure for thiserror (backward-incompatible) (#135)
+- Update digest crate and digest::Digest trait to 0.9 (backward-incompatible with digest::Digest 0.8) (#133)
+- Replace some manual from_str implementations with strum (#136)
+- Handle logical types in canonical form schemas (#144)
+- Move to specific error variants for errors (#146)
+
+### Added
+- Support to convert avro value to json value (#155)
+- Implement deserialize for Uuid (#153)
+
+## Deprecated
+- Deprecate ToAvro in favor of From<T> for Value implementations (#137)
+
+## [0.10.0] - 2020-05-31
+### Changed
+- Writer::into_inner() now calls flush() and returns a Result (backward-incompatible)
+
+### Added
+- Add utility for schema compatibility check
+
+## [0.9.1] - 2020-05-02
+### Changed
+- Port benchmarks to criterion
+
+### Fixed
+- Fix bug in the reader buffer length
+
+## [0.9.0] - 2020-04-24
+### Added
+- Add support for logical types
+- Make writer block size configurable via builder pattern
+
+## [0.8.0] - 2020-04-15
+### Added
+- Partial rust enum serialization/deserialization support
+
+## [0.7.0] - 2020-02-16
+### Added
+- Export de::Error and ser::Error as DeError and SerError
+
+### Fixed
+- Fix union resolution of default values
+
+## [0.6.6] - 2019-12-22
+### Fixed
+- Negative block lengths are not handled
 
 ## [0.6.5] - 2019-03-09
 ### Fixed
@@ -29,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.0]- 2018-08-11
 ### Added
-- impl Send+Sync for Schema (non-backwards compatible)
+- impl Send+Sync for Schema (backwards-incompatible)
 
 ## [0.5.0] - 2018-08-06
 ### Added
@@ -42,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.1] - 2018-06-17
 ### Changed
-- Implememented clippy suggestions
+- Implemented clippy suggestions
 
 ## [0.4.0] - 2018-06-17
 ### Changed

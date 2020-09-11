@@ -156,6 +156,16 @@ impl Serialize for OnceSchemaCell<SchemaType<'_>> {
             }
             SchemaType::Enum(enum_) => self.map(enum_).serialize(serializer),
             SchemaType::Fixed(fixed) => self.map(fixed).serialize(serializer),
+            //TODO: I have no frickking idea what to do here
+            SchemaType::Decimal{  precision, scale, inner} => (),
+            SchemaType::Uuid => (),
+            SchemaType::Date => (),
+            SchemaType::TimeMillis => (),
+            SchemaType::TimeMicros => (),
+            SchemaType::TimestampMillis => (),
+            SchemaType::TimestampMicros => (),
+            SchemaType::Duration => (),
+            _ => (),
         }
     }
 }
