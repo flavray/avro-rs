@@ -1,7 +1,7 @@
 use crate::{
     decimal::Decimal,
     duration::Duration,
-    schema::SchemaType,
+    schema::{DecimalSchema, Schema, SchemaKind, SchemaType},
     types::Value,
     util::{safe_len, zag_i32, zag_i64},
     AvroResult, Error,
@@ -73,17 +73,29 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
             reader.read_exact(&mut buf[..]).map_err(Error::ReadFloat)?;
             Ok(Value::Float(f32::from_le_bytes(buf)))
         }
-        // SchemaType::Decimal { ref inner, .. } => match &**inner {
-        //     SchemaType::Fixed { .. } => match decode(*inner, reader)? {
-        //         Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-        //         value => Err(Error::FixedValue(value.into())),
-        //     },
-        //     SchemaType::Bytes => match decode(*inner, reader)? {
-        //         Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-        //         value => Err(Error::BytesValue(value.into())),
-        //     },
-        //     schema => Err(Error::ResolveDecimalSchema(schema.into())),
-        // },
+        SchemaType::Decimal(d) => {
+            let mut builder = Schema::builder();
+            // TODO: name implementation
+            let root = builder
+                .decimal("name")
+                .decimal(d.precision(), d.scale(), &mut builder)
+                .unwrap();
+            let expected = builder.build(root).unwrap();
+
+            match expected.root() {
+                SchemaType::Fixed { .. } => match decode(expected.root(), reader)? {
+                    Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+                    value => Err(Error::FixedValue(value.into())),
+                },
+                SchemaType::Bytes => match decode(expected.root(), reader)? {
+                    Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
+                    value => Err(Error::BytesValue(value.into())),
+                },
+                schema => Err(Error::ResolveDecimalSchema(
+                    crate::schema::SchemaKind::Decimal,
+                )),
+            }
+        }
         SchemaType::Uuid => Ok(Value::Uuid(
             Uuid::from_str(match decode(SchemaType::String, reader)? {
                 Value::String(ref s) => s,
@@ -124,7 +136,7 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
         //TODO: what about name?
         SchemaType::Fixed(fixed) => {
             let mut buf = vec![0u8; fixed.size() as usize];
-            reader.read_exact(&mut buf)?;
+            reader.read_exact(&mut buf).map_err(Error::ReadBytes)?;
             Ok(Value::Fixed(fixed.size(), buf))
         }
         SchemaType::Array(array) => {
@@ -260,6 +272,7 @@ mod tests {
     fn test_negative_decimal_value() {
         use crate::{encode::encode, schema::Name};
         use num_bigint::ToBigInt;
+
         let inner = SchemaType::Fixed {
             size: 2,
             name: Name::new("decimal"),
@@ -282,17 +295,9 @@ mod tests {
 
     #[test]
     fn test_decode_decimal_with_bigger_than_necessary_size() {
-        use crate::{encode::encode, schema::Name};
+        use crate::encode::encode;
         use num_bigint::ToBigInt;
-        let inner = Schema::Fixed {
-            size: 13,
-            name: Name::new("decimal"),
-        };
-        let schema = SchemaType::Decimal {
-            inner,
-            precision: 4,
-            scale: 2,
-        };
+        let schema = super::DecimalSchema;
         let value = Value::Decimal(Decimal::from(
             (-423.to_bigint().unwrap()).to_signed_bytes_be(),
         ));

@@ -1,5 +1,8 @@
 //! Logic for checking schema compatibility
-use crate::schema::{SchemaKind, SchemaType};
+use crate::{
+    schema::{SchemaKind, SchemaType},
+    Schema,
+};
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     hash::Hasher,
@@ -20,14 +23,18 @@ impl Checker {
         }
     }
 
-    pub(crate) fn can_read(&mut self, writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    pub(crate) fn can_read(
+        &mut self,
+        writers_schema: &SchemaType,
+        readers_schema: &SchemaType,
+    ) -> bool {
         self.full_match_schemas(writers_schema, readers_schema)
     }
 
     pub(crate) fn full_match_schemas(
         &mut self,
-        writers_schema: &Schema,
-        readers_schema: &Schema,
+        writers_schema: &SchemaType,
+        readers_schema: &SchemaType,
     ) -> bool {
         if self.recursion_in_progress(writers_schema, readers_schema) {
             return true;
@@ -47,48 +54,46 @@ impl Checker {
         match r_type {
             SchemaKind::Record => self.match_record_schemas(writers_schema, readers_schema),
             SchemaKind::Map => {
-                if let Schema::Map(w_m) = writers_schema {
-                    if let Schema::Map(r_m) = readers_schema {
-                        self.full_match_schemas(w_m, r_m)
+                if let SchemaType::Map(w_m) = writers_schema {
+                    if let SchemaType::Map(r_m) = readers_schema {
+                        self.full_match_schemas(&w_m.items(), &r_m.items())
                     } else {
-                        unreachable!("readers_schema should have been Schema::Map")
+                        unreachable!("readers_schema should have been SchemaType::Map")
                     }
                 } else {
-                    unreachable!("writers_schema should have been Schema::Map")
+                    unreachable!("writers_schema should have been SchemaType::Map")
                 }
             }
             SchemaKind::Array => {
-                if let Schema::Array(w_a) = writers_schema {
-                    if let Schema::Array(r_a) = readers_schema {
-                        self.full_match_schemas(w_a, r_a)
+                if let SchemaType::Array(w_a) = writers_schema {
+                    if let SchemaType::Array(r_a) = readers_schema {
+                        self.full_match_schemas(&w_a.items(), &r_a.items())
                     } else {
-                        unreachable!("readers_schema should have been Schema::Array")
+                        unreachable!("readers_schema should have been SchemaType::Array")
                     }
                 } else {
-                    unreachable!("writers_schema should have been Schema::Array")
+                    unreachable!("writers_schema should have been SchemaType::Array")
                 }
             }
             SchemaKind::Union => self.match_union_schemas(writers_schema, readers_schema),
             SchemaKind::Enum => {
                 // reader's symbols must contain all writer's symbols
-                if let Schema::Enum {
-                    symbols: w_symbols, ..
-                } = writers_schema
-                {
-                    if let Schema::Enum {
-                        symbols: r_symbols, ..
-                    } = readers_schema
-                    {
-                        return w_symbols.iter().find(|e| !r_symbols.contains(e)).is_none();
+                if let SchemaType::Enum(w_e) = writers_schema {
+                    if let SchemaType::Enum(r_e) = readers_schema {
+                        return w_e
+                            .symbols()
+                            .iter()
+                            .find(|e| !r_e.symbols().contains(e))
+                            .is_none();
                     }
                 }
                 false
             }
             _ => {
                 if w_type == SchemaKind::Union {
-                    if let Schema::Union(r) = writers_schema {
-                        if r.schemas.len() == 1 {
-                            return self.full_match_schemas(&r.schemas[0], readers_schema);
+                    if let SchemaType::Union(r) = writers_schema {
+                        if r.variants().len() == 1 {
+                            return self.full_match_schemas(&r.variants()[0], readers_schema);
                         }
                     }
                 }
@@ -97,29 +102,27 @@ impl Checker {
         }
     }
 
-    fn match_record_schemas(&mut self, writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    fn match_record_schemas(
+        &mut self,
+        writers_schema: &SchemaType,
+        readers_schema: &SchemaType,
+    ) -> bool {
         let w_type = SchemaKind::from(writers_schema);
 
         if w_type == SchemaKind::Union {
             return false;
         }
 
-        if let Schema::Record {
-            fields: w_fields,
-            lookup: w_lookup,
-            ..
-        } = writers_schema
-        {
-            if let Schema::Record {
-                fields: r_fields, ..
-            } = readers_schema
-            {
-                for field in r_fields.iter() {
-                    if let Some(pos) = w_lookup.get(&field.name) {
-                        if !self.full_match_schemas(&w_fields[*pos].schema, &field.schema) {
+        if let SchemaType::Record(record) = writers_schema {
+            let w_fields = record.fields();
+
+            if let SchemaType::Record(r_record) = readers_schema {
+                for field in r_record.iter_fields() {
+                    if let Some(pos) = record.field(field.name()) {
+                        if !self.full_match_schemas(&pos.schema(), &field.schema()) {
                             return false;
                         }
-                    } else if field.default.is_none() {
+                    } else if field.default().is_none() {
                         return false;
                     }
                 }
@@ -128,30 +131,38 @@ impl Checker {
         true
     }
 
-    fn match_union_schemas(&mut self, writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    fn match_union_schemas(
+        &mut self,
+        writers_schema: &SchemaType,
+        readers_schema: &SchemaType,
+    ) -> bool {
         let w_type = SchemaKind::from(writers_schema);
         let r_type = SchemaKind::from(readers_schema);
 
         assert_eq!(r_type, SchemaKind::Union);
 
         if w_type == SchemaKind::Union {
-            if let Schema::Union(u) = writers_schema {
-                u.schemas
+            if let SchemaType::Union(u) = writers_schema {
+                u.variants()
                     .iter()
                     .all(|schema| self.full_match_schemas(schema, readers_schema))
             } else {
-                unreachable!("writers_schema should have been Schema::Union")
+                unreachable!("writers_schema should have been SchemaType::Union")
             }
-        } else if let Schema::Union(u) = readers_schema {
-            u.schemas
+        } else if let SchemaType::Union(u) = readers_schema {
+            u.variants()
                 .iter()
                 .any(|schema| self.full_match_schemas(writers_schema, schema))
         } else {
-            unreachable!("readers_schema should have been Schema::Union")
+            unreachable!("readers_schema should have been SchemaType::Union")
         }
     }
 
-    fn recursion_in_progress(&mut self, writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    fn recursion_in_progress(
+        &mut self,
+        writers_schema: &SchemaType,
+        readers_schema: &SchemaType,
+    ) -> bool {
         let mut hasher = DefaultHasher::new();
         ptr::hash(writers_schema, &mut hasher);
         let w_hash = hasher.finish();
@@ -170,14 +181,14 @@ impl Checker {
 impl SchemaCompatibility {
     /// `can_read` performs a full, recursive check that a datum written using the
     /// writers_schema can be read using the readers_schema.
-    pub fn can_read(writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    pub fn can_read(writers_schema: &SchemaType, readers_schema: &SchemaType) -> bool {
         let mut c = Checker::new();
         c.can_read(writers_schema, readers_schema)
     }
 
     /// `mutual_read` performs a full, recursive check that a datum written using either
     /// the writers_schema or the readers_schema can be read using the other schema.
-    pub fn mutual_read(writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    pub fn mutual_read(writers_schema: &SchemaType, readers_schema: &SchemaType) -> bool {
         SchemaCompatibility::can_read(writers_schema, readers_schema)
             && SchemaCompatibility::can_read(readers_schema, writers_schema)
     }
@@ -187,7 +198,7 @@ impl SchemaCompatibility {
     ///  matching the types, including schema promotion, and matching the full name for
     ///  named types. Aliases for named types are not supported here, and the rust
     ///  implementation of Avro in general does not include support for aliases (I think).
-    pub(crate) fn match_schemas(writers_schema: &Schema, readers_schema: &Schema) -> bool {
+    pub(crate) fn match_schemas(writers_schema: &SchemaType, readers_schema: &SchemaType) -> bool {
         let w_type = SchemaKind::from(writers_schema);
         let r_type = SchemaKind::from(readers_schema);
 
@@ -202,67 +213,59 @@ impl SchemaCompatibility {
 
             match r_type {
                 SchemaKind::Record => {
-                    if let Schema::Record { name: w_name, .. } = writers_schema {
-                        if let Schema::Record { name: r_name, .. } = readers_schema {
-                            return w_name.fullname(None) == r_name.fullname(None);
+                    if let SchemaType::Record(w_record) = writers_schema {
+                        if let SchemaType::Record(r_record) = readers_schema {
+                            return w_record.name() == r_record.name();
                         } else {
-                            unreachable!("readers_schema should have been Schema::Record")
+                            unreachable!("readers_schema should have been SchemaType::Record")
                         }
                     } else {
-                        unreachable!("writers_schema should have been Schema::Record")
+                        unreachable!("writers_schema should have been SchemaType::Record")
                     }
                 }
                 SchemaKind::Fixed => {
-                    if let Schema::Fixed {
-                        name: w_name,
-                        size: w_size,
-                    } = writers_schema
-                    {
-                        if let Schema::Fixed {
-                            name: r_name,
-                            size: r_size,
-                        } = readers_schema
-                        {
-                            return w_name.fullname(None) == r_name.fullname(None)
-                                && w_size == r_size;
+                    if let SchemaType::Fixed(w_fixed) = writers_schema {
+                        if let SchemaType::Fixed(r_fixed) = readers_schema {
+                            return w_fixed.name() == r_fixed.name()
+                                && w_fixed.size() == r_fixed.size();
                         } else {
-                            unreachable!("readers_schema should have been Schema::Fixed")
+                            unreachable!("readers_schema should have been SchemaType::Fixed")
                         }
                     } else {
-                        unreachable!("writers_schema should have been Schema::Fixed")
+                        unreachable!("writers_schema should have been SchemaType::Fixed")
                     }
                 }
                 SchemaKind::Enum => {
-                    if let Schema::Enum { name: w_name, .. } = writers_schema {
-                        if let Schema::Enum { name: r_name, .. } = readers_schema {
-                            return w_name.fullname(None) == r_name.fullname(None);
+                    if let SchemaType::Enum(w_e) = writers_schema {
+                        if let SchemaType::Enum(r_e) = readers_schema {
+                            return w_e.name() == r_e.name();
                         } else {
-                            unreachable!("readers_schema should have been Schema::Enum")
+                            unreachable!("readers_schema should have been SchemaType::Enum")
                         }
                     } else {
-                        unreachable!("writers_schema should have been Schema::Enum")
+                        unreachable!("writers_schema should have been SchemaType::Enum")
                     }
                 }
                 SchemaKind::Map => {
-                    if let Schema::Map(w_m) = writers_schema {
-                        if let Schema::Map(r_m) = readers_schema {
-                            return SchemaCompatibility::match_schemas(w_m, r_m);
+                    if let SchemaType::Map(w_m) = writers_schema {
+                        if let SchemaType::Map(r_m) = readers_schema {
+                            return SchemaCompatibility::match_schemas(&w_m.items(), &r_m.items());
                         } else {
-                            unreachable!("readers_schema should have been Schema::Map")
+                            unreachable!("readers_schema should have been SchemaType::Map")
                         }
                     } else {
-                        unreachable!("writers_schema should have been Schema::Map")
+                        unreachable!("writers_schema should have been SchemaType::Map")
                     }
                 }
                 SchemaKind::Array => {
                     if let SchemaType::Array(w_a) = writers_schema {
                         if let SchemaType::Array(r_a) = readers_schema {
-                            return SchemaCompatibility::match_schemas(w_a, r_a);
+                            return SchemaCompatibility::match_schemas(&w_a.items(), &r_a.items());
                         } else {
-                            unreachable!("readers_schema should have been Schema::Array")
+                            unreachable!("readers_schema should have been SchemaType::Array")
                         }
                     } else {
-                        unreachable!("writers_schema should have been Schema::Array")
+                        unreachable!("writers_schema should have been SchemaType::Array")
                     }
                 }
                 _ => (),
@@ -310,27 +313,27 @@ mod tests {
     }
 
     fn long_array_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"array", "items":"long"}"#).unwrap()
+        SchemaType::parse_str(r#"{"type":"array", "items":"long"}"#).unwrap()
     }
 
     fn string_array_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"array", "items":"string"}"#).unwrap()
+        SchemaType::parse_str(r#"{"type":"array", "items":"string"}"#).unwrap()
     }
 
     fn int_map_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"map", "values":"int"}"#).unwrap()
+        SchemaType::parse_str(r#"{"type":"map", "values":"int"}"#).unwrap()
     }
 
     fn long_map_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"map", "values":"long"}"#).unwrap()
+        SchemaType::parse_str(r#"{"type":"map", "values":"long"}"#).unwrap()
     }
 
     fn string_map_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"map", "values":"string"}"#).unwrap()
+        SchemaType::parse_str(r#"{"type":"map", "values":"string"}"#).unwrap()
     }
 
     fn enum1_ab_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"enum", "name":"Enum1", "symbols":["A","B"]}"#).unwrap()
+        SchemaType::parse_str(r#"{"type":"enum", "name":"Enum1", "symbols":["A","B"]}"#).unwrap()
     }
 
     fn enum1_abc_schema() -> Schema {
@@ -457,27 +460,27 @@ mod tests {
     fn test_incompatible_reader_writer_pairs() {
         let incompatible_schemas = vec![
             // null
-            (Schema::Null, Schema::Int),
-            (Schema::Null, Schema::Long),
+            (SchemaType::Null, SchemaType::Int),
+            (SchemaType::Null, SchemaType::Long),
             // boolean
-            (Schema::Boolean, Schema::Int),
+            (SchemaType::Boolean, SchemaType::Int),
             // int
-            (Schema::Int, Schema::Null),
-            (Schema::Int, Schema::Boolean),
-            (Schema::Int, Schema::Long),
-            (Schema::Int, Schema::Float),
-            (Schema::Int, Schema::Double),
+            (SchemaType::Int, SchemaType::Null),
+            (SchemaType::Int, SchemaType::Boolean),
+            (SchemaType::Int, SchemaType::Long),
+            (SchemaType::Int, SchemaType::Float),
+            (SchemaType::Int, SchemaType::Double),
             // long
-            (Schema::Long, Schema::Float),
-            (Schema::Long, Schema::Double),
+            (SchemaType::Long, SchemaType::Float),
+            (SchemaType::Long, SchemaType::Double),
             // float
-            (Schema::Float, Schema::Double),
+            (SchemaType::Float, SchemaType::Double),
             // string
-            (Schema::String, Schema::Boolean),
-            (Schema::String, Schema::Int),
+            (SchemaType::String, SchemaType::Boolean),
+            (SchemaType::String, SchemaType::Int),
             // bytes
-            (Schema::Bytes, Schema::Null),
-            (Schema::Bytes, Schema::Int),
+            (SchemaType::Bytes, SchemaType::Null),
+            (SchemaType::Bytes, SchemaType::Int),
             // array and maps
             (int_array_schema(), long_array_schema()),
             (int_map_schema(), int_array_schema()),
@@ -487,8 +490,8 @@ mod tests {
             (enum1_ab_schema(), enum1_abc_schema()),
             (enum1_bc_schema(), enum1_abc_schema()),
             (enum1_ab_schema(), enum2_ab_schema()),
-            (Schema::Int, enum2_ab_schema()),
-            (enum2_ab_schema(), Schema::Int),
+            (SchemaType::Int, enum2_ab_schema()),
+            (enum2_ab_schema(), SchemaType::Int),
             //union
             (int_union_schema(), int_string_union_schema()),
             (string_union_schema(), int_string_union_schema()),
@@ -508,15 +511,15 @@ mod tests {
     #[test]
     fn test_compatible_reader_writer_pairs() {
         let compatible_schemas = vec![
-            (Schema::Null, Schema::Null),
-            (Schema::Long, Schema::Int),
-            (Schema::Float, Schema::Int),
-            (Schema::Float, Schema::Long),
-            (Schema::Double, Schema::Long),
-            (Schema::Double, Schema::Int),
-            (Schema::Double, Schema::Float),
-            (Schema::String, Schema::Bytes),
-            (Schema::Bytes, Schema::String),
+            (SchemaType::Null, SchemaType::Null),
+            (SchemaType::Long, SchemaType::Int),
+            (SchemaType::Float, SchemaType::Int),
+            (SchemaType::Float, SchemaType::Long),
+            (SchemaType::Double, SchemaType::Long),
+            (SchemaType::Double, SchemaType::Int),
+            (SchemaType::Double, SchemaType::Float),
+            (SchemaType::String, SchemaType::Bytes),
+            (SchemaType::Bytes, SchemaType::String),
             (int_array_schema(), int_array_schema()),
             (long_array_schema(), int_array_schema()),
             (int_map_schema(), int_map_schema()),
@@ -528,8 +531,8 @@ mod tests {
             (int_string_union_schema(), string_int_union_schema()),
             (int_union_schema(), empty_union_schema()),
             (long_union_schema(), int_union_schema()),
-            (int_union_schema(), Schema::Int),
-            (Schema::Int, int_union_schema()),
+            (int_union_schema(), SchemaType::Int),
+            (SchemaType::Int, int_union_schema()),
             (empty_record1_schema(), empty_record1_schema()),
             (empty_record1_schema(), a_int_record1_schema()),
             (a_int_record1_schema(), a_int_record1_schema()),
@@ -555,7 +558,7 @@ mod tests {
     }
 
     fn writer_schema() -> Schema {
-        Schema::parse_str(
+        SchemaType::parse_str(
             r#"
       {"type":"record", "name":"Record", "fields":[
         {"name":"oldfield1", "type":"int"},
@@ -568,7 +571,7 @@ mod tests {
 
     #[test]
     fn test_missing_field() {
-        let reader_schema = Schema::parse_str(
+        let reader_schema = SchemaType::parse_str(
             r#"
       {"type":"record", "name":"Record", "fields":[
         {"name":"oldfield1", "type":"int"}
@@ -588,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_missing_second_field() {
-        let reader_schema = Schema::parse_str(
+        let reader_schema = SchemaType::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield2", "type":"string"}
@@ -608,7 +611,7 @@ mod tests {
 
     #[test]
     fn test_all_fields() {
-        let reader_schema = Schema::parse_str(
+        let reader_schema = SchemaType::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield1", "type":"int"},
@@ -629,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_new_field_with_default() {
-        let reader_schema = Schema::parse_str(
+        let reader_schema = SchemaType::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield1", "type":"int"},
@@ -650,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_new_field() {
-        let reader_schema = Schema::parse_str(
+        let reader_schema = SchemaType::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield1", "type":"int"},
@@ -686,13 +689,13 @@ mod tests {
 
     #[test]
     fn test_primitive_writer_schema() {
-        let valid_reader = Schema::String;
+        let valid_reader = SchemaType::String;
         assert!(SchemaCompatibility::can_read(
-            &Schema::String,
+            SchemaType::String,
             &valid_reader
         ));
         assert_eq!(
-            SchemaCompatibility::can_read(&Schema::Int, &Schema::String),
+            SchemaCompatibility::can_read(SchemaType::Int, SchemaType::String),
             false
         );
     }
@@ -700,8 +703,8 @@ mod tests {
     #[test]
     fn test_union_reader_writer_subset_incompatiblity() {
         // reader union schema must contain all writer union branches
-        let union_writer = union_schema(vec![Schema::Int, Schema::String]);
-        let union_reader = union_schema(vec![Schema::String]);
+        let union_writer = union_schema(vec![SchemaType::Int, SchemaType::String]);
+        let union_reader = union_schema(vec![SchemaType::String]);
 
         assert_eq!(
             SchemaCompatibility::can_read(&union_writer, &union_reader),
@@ -712,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_incompatible_record_field() {
-        let string_schema = Schema::parse_str(
+        let string_schema = SchemaType::parse_str(
             r#"
         {"type":"record", "name":"MyRecord", "namespace":"ns", "fields": [
             {"name":"field1", "type":"string"}
@@ -721,7 +724,7 @@ mod tests {
         )
         .unwrap();
 
-        let int_schema = Schema::parse_str(
+        let int_schema = SchemaType::parse_str(
             r#"
       {"type":"record", "name":"MyRecord", "namespace":"ns", "fields": [
         {"name":"field1", "type":"int"}
@@ -738,14 +741,14 @@ mod tests {
 
     #[test]
     fn test_enum_symbols() {
-        let enum_schema1 = Schema::parse_str(
+        let enum_schema1 = SchemaType::parse_str(
             r#"
       {"type":"enum", "name":"MyEnum", "symbols":["A","B"]}
 "#,
         )
         .unwrap();
         let enum_schema2 =
-            Schema::parse_str(r#"{"type":"enum", "name":"MyEnum", "symbols":["A","B","C"]}"#)
+            SchemaType::parse_str(r#"{"type":"enum", "name":"MyEnum", "symbols":["A","B","C"]}"#)
                 .unwrap();
         assert_eq!(
             SchemaCompatibility::can_read(&enum_schema2, &enum_schema1),
@@ -756,8 +759,8 @@ mod tests {
 
     // unused
     /*
-        fn point_2d_schema() -> Schema {
-            Schema::parse_str(
+        fn point_2d_schema() -> SchemaType {
+            SchemaType::parse_str(
                 r#"
           {"type":"record", "name":"Point2D", "fields":[
             {"name":"x", "type":"double"},
@@ -770,7 +773,7 @@ mod tests {
     */
 
     fn point_2d_fullname_schema() -> Schema {
-        Schema::parse_str(
+        SchemaType::parse_str(
             r#"
       {"type":"record", "name":"Point", "namespace":"written", "fields":[
         {"name":"x", "type":"double"},
@@ -782,7 +785,7 @@ mod tests {
     }
 
     fn point_3d_no_default_schema() -> Schema {
-        Schema::parse_str(
+        SchemaType::parse_str(
             r#"
       {"type":"record", "name":"Point", "fields":[
         {"name":"x", "type":"double"},
@@ -796,8 +799,8 @@ mod tests {
 
     // unused
     /*
-        fn point_3d_schema() -> Schema {
-            Schema::parse_str(
+        fn point_3d_schema() -> SchemaType {
+            SchemaType::parse_str(
                 r#"
           {"type":"record", "name":"Point3D", "fields":[
             {"name":"x", "type":"double"},
@@ -809,8 +812,8 @@ mod tests {
             .unwrap()
         }
 
-        fn point_3d_match_name_schema() -> Schema {
-            Schema::parse_str(
+        fn point_3d_match_name_schema() -> SchemaType {
+            SchemaType::parse_str(
                 r#"
           {"type":"record", "name":"Point", "fields":[
             {"name":"x", "type":"double"},
@@ -826,7 +829,7 @@ mod tests {
     #[test]
     fn test_union_resolution_no_structure_match() {
         // short name match, but no structure match
-        let read_schema = union_schema(vec![Schema::Null, point_3d_no_default_schema()]);
+        let read_schema = union_schema(vec![SchemaType::Null, point_3d_no_default_schema()]);
         assert_eq!(
             SchemaCompatibility::can_read(&point_2d_fullname_schema(), &read_schema),
             false
@@ -840,7 +843,7 @@ mod tests {
     // fn test_union_resolution_first_structure_match_2d() {
     //     // multiple structure matches with no name matches
     //     let read_schema = union_schema(vec![
-    //         Schema::Null,
+    //         SchemaType::Null,
     //         point_3d_no_default_schema(),
     //         point_2d_schema(),
     //         point_3d_schema(),
@@ -855,7 +858,7 @@ mod tests {
     // fn test_union_resolution_first_structure_match_3d() {
     //     // multiple structure matches with no name matches
     //     let read_schema = union_schema(vec![
-    //         Schema::Null,
+    //         SchemaType::Null,
     //         point_3d_no_default_schema(),
     //         point_3d_schema(),
     //         point_2d_schema(),
@@ -870,7 +873,7 @@ mod tests {
     // fn test_union_resolution_named_structure_match() {
     //     // multiple structure matches with a short name match
     //     let read_schema = union_schema(vec![
-    //         Schema::Null,
+    //         SchemaType::Null,
     //         point_2d_schema(),
     //         point_3d_match_name_schema(),
     //         point_3d_schema(),
@@ -885,7 +888,7 @@ mod tests {
     // fn test_union_resolution_full_name_match() {
     //     // there is a full name match that should be chosen
     //     let read_schema = union_schema(vec![
-    //         Schema::Null,
+    //         SchemaType::Null,
     //         point_2d_schema(),
     //         point_3d_match_name_schema(),
     //         point_3d_schema(),

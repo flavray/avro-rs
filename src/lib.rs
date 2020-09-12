@@ -712,6 +712,13 @@ pub type AvroResult<T> = Result<T, Error>;
 // pub use crate::util::{max_allocation_bytes, DecodeError};
 // pub use crate::writer::{to_avro_datum, ValidationError, Writer};
 
+#[macro_use]
+extern crate failure;
+
+extern crate strum;
+#[macro_use]
+extern crate strum_macros;
+
 #[cfg(test)]
 mod tests {
     use crate::{

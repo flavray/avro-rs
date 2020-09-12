@@ -190,14 +190,23 @@ pub enum Error {
     #[error("No `name` in record field")]
     GetNameFieldFromRecord,
 
-    #[error("No `type` in record field")]
-    GetTypeFieldFromRecord,
-
     #[error("Unions may not directly contain a union")]
     GetNestedUnion,
 
-    #[error("Unions cannot contain duplicate types, but union `{0}` duplicates `{1}`")]
-    GetUnionDuplicate(String, String),
+    #[error("Unions cannot contain duplicate types")]
+    GetUnionDuplicate,
+
+    #[error("SchemaBuilderInvalidSchema error")]
+    SchemaBuilderInvalidSchema(String),
+
+    #[error("SchemaBuilderValidationFail error")]
+    SchemaBuilderValidationFail(Vec<Error>),
+
+    #[error("SchemaResolution")]
+    SchemaResolution(String),
+
+    #[error("GetTypeFieldFromRecord")]
+    GetTypeFieldFromRecord,
 
     #[error("JSON value {0} claims to be u64 but cannot be converted")]
     GetU64FromJson(serde_json::Number),
@@ -341,19 +350,7 @@ pub enum Error {
     #[error("failed to convert avro float to json: {0}")]
     ConvertF64ToJson(f64),
 
-    #[error("Invalid schema construction: {0}")]
-    SchemaBuilderInvalidSchema(String),
-
-    #[error("Schema validation failed: {0}")]
-    SchemaBuilderValidationFail(Vec<Self>),
-
-    #[error("Schema resoulution error: {0}")]
-    SchemaResolution(String),
-
-    #[error("Failed to parse complex schema: {0}")]
-    ParseName(String),
-
-    #[error("{0} declared as a forward reference, but is not defined")]
+    #[error("Failed to find a reference")]
     UndefinedReference(String),
 }
 

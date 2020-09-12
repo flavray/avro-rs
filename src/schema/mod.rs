@@ -5,31 +5,29 @@ mod parse;
 mod pcf;
 mod serialize;
 
-use {
-    crate::{
-        error::Error,
-        schema::{
-            builder::SchemaBuilder,
-            data::{RecordFieldData, SchemaData},
-            parse::SchemaParser,
-        },
-        types,
-        util::MapHelper,
+use crate::{
+    error::Error,
+    schema::{
+        builder::SchemaBuilder,
+        data::{RecordFieldData, SchemaData},
+        parse::SchemaParser,
     },
-    digest::Digest,
-    once_cell::sync::OnceCell,
-    serde_json::{self, Map, Value},
-    std::{
-        borrow::Cow,
-        cell::RefCell,
-        collections::{HashMap, HashSet},
-        convert::TryInto,
-        fmt,
-        rc::Rc,
-    },
-    string_interner::{DefaultStringInterner, Sym as RawNameSym},
-    wyhash::{self, WyHash},
+    types,
+    util::MapHelper,
 };
+use digest::Digest;
+use once_cell::sync::OnceCell;
+use serde_json::{self, Map, Value};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    convert::TryInto,
+    fmt,
+    rc::Rc,
+};
+use string_interner::{DefaultStringInterner, Sym as RawNameSym};
+use wyhash::{self, WyHash};
 // use failure::Error;
 
 // Rexport the error types as part of the public API
@@ -75,7 +73,7 @@ impl Schema {
 
     /// Parse the schema from a slice
     pub fn parse_slice<'a>(raw: &'a [u8]) -> Result<Schema, Error> {
-        let value = serde_json::from_slice(raw)?;
+        let value = serde_json::from_slice(raw).map_err(Error::ConvertJsonToString)?;
         Self::parse(&value).map_err(|e| e.into())
     }
 
@@ -226,7 +224,7 @@ impl fmt::Display for SchemaFingerprint {
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub enum SchemaType<'schema> {
     /// A `null` Avro schema.
     Null,
@@ -270,28 +268,23 @@ pub enum SchemaType<'schema> {
     ///
     /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
     /// integer greater than 0.
-    // Decimal {
-    //     precision: DecimalMetadata,
-    //     scale: DecimalMetadata,
-    //     // TODO: Do we have to box it? If so then we cannot derive copy anymore
-    //     inner: SchemaType<'schema>,
-    // },
-    /// A universally unique identifier, annotating a string.
+    Decimal(DecimalSchema<'schema>),
+    // A universally unique identifier, annotating a string.
     Uuid,
-    /// Logical type which represents the number of days since the unix epoch.
-    /// Serialization format is `Schema::Int`.
+    // /// Logical type which represents the number of days since the unix epoch.
+    // /// Serialization format is `Schema::Int`.
     Date,
-    /// The time of day in number of milliseconds after midnight with no reference any calendar,
-    /// time zone or date in particular.
+    // /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    // /// time zone or date in particular.
     TimeMillis,
-    /// The time of day in number of microseconds after midnight with no reference any calendar,
-    /// time zone or date in particular.
+    // /// The time of day in number of microseconds after midnight with no reference any calendar,
+    // /// time zone or date in particular.
     TimeMicros,
-    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
+    // /// An instant in time represented as the number of milliseconds after the UNIX epoch.
     TimestampMillis,
-    /// An instant in time represented as the number of microseconds after the UNIX epoch.
+    // /// An instant in time represented as the number of microseconds after the UNIX epoch.
     TimestampMicros,
-    /// An amount of time defined by a number of months, days and milliseconds.
+    // An amount of time defined by a number of months, days and milliseconds.
     Duration,
 }
 
@@ -335,51 +328,64 @@ fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalM
 }
 
 // replaced with derive
-// impl fmt::Debug for SchemaType<'_> {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         match self {
-//             SchemaType::Null => write!(f, "null"),
-//             SchemaType::Boolean => write!(f, "boolean"),
-//             SchemaType::Int => write!(f, "int"),
-//             SchemaType::Long => write!(f, "long"),
-//             SchemaType::Float => write!(f, "float"),
-//             SchemaType::Double => write!(f, "double"),
-//             SchemaType::Bytes => write!(f, "bytes"),
-//             SchemaType::String => write!(f, "string"),
-//             SchemaType::Array(agg) => f
-//                 .debug_struct("Array")
-//                 .field("name", &agg.name())
-//                 .field("value", &agg.items())
-//                 .finish(),
-//             SchemaType::Map(agg) => f
-//                 .debug_struct("Map")
-//                 .field("name", &agg.name())
-//                 .field("value", &agg.items())
-//                 .finish(),
-//             SchemaType::Union(union_) => f
-//                 .debug_struct("Union")
-//                 .field("variants", &&union_.variants())
-//                 .finish(),
-//             SchemaType::Record(record) => f
-//                 .debug_struct("Record")
-//                 .field("name", &record.name())
-//                 .field("doc", &record.doc())
-//                 .field("fields", &record.fields())
-//                 .finish(),
-//             SchemaType::Enum(enum_) => f
-//                 .debug_struct("Enum")
-//                 .field("name", &enum_.name())
-//                 .field("symbols", &enum_.symbols())
-//                 .finish(),
-//             //TODO: extend to support name field
-//             SchemaType::Fixed(name, fixed) => f
-//                 .debug_struct("Fixed")
-//                 .field("name", &fixed.name())
-//                 .field("size", &fixed.size())
-//                 .finish(),
-//         }
-//     }
-// }
+impl fmt::Debug for SchemaType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SchemaType::Null => write!(f, "null"),
+            SchemaType::Boolean => write!(f, "boolean"),
+            SchemaType::Int => write!(f, "int"),
+            SchemaType::Long => write!(f, "long"),
+            SchemaType::Float => write!(f, "float"),
+            SchemaType::Double => write!(f, "double"),
+            SchemaType::Bytes => write!(f, "bytes"),
+            SchemaType::String => write!(f, "string"),
+            SchemaType::Array(agg) => f
+                .debug_struct("Array")
+                .field("name", &agg.name())
+                .field("value", &agg.items())
+                .finish(),
+            SchemaType::Map(agg) => f
+                .debug_struct("Map")
+                .field("name", &agg.name())
+                // .field("value", &agg.items())
+                .finish(),
+            SchemaType::Union(union_) => f
+                .debug_struct("Union")
+                // .field("variants", &&union_.variants())
+                .finish(),
+            SchemaType::Record(record) => f
+                .debug_struct("Record")
+                .field("name", &record.name())
+                .field("doc", &record.doc())
+                .field("fields", &record.fields())
+                .finish(),
+            SchemaType::Enum(enum_) => f
+                .debug_struct("Enum")
+                .field("name", &enum_.name())
+                .field("symbols", &enum_.symbols())
+                .finish(),
+            //TODO: extend to support name field
+            SchemaType::Fixed(fixed) => f
+                .debug_struct("Fixed")
+                .field("name", &fixed.name())
+                .field("size", &fixed.size())
+                .finish(),
+            SchemaType::Decimal(decimal) => f
+                .debug_struct("Decimal")
+                .field("name", &decimal.name())
+                .field("precision", &decimal.precision())
+                .field("scale", &decimal.scale())
+                .finish(),
+            SchemaType::Uuid => write!(f, "uuid"),
+            SchemaType::Date => write!(f, "date"),
+            SchemaType::TimeMillis => write!(f, "time millis"),
+            SchemaType::TimeMicros => write!(f, "time micros"),
+            SchemaType::TimestampMillis => write!(f, "timestamp millis"),
+            SchemaType::TimestampMicros => write!(f, "tiumestamp micros"),
+            SchemaType::Duration => write!(f, "duration"),
+        }
+    }
+}
 
 /// Unwrap the flyweight to its data member for easier and less verbose implementation of getters
 macro_rules! match_lookup {
@@ -400,7 +406,7 @@ macro_rules! match_lookup {
 
 /// Represents `fixed` types in Avro schemas.
 ///
-/// More information about `vixed` can be found in the
+/// More information about `fixed` can be found in the
 /// [Avro specification](https://avro.apache.org/docs/current/spec.html#schema_fixed)
 #[derive(Copy, Clone, Debug)]
 pub struct FixedSchema<'s>(&'s Schema, NameRef);
@@ -412,6 +418,27 @@ impl<'s> FixedSchema<'s> {
 
     pub fn size(&self) -> usize {
         match_lookup!(self, SchemaData::Fixed(size) => *size)
+    }
+}
+
+/// Represents `decimal` types in Avro schemas.
+///
+/// More information about `decimal` can be found in the
+/// [Avro specification](https://avro.apache.org/docs/current/spec.html#schema_decimal)
+#[derive(Copy, Clone, Debug)]
+pub struct DecimalSchema<'s>(&'s Schema, NameRef);
+
+impl<'s> DecimalSchema<'s> {
+    pub fn name(&self) -> Name<'_> {
+        Name(self.0, self.1)
+    }
+
+    pub fn precision(&self) -> usize {
+        match_lookup!(self, SchemaData::Decimal(p, s) => *p)
+    }
+
+    pub fn scale(&self) -> usize {
+        match_lookup!(self, SchemaData::Decimal(p, s) => *s)
     }
 }
 
@@ -552,7 +579,7 @@ impl<'s> UnionSchema<'s> {
 /// intermediate type should be especially fast, as the number of enum variants is small, which
 /// _should_ compile into a jump-table for the conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum SchemaKind {
+pub enum SchemaKind {
     Null,
     Boolean,
     Int,
@@ -577,6 +604,22 @@ pub(crate) enum SchemaKind {
     Duration,
 }
 
+impl SchemaKind {
+    pub fn is_primitive(self) -> bool {
+        match self {
+            SchemaKind::Null
+            | SchemaKind::Boolean
+            | SchemaKind::Int
+            | SchemaKind::Long
+            | SchemaKind::Double
+            | SchemaKind::Float
+            | SchemaKind::Bytes
+            | SchemaKind::String => true,
+            _ => false,
+        }
+    }
+}
+
 impl From<SchemaType<'_>> for SchemaKind {
     #[inline(always)]
     fn from(schema: SchemaType) -> SchemaKind {
@@ -596,7 +639,38 @@ impl From<SchemaType<'_>> for SchemaKind {
             SchemaType::Record(_) => SchemaKind::Record,
             SchemaType::Enum(_) => SchemaKind::Enum,
             SchemaType::Fixed(_) => SchemaKind::Fixed,
-            // SchemaType::Decimal { .. } => SchemaKind::Decimal,
+            SchemaType::Decimal { .. } => SchemaKind::Decimal,
+            SchemaType::Uuid => SchemaKind::Uuid,
+            SchemaType::Date => SchemaKind::Date,
+            SchemaType::TimeMillis => SchemaKind::TimeMillis,
+            SchemaType::TimeMicros => SchemaKind::TimeMicros,
+            SchemaType::TimestampMillis => SchemaKind::TimestampMillis,
+            SchemaType::TimestampMicros => SchemaKind::TimestampMicros,
+            SchemaType::Duration => SchemaKind::Duration,
+        }
+    }
+}
+
+impl<'a> From<&'a SchemaType<'_>> for SchemaKind {
+    #[inline(always)]
+    fn from(schema: &SchemaType) -> SchemaKind {
+        // NOTE: I _believe_ this will always be fast as it should convert into a jump table.
+        match schema {
+            SchemaType::Null => SchemaKind::Null,
+            SchemaType::Boolean => SchemaKind::Boolean,
+            SchemaType::Int => SchemaKind::Int,
+            SchemaType::Long => SchemaKind::Long,
+            SchemaType::Float => SchemaKind::Float,
+            SchemaType::Double => SchemaKind::Double,
+            SchemaType::Bytes => SchemaKind::Bytes,
+            SchemaType::String => SchemaKind::String,
+            SchemaType::Array(_) => SchemaKind::Array,
+            SchemaType::Map(_) => SchemaKind::Map,
+            SchemaType::Union(_) => SchemaKind::Union,
+            SchemaType::Record(_) => SchemaKind::Record,
+            SchemaType::Enum(_) => SchemaKind::Enum,
+            SchemaType::Fixed(_) => SchemaKind::Fixed,
+            SchemaType::Decimal { .. } => SchemaKind::Decimal,
             SchemaType::Uuid => SchemaKind::Uuid,
             SchemaType::Date => SchemaKind::Date,
             SchemaType::TimeMillis => SchemaKind::TimeMillis,
@@ -618,6 +692,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::Long(_) => SchemaKind::Long,
             types::Value::Float(_) => SchemaKind::Float,
             types::Value::Double(_) => SchemaKind::Double,
+            types::Value::Decimal(_) => SchemaKind::Decimal,
             types::Value::Bytes(_) => SchemaKind::Bytes,
             types::Value::String(_) => SchemaKind::String,
             types::Value::Array(_) => SchemaKind::Array,
@@ -632,7 +707,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
             types::Value::TimeMicros(_) => SchemaKind::TimeMicros,
             types::Value::TimeMillis(_) => SchemaKind::TimeMillis,
-            types::Value::Decimal(_) => SchemaKind::Decimal,
+            types::Value::Decimal { .. } => SchemaKind::Decimal,
             types::Value::Date(_) => SchemaKind::Date,
         }
     }
@@ -1005,8 +1080,7 @@ mod tests {
 
     #[test]
     fn test_schema_fingerprint() {
-        use self::md5::Md5;
-        use self::sha2::Sha256;
+        use self::{md5::Md5, sha2::Sha256};
 
         let raw_schema = r#"
     {

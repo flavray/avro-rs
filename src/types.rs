@@ -1,20 +1,22 @@
 //! Logic handling the intermediate representation of Avro values.
 
-use {
-    crate::{
-        decimal::Decimal,
-        duration::Duration,
-        schema::{
-            Aggregate, Precision, RecordSchema, Scale, Schema, SchemaKind, SchemaType, UnionSchema,
-        },
-        AvroResult, Error,
+use crate::{
+    decimal::Decimal,
+    duration::Duration,
+    schema::{
+        Aggregate, Precision, RecordSchema, Scale, Schema, SchemaKind, SchemaType, UnionSchema,
     },
-    serde_json::{Number, Value as JsonValue},
-    std::{
-        collections::HashMap, convert::From, convert::TryFrom, hash::BuildHasher, str::FromStr, u8,
-    },
-    uuid::Uuid,
+    AvroResult, Error,
 };
+use serde_json::{Number, Value as JsonValue};
+use std::{
+    collections::HashMap,
+    convert::{From, TryFrom},
+    hash::BuildHasher,
+    str::FromStr,
+    u8,
+};
+use uuid::Uuid;
 
 /// Compute the maximum decimal value precision of a byte array of length `len` could hold.
 fn max_prec_for_len(len: usize) -> Result<usize, Error> {
@@ -405,11 +407,9 @@ impl Value {
             SchemaType::Array(array) => self.resolve_array(&array),
             SchemaType::Map(map) => self.resolve_map(&map),
             SchemaType::Record(record) => self.resolve_record(&record),
-            // Schema::Decimal {
-            //     scale,
-            //     precision,
-            //     ref inner,
-            // } => self.resolve_decimal(precision, scale, inner),
+            SchemaType::Decimal(decimal) => {
+                self.resolve_decimal(decimal.precision(), decimal.scale(), &SchemaType::Bytes)
+            }
             SchemaType::Date => self.resolve_date(),
             SchemaType::TimeMillis => self.resolve_time_millis(),
             SchemaType::TimeMicros => self.resolve_time_micros(),
@@ -465,7 +465,7 @@ impl Value {
                 }
             }
             SchemaType::Bytes => (),
-            _ => return Err(Error::ResolveDecimalSchema(SchemaKind::from(*inner))),
+            _ => return Err(Error::ResolveDecimalSchema(SchemaKind::from(inner))),
         };
         match self {
             Value::Decimal(num) => {
@@ -973,55 +973,38 @@ mod tests {
     #[test]
     fn resolve_decimal_bytes() {
         let value = Value::Decimal(Decimal::from(vec![1, 2]));
-        value
-            .clone()
-            .resolve(SchemaType::Decimal {
-                precision: 10,
-                scale: 4,
-                inner: SchemaType::Bytes,
-            })
-            .unwrap();
+        let mut builder = Schema::builder();
+        let root = builder.decimal("test").decimal(2, 3, &mut builder).unwrap();
+        let expected = builder.build(root).unwrap();
+        value.clone().resolve(expected.root()).unwrap();
         assert!(value.resolve(SchemaType::String).is_err());
     }
 
     #[test]
     fn resolve_decimal_invalid_scale() {
-        let value = Value::Decimal(Decimal::from(vec![1]));
-        assert!(value
-            .resolve(SchemaType::Decimal {
-                precision: 2,
-                scale: 3,
-                inner: SchemaType::Bytes,
-            })
-            .is_err());
+        let mut builder = Schema::builder();
+        assert!(builder.decimal("test").decimal(3, 2, &mut builder).is_err())
     }
 
     #[test]
     fn resolve_decimal_invalid_precision_for_length() {
         let value = Value::Decimal(Decimal::from((1u8..=8u8).rev().collect::<Vec<_>>()));
-        assert!(value
-            .resolve(SchemaType::Decimal {
-                precision: 1,
-                scale: 0,
-                inner: SchemaType::Bytes,
-            })
-            .is_err());
+        let mut builder = Schema::builder();
+        let root = builder.decimal("test").decimal(1, 0, &mut builder).unwrap();
+        let expected = builder.build(root).unwrap();
+        assert!(value.resolve(expected.root()).is_err());
     }
 
     #[test]
     fn resolve_decimal_fixed() {
         let value = Value::Decimal(Decimal::from(vec![1, 2]));
-        assert!(value
-            .clone()
-            .resolve(SchemaType::Decimal {
-                precision: 10,
-                scale: 1,
-                inner: SchemaType::Fixed (
-                    name: Name::new("decimal"),
-                    size: 20
-                )
-            })
-            .is_ok());
+        let mut builder = Schema::builder();
+        let root = builder
+            .decimal("test")
+            .decimal(10, 1, &mut builder)
+            .unwrap();
+        let expected = builder.build(root).unwrap();
+        assert!(value.clone().resolve(expected.root()).is_ok());
         assert!(value.resolve(SchemaType::String).is_err());
     }
 

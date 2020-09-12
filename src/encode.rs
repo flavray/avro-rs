@@ -48,24 +48,10 @@ pub fn encode_ref(value: &Value, schema: SchemaType, buffer: &mut Vec<u8>) {
         | Value::TimeMicros(i) => encode_long(*i, buffer),
         Value::Float(x) => buffer.extend_from_slice(&x.to_le_bytes()),
         Value::Double(x) => buffer.extend_from_slice(&x.to_le_bytes()),
-        // Value::Decimal(decimal) => match schema {
-        //     SchemaType::Decimal { inner, .. } => match *inner.clone() {
-        //         SchemaType::Fixed { size, .. } => {
-        //             let bytes = decimal.to_sign_extended_bytes_with_len(size).unwrap();
-        //             let num_bytes = bytes.len();
-        //             if num_bytes != size {
-        //                 panic!(
-        //                     "signed decimal bytes length {} not equal to fixed schema size {}",
-        //                     num_bytes, size
-        //                 );
-        //             }
-        //             encode(&Value::Fixed(size, bytes), inner, buffer)
-        //         }
-        //         SchemaType::Bytes => encode(&Value::Bytes(decimal.try_into().unwrap()), inner, buffer),
-        //         _ => panic!("invalid inner type for decimal: {:?}", inner),
-        //     },
-        //     _ => panic!("invalid type for decimal: {:?}", schema),
-        // },
+        Value::Decimal(decimal) => {
+            let mut bytes = decimal.to_vec().unwrap();
+            encode(value, schema, &mut bytes)
+        }
         &Value::Duration(duration) => {
             let slice: [u8; 12] = duration.into();
             buffer.extend_from_slice(&slice);

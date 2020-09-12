@@ -1,8 +1,6 @@
-use {
-    super::*,
-    crate::{error::Error, schema::data::*, AvroResult},
-    std::collections::HashSet,
-};
+use super::*;
+use crate::{error::Error, schema::data::*, AvroResult};
+use std::collections::HashSet;
 
 // #[derive(Debug)]
 // #[fail(display = "Invalid schema construction: {}", _0)]
@@ -174,6 +172,29 @@ impl<'s> FixedBuilder<'s> {
     }
 }
 
+/// Builder that creates a decimal buffer in a schema
+pub struct DecimalBuilder<'s> {
+    name: Naming<'s>,
+}
+
+impl_namebuilder!(DecimalBuilder, DecimalBuilder::named);
+
+impl<'s> DecimalBuilder<'s> {
+    fn named(name: Naming<'s>) -> Self {
+        DecimalBuilder { name }
+    }
+
+    pub fn decimal(
+        self,
+        precision: usize,
+        scale: usize,
+        builder: &mut SchemaBuilder,
+    ) -> AvroResult<NameRef> {
+        let name_ref = self.name.into_ref(builder)?;
+        builder.add_type(name_ref, SchemaData::Decimal(precision, scale))
+    }
+}
+
 pub struct EnumBuilder<'s> {
     name: Naming<'s>,
     doc: Documentation,
@@ -300,6 +321,13 @@ impl SchemaBuilder {
         add_type("float", SchemaData::Float);
         add_type("bytes", SchemaData::Bytes);
         add_type("string", SchemaData::String);
+        add_type("uuid", SchemaData::Uuid);
+        add_type("date", SchemaData::Date);
+        add_type("time_millis", SchemaData::TimeMillis);
+        add_type("time_micros", SchemaData::TimeMicros);
+        add_type("timestamp_millis", SchemaData::TimestampMillis);
+        add_type("timestamp_micros", SchemaData::TimestampMicros);
+        add_type("duration", SchemaData::Duration);
 
         builder
     }
@@ -331,6 +359,10 @@ impl SchemaBuilder {
 
     pub fn fixed<'s>(&self, name: &'s str) -> FixedBuilder<'s> {
         FixedBuilder::name(name)
+    }
+
+    pub fn decimal<'s>(&self, name: &'s str) -> DecimalBuilder<'s> {
+        DecimalBuilder::name(name)
     }
 
     pub fn enumeration<'s>(&self, name: &'s str) -> EnumBuilder<'s> {
@@ -400,10 +432,7 @@ impl SchemaBuilder {
                     }
 
                     if !uniq.insert(variant) {
-                        errors.push(Error::GetUnionDuplicate(
-                            self.basic_name(name),
-                            self.basic_name(variant),
-                        ));
+                        errors.push(Error::GetUnionDuplicate);
                     }
                 }
             }

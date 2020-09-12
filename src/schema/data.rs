@@ -1,6 +1,6 @@
 use super::{
-    Aggregate, Documentation, EnumSchema, FixedSchema, NameRef, RecordFieldOrder, RecordSchema,
-    Schema, SchemaType, UnionSchema,
+    Aggregate, DecimalSchema, Documentation, EnumSchema, FixedSchema, NameRef, RecordFieldOrder,
+    RecordSchema, Schema, SchemaType, UnionSchema,
 };
 use serde_json::Value;
 use std::fmt;
@@ -22,6 +22,14 @@ pub(super) enum SchemaData {
     Record(Documentation, Vec<RecordFieldData>),
     Enum(Documentation, Vec<String>),
     Fixed(usize),
+    Decimal(usize, usize),
+    Uuid,
+    Date,
+    TimeMillis,
+    TimeMicros,
+    TimestampMillis,
+    TimestampMicros,
+    Duration,
 }
 
 impl fmt::Debug for SchemaData {
@@ -44,6 +52,18 @@ impl fmt::Debug for SchemaData {
                 f.debug_set().entries(syms).finish()
             }
             SchemaData::Fixed(size) => f.debug_tuple("fixed").field(size).finish(),
+            SchemaData::Decimal(precision, scale) => f
+                .debug_tuple("decimal")
+                .field(precision)
+                .field(scale)
+                .finish(),
+            SchemaData::Uuid => f.write_str("uuid"),
+            SchemaData::Date => f.write_str("date"),
+            SchemaData::TimeMillis => f.write_str("time millis"),
+            SchemaData::TimeMicros => f.write_str("time micros"),
+            SchemaData::TimestampMillis => f.write_str("timestamp millis"),
+            SchemaData::TimestampMicros => f.write_str("timestamp micros"),
+            SchemaData::Duration => f.write_str("duration"),
         }
     }
 }
@@ -65,6 +85,14 @@ impl SchemaData {
             SchemaData::Record(_, _) => SchemaType::Record(RecordSchema(schema, name)),
             SchemaData::Enum(_, _) => SchemaType::Enum(EnumSchema(schema, name)),
             SchemaData::Fixed(_) => SchemaType::Fixed(FixedSchema(schema, name)),
+            SchemaData::Decimal(_, _) => SchemaType::Decimal(DecimalSchema(schema, name)),
+            SchemaData::Uuid => SchemaType::Uuid,
+            SchemaData::Date => SchemaType::Date,
+            SchemaData::TimeMillis => SchemaType::TimeMillis,
+            SchemaData::TimeMicros => SchemaType::TimeMicros,
+            SchemaData::TimestampMillis => SchemaType::TimestampMillis,
+            SchemaData::TimestampMicros => SchemaType::TimestampMicros,
+            SchemaData::Duration => SchemaType::Duration,
         }
     }
 }
