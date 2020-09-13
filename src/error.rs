@@ -1,7 +1,8 @@
 use crate::{schema::SchemaKind, types::ValueKind};
 use std::fmt;
+use thiserror::Error;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     #[error("Bad Snappy CRC32; expected {expected:x} but got {actual:x}")]
     SnappyCrc32 { expected: u32, actual: u32 },
@@ -352,6 +353,15 @@ pub enum Error {
 
     #[error("Failed to find a reference")]
     UndefinedReference(String),
+
+    #[error("SchemaResolutionError error")]
+    SchemaResolutionError,
+}
+
+impl From<serde_json::error::Error> for Error {
+    fn from(err: serde_json::error::Error) -> Self {
+        Error::SerializeValue(err.to_string())
+    }
 }
 
 impl serde::ser::Error for Error {

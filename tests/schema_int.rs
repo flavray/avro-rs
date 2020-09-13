@@ -1,8 +1,6 @@
 use std::{fs::File, io::BufReader, path::PathBuf, str::FromStr};
 
-use failure::Error;
-
-use avro_rs::schema::*;
+use avro_rs::{schema::*, Error};
 use serde_json::{Map, Number, Value};
 
 fn fixture(name: &str) -> Value {

@@ -1,6 +1,5 @@
 //! Port of https://github.com/apache/avro/blob/release-1.9.1/lang/py/test/test_schema.py
-use avro_rs::{schema::Name, Error, Schema};
-use avro_rs::{Schema, SchemaType};
+use avro_rs::{schema::Name, Error, Schema, SchemaType};
 use lazy_static::lazy_static;
 
 const PRIMITIVE_EXAMPLES: &[(&str, bool)] = &[
@@ -135,7 +134,7 @@ const RECORD_EXAMPLES: &[(&str, bool)] = &[
     ),
     */
     (
-            r#"{
+        r#"{
                 "type": "record",
                 "name": "Node",
                 "fields": [
@@ -143,10 +142,10 @@ const RECORD_EXAMPLES: &[(&str, bool)] = &[
                     {"name": "children", "type": {"type": "array", "items": "Node"}}
                 ]
             }"#,
-            true
-        ),
-        (
-            r#"{
+        true,
+    ),
+    (
+        r#"{
                 "type": "record",
                 "name": "Lisp",
                 "fields": [
@@ -166,10 +165,10 @@ const RECORD_EXAMPLES: &[(&str, bool)] = &[
                     }
                 ]
             }"#,
-            true
-        ),
-        (
-            r#"{
+        true,
+    ),
+    (
+        r#"{
                 "type": "record",
                 "name": "HandshakeRequest",
                 "namespace": "org.apache.avro.ipc",
@@ -179,7 +178,8 @@ const RECORD_EXAMPLES: &[(&str, bool)] = &[
                     {"name": "serverHash", "type": "MD5"},
                     {"name": "meta", "type": ["null", {"type": "map", "values": "bytes"}]}
                 ]
-            }"#, true
+            }"#,
+        true,
     ),
     (
         r#"{
@@ -233,11 +233,11 @@ const RECORD_EXAMPLES: &[(&str, bool)] = &[
         true,
     ),
     // Unions may not contain more than one schema with the same type, except for the named
-        // types record, fixed and enum. For example, unions containing two array types or two map
-        // types are not permitted, but two types with different names are permitted.
-        // (Names permit efficient resolution when reading and writing unions.)
-        (
-            r#"{
+    // types record, fixed and enum. For example, unions containing two array types or two map
+    // types are not permitted, but two types with different names are permitted.
+    // (Names permit efficient resolution when reading and writing unions.)
+    (
+        r#"{
                 "type": "record",
                 "name": "ipAddr",
                 "fields": [
@@ -250,7 +250,7 @@ const RECORD_EXAMPLES: &[(&str, bool)] = &[
                     }
                 ]
             }"#,
-            true
+        true,
     ),
     (
         r#"{
