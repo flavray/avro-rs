@@ -716,7 +716,6 @@ pub type AvroResult<T> = Result<T, Error>;
 extern crate failure;
 
 extern crate strum;
-#[macro_use]
 extern crate strum_macros;
 
 #[cfg(test)]

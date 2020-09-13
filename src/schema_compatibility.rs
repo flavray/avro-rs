@@ -1,8 +1,5 @@
 //! Logic for checking schema compatibility
-use crate::{
-    schema::{SchemaKind, SchemaType},
-    Schema,
-};
+use crate::schema::{SchemaKind, SchemaType};
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     hash::Hasher,
@@ -113,12 +110,10 @@ impl Checker {
             return false;
         }
 
-        if let SchemaType::Record(record) = writers_schema {
-            let w_fields = record.fields();
-
+        if let SchemaType::Record(w_record) = writers_schema {
             if let SchemaType::Record(r_record) = readers_schema {
                 for field in r_record.iter_fields() {
-                    if let Some(pos) = record.field(field.name()) {
+                    if let Some(pos) = w_record.field(field.name()) {
                         if !self.full_match_schemas(&pos.schema(), &field.schema()) {
                             return false;
                         }

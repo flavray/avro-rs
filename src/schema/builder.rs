@@ -417,7 +417,7 @@ impl SchemaBuilder {
         }
     }
 
-    fn validate_union(&self, name: &NameRef, variants: &Vec<NameRef>) -> Vec<Error> {
+    fn validate_union(&self, _name: &NameRef, variants: &Vec<NameRef>) -> Vec<Error> {
         let mut errors = vec![];
         let mut uniq = HashSet::new();
 

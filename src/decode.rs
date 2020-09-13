@@ -1,7 +1,7 @@
 use crate::{
     decimal::Decimal,
     duration::Duration,
-    schema::{DecimalSchema, Schema, SchemaKind, SchemaType},
+    schema::{Schema, SchemaType},
     types::Value,
     util::{safe_len, zag_i32, zag_i64},
     AvroResult, Error,
@@ -91,7 +91,7 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
                     Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
                     value => Err(Error::BytesValue(value.into())),
                 },
-                schema => Err(Error::ResolveDecimalSchema(
+                _schema => Err(Error::ResolveDecimalSchema(
                     crate::schema::SchemaKind::Decimal,
                 )),
             }
@@ -277,16 +277,13 @@ mod tests {
             size: 2,
             name: Name::new("decimal"),
         };
-        let schema = SchemaType::Decimal {
-            inner,
-            precision: 4,
-            scale: 2,
-        };
+
+        let schema = Schema::meta_schema();
         let bigint = -423.to_bigint().unwrap();
         let value = Value::Decimal(Decimal::from(bigint.to_signed_bytes_be()));
 
         let mut buffer = Vec::new();
-        encode(&value, schema.clone(), &mut buffer);
+        encode(&value, schema.root(), &mut buffer);
 
         let mut bytes = &buffer[..];
         let result = decode(schema, &mut bytes).unwrap();
@@ -297,13 +294,13 @@ mod tests {
     fn test_decode_decimal_with_bigger_than_necessary_size() {
         use crate::encode::encode;
         use num_bigint::ToBigInt;
-        let schema = super::DecimalSchema;
+        let schema = Schema::meta_schema();
         let value = Value::Decimal(Decimal::from(
             (-423.to_bigint().unwrap()).to_signed_bytes_be(),
         ));
         let mut buffer = Vec::<u8>::new();
 
-        encode(&value, schema.clone(), &mut buffer);
+        encode(&value, schema.root(), &mut buffer);
         let mut bytes: &[u8] = &buffer[..];
         let result = decode(schema, &mut bytes).unwrap();
         assert_eq!(result, value);

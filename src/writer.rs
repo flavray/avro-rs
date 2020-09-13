@@ -8,12 +8,9 @@ use crate::{
 };
 use rand::random;
 use serde::Serialize;
-use std::{collections::HashMap, io::Write};
 use serde_json;
+use std::{collections::HashMap, io::Write};
 
-
-const SYNC_SIZE: usize = 16;
-const SYNC_INTERVAL: usize = 1000 * SYNC_SIZE; // TODO: parametrize in Writer
 const DEFAULT_BLOCK_SIZE: usize = 16000;
 const AVRO_OBJECT_HEADER: &[u8] = b"Obj\x01";
 

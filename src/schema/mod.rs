@@ -349,7 +349,7 @@ impl fmt::Debug for SchemaType<'_> {
                 .field("name", &agg.name())
                 // .field("value", &agg.items())
                 .finish(),
-            SchemaType::Union(union_) => f
+            SchemaType::Union(_union) => f
                 .debug_struct("Union")
                 // .field("variants", &&union_.variants())
                 .finish(),
@@ -434,11 +434,11 @@ impl<'s> DecimalSchema<'s> {
     }
 
     pub fn precision(&self) -> usize {
-        match_lookup!(self, SchemaData::Decimal(p, s) => *p)
+        match_lookup!(self, SchemaData::Decimal(p, _s) => *p)
     }
 
     pub fn scale(&self) -> usize {
-        match_lookup!(self, SchemaData::Decimal(p, s) => *s)
+        match_lookup!(self, SchemaData::Decimal(_p, s) => *s)
     }
 }
 
@@ -505,7 +505,7 @@ impl<'s> RecordSchema<'s> {
 
     pub fn len(&self) -> usize {
         match_lookup!(self, SchemaData::Record(_, flds) => {
-        let schema = &*self.0;
+        // let schema = &*self.0;
         flds.len()
         })
     }
@@ -707,7 +707,7 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
             types::Value::TimeMicros(_) => SchemaKind::TimeMicros,
             types::Value::TimeMillis(_) => SchemaKind::TimeMillis,
-            types::Value::Decimal { .. } => SchemaKind::Decimal,
+            types::Value::Decimal(_) => SchemaKind::Decimal,
             types::Value::Date(_) => SchemaKind::Date,
         }
     }
