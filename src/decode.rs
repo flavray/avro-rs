@@ -273,11 +273,6 @@ mod tests {
         use crate::{encode::encode, schema::Name};
         use num_bigint::ToBigInt;
 
-        let inner = SchemaType::Fixed {
-            size: 2,
-            name: Name::new("decimal"),
-        };
-
         let schema = Schema::meta_schema();
         let bigint = -423.to_bigint().unwrap();
         let value = Value::Decimal(Decimal::from(bigint.to_signed_bytes_be()));
@@ -286,7 +281,7 @@ mod tests {
         encode(&value, schema.root(), &mut buffer);
 
         let mut bytes = &buffer[..];
-        let result = decode(schema, &mut bytes).unwrap();
+        let result = decode(schema.root(), &mut bytes).unwrap();
         assert_eq!(result, value);
     }
 
@@ -302,7 +297,7 @@ mod tests {
 
         encode(&value, schema.root(), &mut buffer);
         let mut bytes: &[u8] = &buffer[..];
-        let result = decode(schema, &mut bytes).unwrap();
+        let result = decode(schema.root(), &mut bytes).unwrap();
         assert_eq!(result, value);
     }
 }

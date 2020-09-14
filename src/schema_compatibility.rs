@@ -302,33 +302,34 @@ impl SchemaCompatibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::Schema;
 
     fn int_array_schema() -> Schema {
         Schema::parse_str(r#"{"type":"array", "items":"int"}"#).unwrap()
     }
 
     fn long_array_schema() -> Schema {
-        SchemaType::parse_str(r#"{"type":"array", "items":"long"}"#).unwrap()
+        Schema::parse_str(r#"{"type":"array", "items":"long"}"#).unwrap()
     }
 
     fn string_array_schema() -> Schema {
-        SchemaType::parse_str(r#"{"type":"array", "items":"string"}"#).unwrap()
+        Schema::parse_str(r#"{"type":"array", "items":"string"}"#).unwrap()
     }
 
     fn int_map_schema() -> Schema {
-        SchemaType::parse_str(r#"{"type":"map", "values":"int"}"#).unwrap()
+        Schema::parse_str(r#"{"type":"map", "values":"int"}"#).unwrap()
     }
 
     fn long_map_schema() -> Schema {
-        SchemaType::parse_str(r#"{"type":"map", "values":"long"}"#).unwrap()
+        Schema::parse_str(r#"{"type":"map", "values":"long"}"#).unwrap()
     }
 
     fn string_map_schema() -> Schema {
-        SchemaType::parse_str(r#"{"type":"map", "values":"string"}"#).unwrap()
+        Schema::parse_str(r#"{"type":"map", "values":"string"}"#).unwrap()
     }
 
     fn enum1_ab_schema() -> Schema {
-        SchemaType::parse_str(r#"{"type":"enum", "name":"Enum1", "symbols":["A","B"]}"#).unwrap()
+        Schema::parse_str(r#"{"type":"enum", "name":"Enum1", "symbols":["A","B"]}"#).unwrap()
     }
 
     fn enum1_abc_schema() -> Schema {

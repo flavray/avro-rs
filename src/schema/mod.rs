@@ -707,7 +707,6 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
             types::Value::TimeMicros(_) => SchemaKind::TimeMicros,
             types::Value::TimeMillis(_) => SchemaKind::TimeMillis,
-            types::Value::Decimal(_) => SchemaKind::Decimal,
             types::Value::Date(_) => SchemaKind::Date,
         }
     }

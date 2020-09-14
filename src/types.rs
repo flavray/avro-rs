@@ -906,7 +906,6 @@ mod tests {
 
     #[test]
     fn validate_record() {
-        use std::collections::HashMap;
         // {
         //    "type": "record",
         //    "fields": [

@@ -1,5 +1,5 @@
 //! Port of https://github.com/apache/avro/blob/release-1.9.1/lang/py/test/test_schema.py
-use avro_rs::{schema::Name, Error, Schema, SchemaType};
+use avro_rs::{Error, Schema, SchemaType};
 use lazy_static::lazy_static;
 
 const PRIMITIVE_EXAMPLES: &[(&str, bool)] = &[

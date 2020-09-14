@@ -405,14 +405,14 @@ mod tests {
     fn logical_type_test<T: Into<Value> + Clone>(
         schema_str: &'static str,
 
-        expected_schema: &Schema,
+        expected_schema: &SchemaType,
         value: Value,
 
-        raw_schema: &Schema,
+        raw_schema: &SchemaType,
         raw_value: T,
     ) -> TestResult<()> {
         let schema = Schema::parse_str(schema_str)?;
-        assert_eq!(&schema, expected_schema);
+        assert_eq!(&schema.root(), expected_schema);
         // The serialized format should be the same as the schema.
         let ser = to_avro_datum(&schema, value.clone())?;
         let raw_ser = to_avro_datum(&raw_schema, raw_value)?;
@@ -429,9 +429,9 @@ mod tests {
     fn date() -> TestResult<()> {
         logical_type_test(
             r#"{"type": "int", "logicalType": "date"}"#,
-            &Schema::Date,
-            Value::Date(1_i32),
-            &Schema::Int,
+            &SchemaType::Date,
+            1_i32,
+            &SchemaType::Int,
             1_i32,
         )
     }
@@ -440,9 +440,9 @@ mod tests {
     fn time_millis() -> TestResult<()> {
         logical_type_test(
             r#"{"type": "int", "logicalType": "time-millis"}"#,
-            &Schema::TimeMillis,
+            &SchemaType::TimeMillis,
             Value::TimeMillis(1_i32),
-            &Schema::Int,
+            &SchemaType::Int,
             1_i32,
         )
     }
@@ -451,9 +451,9 @@ mod tests {
     fn time_micros() -> TestResult<()> {
         logical_type_test(
             r#"{"type": "long", "logicalType": "time-micros"}"#,
-            &Schema::TimeMicros,
+            &SchemaType::TimeMicros,
             Value::TimeMicros(1_i64),
-            &Schema::Long,
+            &SchemaType::Long,
             1_i64,
         )
     }
@@ -462,9 +462,9 @@ mod tests {
     fn timestamp_millis() -> TestResult<()> {
         logical_type_test(
             r#"{"type": "long", "logicalType": "timestamp-millis"}"#,
-            &Schema::TimestampMillis,
+            &SchemaType::TimestampMillis,
             Value::TimestampMillis(1_i64),
-            &Schema::Long,
+            &SchemaType::Long,
             1_i64,
         )
     }
@@ -473,9 +473,9 @@ mod tests {
     fn timestamp_micros() -> TestResult<()> {
         logical_type_test(
             r#"{"type": "long", "logicalType": "timestamp-micros"}"#,
-            &Schema::TimestampMicros,
+            &SchemaType::TimestampMicros,
             Value::TimestampMicros(1_i64),
-            &Schema::Long,
+            &SchemaType::Long,
             1_i64,
         )
     }
@@ -483,20 +483,18 @@ mod tests {
     #[test]
     fn decimal_fixed() -> TestResult<()> {
         let size = 30;
-        let inner = Schema::Fixed {
-            name: Name::new("decimal"),
-            size,
-        };
+
+        let mut builder = Schema::builder();
+        let root = builder.decimal("decimal").decimal(20, 5, &mut builder)?;
+        let expected = builder.build(root)?;
+
         let value = vec![0u8; size];
+        let v = Value::Decimal(Decimal::from(value.clone()));
         logical_type_test(
             r#"{"type": {"type": "fixed", "size": 30, "name": "decimal"}, "logicalType": "decimal", "precision": 20, "scale": 5}"#,
-            &Schema::Decimal {
-                precision: 20,
-                scale: 5,
-                inner: Box::new(inner.clone()),
-            },
+            &expected.root(),
             Value::Decimal(Decimal::from(value.clone())),
-            &inner,
+            &expected.root(),
             Value::Fixed(size, value),
         )
     }
