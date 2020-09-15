@@ -28,11 +28,6 @@ use std::{
 };
 use string_interner::{DefaultStringInterner, Sym as RawNameSym};
 use wyhash::{self, WyHash};
-// use failure::Error;
-
-// Rexport the error types as part of the public API
-// pub use builder::{BuilderError, BuilderErrors};
-// pub use parse::ParseSchemaError;
 
 /// Trait to provide hash implementations for HashMaps
 #[derive(Clone, Default)]

@@ -5,12 +5,6 @@ use std::{
     io::{ErrorKind, Read},
     str::FromStr,
 };
-// use std::io::{ErrorKind, Read};
-// use std::str::{from_utf8, FromStr};
-
-
-// use crate::util::{self, DecodeError};
-// use crate::Codec;
 
 // Internal Block reader.
 #[derive(Debug, Clone)]

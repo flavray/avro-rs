@@ -8,12 +8,6 @@ use crate::{
 };
 use std::{collections::HashMap, convert::TryFrom, io::Read, str::FromStr};
 use uuid::Uuid;
-// use std::collections::HashMap;
-// use std::io::Read;
-
-// use crate::schema::SchemaType;
-// use crate::types::Value;
-// use crate::util::{safe_len, zag_i32, zag_i64, DecodeError};
 
 #[inline]
 fn decode_long<R: Read>(reader: &mut R) -> AvroResult<Value> {

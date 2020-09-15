@@ -657,7 +657,7 @@
 //!
 //! let writers_schema = Schema::parse_str(r#"{"type": "array", "items":"int"}"#).unwrap();
 //! let readers_schema = Schema::parse_str(r#"{"type": "array", "items":"long"}"#).unwrap();
-//! assert_eq!(true, SchemaCompatibility::can_read(&writers_schema, &readers_schema));
+//! assert_eq!(true, SchemaCompatibility::can_read(&writers_schema.root(), &readers_schema.root()));
 //! ```
 //!
 //! 2. Incompatible schemas (a long array schema cannot be read by an int array schema)
@@ -670,7 +670,7 @@
 //!
 //! let writers_schema = Schema::parse_str(r#"{"type": "array", "items":"long"}"#).unwrap();
 //! let readers_schema = Schema::parse_str(r#"{"type": "array", "items":"int"}"#).unwrap();
-//! assert_eq!(false, SchemaCompatibility::can_read(&writers_schema, &readers_schema));
+//! assert_eq!(false, SchemaCompatibility::can_read(&writers_schema.root(), &readers_schema.root()));
 //! ```
 
 mod codec;
@@ -703,14 +703,6 @@ pub use writer::{to_avro_datum, Writer};
 
 /// A convenience type alias for `Result`s with `Error`s.
 pub type AvroResult<T> = Result<T, Error>;
-// pub use crate::codec::Codec;
-// pub use crate::de::from_value;
-// pub use crate::reader::{from_avro_datum, Reader};
-// pub use crate::schema::{ParseSchemaError, Schema, SchemaType};
-// pub use crate::ser::to_value;
-// pub use crate::types::SchemaResolutionError;
-// pub use crate::util::{max_allocation_bytes, DecodeError};
-// pub use crate::writer::{to_avro_datum, ValidationError, Writer};
 
 #[macro_use]
 extern crate failure;

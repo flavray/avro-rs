@@ -447,8 +447,8 @@ mod tests {
     #[test]
     fn test_broken() {
         assert!(!SchemaCompatibility::can_read(
-            &int_string_union_schema(),
-            &int_union_schema()
+            &int_string_union_schema().root(),
+            &int_union_schema().root()
         ))
     }
 
@@ -554,7 +554,7 @@ mod tests {
     }
 
     fn writer_schema() -> Schema {
-        SchemaType::parse_str(
+        Schema::parse_str(
             r#"
       {"type":"record", "name":"Record", "fields":[
         {"name":"oldfield1", "type":"int"},
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn test_missing_field() {
-        let reader_schema = SchemaType::parse_str(
+        let reader_schema = Schema::parse_str(
             r#"
       {"type":"record", "name":"Record", "fields":[
         {"name":"oldfield1", "type":"int"}
@@ -576,18 +576,18 @@ mod tests {
         )
         .unwrap();
         assert!(SchemaCompatibility::can_read(
-            &writer_schema(),
-            &reader_schema,
+            &writer_schema().root(),
+            &reader_schema.root(),
         ));
         assert_eq!(
-            SchemaCompatibility::can_read(&reader_schema, &writer_schema()),
+            SchemaCompatibility::can_read(&reader_schema.root(), &writer_schema().root()),
             false
         );
     }
 
     #[test]
     fn test_missing_second_field() {
-        let reader_schema = SchemaType::parse_str(
+        let reader_schema = Schema::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield2", "type":"string"}
@@ -596,18 +596,18 @@ mod tests {
         )
         .unwrap();
         assert!(SchemaCompatibility::can_read(
-            &writer_schema(),
-            &reader_schema
+            &writer_schema().root(),
+            &reader_schema.root()
         ));
         assert_eq!(
-            SchemaCompatibility::can_read(&reader_schema, &writer_schema()),
+            SchemaCompatibility::can_read(&reader_schema.root(), &writer_schema().root()),
             false
         );
     }
 
     #[test]
     fn test_all_fields() {
-        let reader_schema = SchemaType::parse_str(
+        let reader_schema = Schema::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield1", "type":"int"},
@@ -617,18 +617,18 @@ mod tests {
         )
         .unwrap();
         assert!(SchemaCompatibility::can_read(
-            &writer_schema(),
-            &reader_schema
+            &writer_schema().root(),
+            &reader_schema.root()
         ));
         assert!(SchemaCompatibility::can_read(
-            &reader_schema,
-            &writer_schema()
+            &reader_schema.root(),
+            &writer_schema().root()
         ));
     }
 
     #[test]
     fn test_new_field_with_default() {
-        let reader_schema = SchemaType::parse_str(
+        let reader_schema = Schema::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield1", "type":"int"},
@@ -638,18 +638,18 @@ mod tests {
         )
         .unwrap();
         assert!(SchemaCompatibility::can_read(
-            &writer_schema(),
-            &reader_schema
+            &writer_schema().root(),
+            &reader_schema.root()
         ));
         assert_eq!(
-            SchemaCompatibility::can_read(&reader_schema, &writer_schema()),
+            SchemaCompatibility::can_read(&reader_schema.root(), &writer_schema().root()),
             false
         );
     }
 
     #[test]
     fn test_new_field() {
-        let reader_schema = SchemaType::parse_str(
+        let reader_schema = Schema::parse_str(
             r#"
         {"type":"record", "name":"Record", "fields":[
           {"name":"oldfield1", "type":"int"},
@@ -659,11 +659,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            SchemaCompatibility::can_read(&writer_schema(), &reader_schema),
+            SchemaCompatibility::can_read(&writer_schema().root(), &reader_schema.root()),
             false
         );
         assert_eq!(
-            SchemaCompatibility::can_read(&reader_schema, &writer_schema()),
+            SchemaCompatibility::can_read(&reader_schema.root(), &writer_schema().root()),
             false
         );
     }
@@ -674,11 +674,11 @@ mod tests {
         let invalid_reader = string_map_schema();
 
         assert!(SchemaCompatibility::can_read(
-            &string_array_schema(),
-            &valid_reader
+            &string_array_schema().root(),
+            &valid_reader.root()
         ));
         assert_eq!(
-            SchemaCompatibility::can_read(&string_array_schema(), &invalid_reader),
+            SchemaCompatibility::can_read(&string_array_schema().root(), &invalid_reader.root()),
             false
         );
     }
@@ -687,31 +687,34 @@ mod tests {
     fn test_primitive_writer_schema() {
         let valid_reader = SchemaType::String;
         assert!(SchemaCompatibility::can_read(
-            SchemaType::String,
+            &SchemaType::String,
             &valid_reader
         ));
         assert_eq!(
-            SchemaCompatibility::can_read(SchemaType::Int, SchemaType::String),
+            SchemaCompatibility::can_read(&SchemaType::Int, &SchemaType::String),
             false
         );
     }
 
     #[test]
-    fn test_union_reader_writer_subset_incompatiblity() {
+    fn test_union_reader_writer_subset_incompatibility() {
         // reader union schema must contain all writer union branches
         let union_writer = union_schema(vec![SchemaType::Int, SchemaType::String]);
         let union_reader = union_schema(vec![SchemaType::String]);
 
         assert_eq!(
-            SchemaCompatibility::can_read(&union_writer, &union_reader),
+            SchemaCompatibility::can_read(&union_writer.root(), &union_reader.root()),
             false
         );
-        assert!(SchemaCompatibility::can_read(&union_reader, &union_writer));
+        assert!(SchemaCompatibility::can_read(
+            &union_reader.root(),
+            &union_writer.root()
+        ));
     }
 
     #[test]
     fn test_incompatible_record_field() {
-        let string_schema = SchemaType::parse_str(
+        let string_schema = Schema::parse_str(
             r#"
         {"type":"record", "name":"MyRecord", "namespace":"ns", "fields": [
             {"name":"field1", "type":"string"}
@@ -720,7 +723,7 @@ mod tests {
         )
         .unwrap();
 
-        let int_schema = SchemaType::parse_str(
+        let int_schema = Schema::parse_str(
             r#"
       {"type":"record", "name":"MyRecord", "namespace":"ns", "fields": [
         {"name":"field1", "type":"int"}
@@ -730,27 +733,30 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            SchemaCompatibility::can_read(&string_schema, &int_schema),
+            SchemaCompatibility::can_read(&string_schema.root(), &int_schema.root()),
             false
         );
     }
 
     #[test]
     fn test_enum_symbols() {
-        let enum_schema1 = SchemaType::parse_str(
+        let enum_schema1 = Schema::parse_str(
             r#"
       {"type":"enum", "name":"MyEnum", "symbols":["A","B"]}
 "#,
         )
         .unwrap();
         let enum_schema2 =
-            SchemaType::parse_str(r#"{"type":"enum", "name":"MyEnum", "symbols":["A","B","C"]}"#)
+            Schema::parse_str(r#"{"type":"enum", "name":"MyEnum", "symbols":["A","B","C"]}"#)
                 .unwrap();
         assert_eq!(
-            SchemaCompatibility::can_read(&enum_schema2, &enum_schema1),
+            SchemaCompatibility::can_read(&enum_schema2.root(), &enum_schema1.root()),
             false
         );
-        assert!(SchemaCompatibility::can_read(&enum_schema1, &enum_schema2));
+        assert!(SchemaCompatibility::can_read(
+            &enum_schema1.root(),
+            &enum_schema2.root()
+        ));
     }
 
     // unused
@@ -769,7 +775,7 @@ mod tests {
     */
 
     fn point_2d_fullname_schema() -> Schema {
-        SchemaType::parse_str(
+        Schema::parse_str(
             r#"
       {"type":"record", "name":"Point", "namespace":"written", "fields":[
         {"name":"x", "type":"double"},
@@ -781,7 +787,7 @@ mod tests {
     }
 
     fn point_3d_no_default_schema() -> Schema {
-        SchemaType::parse_str(
+        Schema::parse_str(
             r#"
       {"type":"record", "name":"Point", "fields":[
         {"name":"x", "type":"double"},
@@ -827,7 +833,7 @@ mod tests {
         // short name match, but no structure match
         let read_schema = union_schema(vec![SchemaType::Null, point_3d_no_default_schema()]);
         assert_eq!(
-            SchemaCompatibility::can_read(&point_2d_fullname_schema(), &read_schema),
+            SchemaCompatibility::can_read(&point_2d_fullname_schema().root(), &read_schema.root()),
             false
         );
     }

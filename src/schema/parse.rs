@@ -1,14 +1,9 @@
-use crate::AvroResult;
-use {
-    super::*,
-    crate::{
-        error::Error,
-        schema::builder::{
-            ArrayBuilder, EnumBuilder, FixedBuilder, MapBuilder, NamedBuilder, RecordBuilder,
-            SchemaBuilder, UnionBuilder,
-        },
-    },
+use super::*;
+use crate::schema::builder::{
+    ArrayBuilder, EnumBuilder, FixedBuilder, MapBuilder, NamedBuilder, RecordBuilder,
+    SchemaBuilder, UnionBuilder,
 };
+use crate::{error::Error, AvroResult};
 
 pub(super) struct SchemaParser<'s> {
     current_ns: Option<&'s str>,

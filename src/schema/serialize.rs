@@ -114,7 +114,7 @@ impl Serialize for OnceSchemaCell<EnumSchema<'_>> {
     }
 }
 
-/// Wrapper type to handle serialising fields in the precense of state
+/// Wrapper type to handle serialising fields in the presence of state
 struct OnceRecordCell<'s>(OnceSchemaCell<RecordSchema<'s>>);
 
 impl Serialize for OnceRecordCell<'_> {
