@@ -10,23 +10,6 @@ use {
     },
 };
 
-// /// Describes errors happened while parsing Avro schemas.
-// #[derive(Fail, Debug)]
-// #[fail(display = "Failed to parse schema: {}", _0)]
-// pub struct ParseSchemaError(pub(crate) String);
-
-// impl ParseSchemaError {
-//     pub fn new<S: Into<String>>(msg: S) -> ParseSchemaError {
-//         ParseSchemaError(msg.into())
-//     }
-// }
-//
-// impl From<BuilderError> for ParseSchemaError {
-//     fn from(err: BuilderError) -> Self {
-//         Self(err.0)
-//     }
-// }
-
 pub(super) struct SchemaParser<'s> {
     current_ns: Option<&'s str>,
     builder: SchemaBuilder,

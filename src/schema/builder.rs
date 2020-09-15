@@ -1,20 +1,6 @@
 use super::*;
-use crate::{error::Error, schema::data::*, AvroResult};
+use crate::{error::Error, AvroResult};
 use std::collections::HashSet;
-
-// #[derive(Debug)]
-// #[fail(display = "Invalid schema construction: {}", _0)]
-// pub struct BuilderError(pub String);
-//
-// #[derive(Fail, Debug)]
-// #[fail(display = "Schema validation failed: [{:?}]", _0)]
-// pub struct BuilderErrors(pub Vec<BuilderError>);
-//
-// impl BuilderError {
-//     pub fn new<S: ToString>(msg: S) -> Self {
-//         Self(msg.to_string())
-//     }
-// }
 
 /// Builder that allows the creation of new schemas in a programmatic fashion
 #[derive(Default)]
