@@ -68,7 +68,7 @@ impl Schema {
 
     /// Parse the schema from a slice
     pub fn parse_slice<'a>(raw: &'a [u8]) -> Result<Schema, Error> {
-        let value = serde_json::from_slice(raw).map_err(Error::ConvertJsonToString)?;
+        let value = serde_json::from_slice(raw).map_err(|e| Error::ParseSchemaJson(e))?;
         Self::parse(&value).map_err(|e| e.into())
     }
 
@@ -304,6 +304,8 @@ type DecimalMetadata = usize;
 pub(crate) type Precision = DecimalMetadata;
 pub(crate) type Scale = DecimalMetadata;
 
+// TODO: Remove this function?
+#[allow(dead_code)]
 fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalMetadata, Error> {
     Ok(if value.is_u64() {
         let num = value

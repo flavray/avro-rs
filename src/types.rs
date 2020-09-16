@@ -450,7 +450,7 @@ impl Value {
         self,
         precision: Precision,
         scale: Scale,
-        inner: &SchemaType, //TODO take ownership instead of borrow?
+        inner: &SchemaType,
     ) -> Result<Self, Error> {
         if scale > precision {
             return Err(Error::GetScaleAndPrecision { scale, precision });
@@ -717,7 +717,7 @@ impl Value {
                     Some(value) => value,
                     None => match field.default() {
                         Some(value) => {
-                            let value = value.clone().avro();
+                            let value: Value = value.clone().into();
                             match field.schema() {
                                 SchemaType::Enum(enum_) => value.resolve_enum(&enum_.symbols())?,
                                 _ => value,
@@ -753,7 +753,7 @@ mod tests {
     use crate::{
         decimal::Decimal,
         duration::{Days, Duration, Millis, Months},
-        schema::{Name, RecordField, RecordFieldOrder, Schema, UnionSchema},
+        schema::Schema,
         types::Value,
     };
     use uuid::Uuid;
@@ -980,6 +980,7 @@ mod tests {
     }
 
     #[test]
+    //TODO: What scale value would be considered invalid?
     fn resolve_decimal_invalid_scale() {
         let mut builder = Schema::builder();
         assert!(builder.decimal("test").decimal(3, 2, &mut builder).is_err())

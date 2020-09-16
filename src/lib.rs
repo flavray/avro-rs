@@ -710,9 +710,6 @@ extern crate failure;
 extern crate strum;
 extern crate strum_macros;
 
-#[macro_use]
-use serde_json::json;
-
 #[cfg(test)]
 mod tests {
     use crate::{

@@ -302,6 +302,7 @@ impl SchemaCompatibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::builder::SchemaBuilder;
     use crate::schema::Schema;
 
     fn int_array_schema() -> Schema {
@@ -425,23 +426,131 @@ mod tests {
     // fn null_union_schema() -> Schema { union_schema(vec![Schema::Null]) }
 
     fn int_union_schema() -> Schema {
-        union_schema(vec![Schema::Int])
+        // union_schema(
+        //     // vec![Schema::Int]
+        //     vec![Schema::parse(&Value::Array(vec![Value::from(1_i32)]))
+        //         .expect("failed to init int union schema")],
+        // )
+        let builder = SchemaBuilder::new();
+        let root = builder.int();
+
+        builder
+            .build(root)
+            .expect("failed to build int union schema")
     }
 
     fn long_union_schema() -> Schema {
-        union_schema(vec![Schema::Long])
+        // union_schema(vec![Schema::Long])
+        let builder = SchemaBuilder::new();
+        let root = builder.long();
+
+        builder
+            .build(root)
+            .expect("failed to build long union schema")
     }
 
     fn string_union_schema() -> Schema {
-        union_schema(vec![Schema::String])
+        // union_schema(vec![Schema::String])
+        let mut builder = SchemaBuilder::new();
+        let mut union_builder = builder.union();
+        union_builder.variant(builder.string());
+        let root = union_builder
+            .build(&mut builder)
+            .expect("failed to build union schema");
+
+        builder
+            .build(root)
+            .expect("failed to build string union schema")
     }
 
     fn int_string_union_schema() -> Schema {
-        union_schema(vec![Schema::Int, Schema::String])
+        // union_schema(vec![Schema::Int, Schema::String])
+        let mut builder = SchemaBuilder::new();
+        let string_schema = builder.string();
+        let int_schema = builder.int();
+        let mut union_builder = builder.union();
+        union_builder.variant(int_schema);
+        union_builder.variant(string_schema);
+        let union = union_builder
+            .build(&mut builder)
+            .expect("failed to build int string union");
+
+        builder
+            .build(union)
+            .expect("failed to build int string union schema")
     }
 
     fn string_int_union_schema() -> Schema {
-        union_schema(vec![Schema::String, Schema::Int])
+        // union_schema(vec![Schema::String, Schema::Int])
+        let mut builder = SchemaBuilder::new();
+        let string_schema = builder.string();
+        let int_schema = builder.int();
+        let mut union_builder = builder.union();
+        union_builder.variant(string_schema);
+        union_builder.variant(int_schema);
+        let union = union_builder
+            .build(&mut builder)
+            .expect("failed to build int string union");
+
+        builder
+            .build(union)
+            .expect("failed to build int string union schema")
+    }
+
+    fn int_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.int();
+
+        builder.build(root).expect("failed to build int schema")
+    }
+
+    fn long_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.long();
+
+        builder.build(root).expect("failed to build long schema")
+    }
+
+    fn boolean_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.boolean();
+
+        builder.build(root).expect("failed to build boolean schema")
+    }
+
+    fn float_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.float();
+
+        builder.build(root).expect("failed to build float schema")
+    }
+
+    fn double_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.double();
+
+        builder.build(root).expect("failed to build double schema")
+    }
+
+    fn string_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.string();
+
+        builder.build(root).expect("failed to build string schema")
+    }
+
+    fn bytes_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.bytes();
+
+        builder.build(root).expect("failed to build bytes schema")
+    }
+
+    fn null_schema() -> Schema {
+        let builder = SchemaBuilder::new();
+        let root = builder.null();
+
+        builder.build(root).expect("failed to build null schema")
     }
 
     #[test]
@@ -456,27 +565,27 @@ mod tests {
     fn test_incompatible_reader_writer_pairs() {
         let incompatible_schemas = vec![
             // null
-            (SchemaType::Null, SchemaType::Int),
-            (SchemaType::Null, SchemaType::Long),
+            (null_schema(), int_schema()),
+            (null_schema(), long_schema()),
             // boolean
-            (SchemaType::Boolean, SchemaType::Int),
+            (boolean_schema(), int_schema()),
             // int
-            (SchemaType::Int, SchemaType::Null),
-            (SchemaType::Int, SchemaType::Boolean),
-            (SchemaType::Int, SchemaType::Long),
-            (SchemaType::Int, SchemaType::Float),
-            (SchemaType::Int, SchemaType::Double),
+            (int_schema(), null_schema()),
+            (int_schema(), boolean_schema()),
+            (int_schema(), long_schema()),
+            (int_schema(), float_schema()),
+            (int_schema(), double_schema()),
             // long
-            (SchemaType::Long, SchemaType::Float),
-            (SchemaType::Long, SchemaType::Double),
+            (long_schema(), float_schema()),
+            (long_schema(), double_schema()),
             // float
-            (SchemaType::Float, SchemaType::Double),
+            (float_schema(), double_schema()),
             // string
-            (SchemaType::String, SchemaType::Boolean),
-            (SchemaType::String, SchemaType::Int),
+            (string_schema(), boolean_schema()),
+            (string_schema(), int_schema()),
             // bytes
-            (SchemaType::Bytes, SchemaType::Null),
-            (SchemaType::Bytes, SchemaType::Int),
+            (bytes_schema(), null_schema()),
+            (bytes_schema(), int_schema()),
             // array and maps
             (int_array_schema(), long_array_schema()),
             (int_map_schema(), int_array_schema()),
@@ -486,8 +595,8 @@ mod tests {
             (enum1_ab_schema(), enum1_abc_schema()),
             (enum1_bc_schema(), enum1_abc_schema()),
             (enum1_ab_schema(), enum2_ab_schema()),
-            (SchemaType::Int, enum2_ab_schema()),
-            (enum2_ab_schema(), SchemaType::Int),
+            (int_schema(), enum2_ab_schema()),
+            (enum2_ab_schema(), int_schema()),
             //union
             (int_union_schema(), int_string_union_schema()),
             (string_union_schema(), int_string_union_schema()),
@@ -501,21 +610,21 @@ mod tests {
 
         assert!(!incompatible_schemas
             .iter()
-            .any(|(reader, writer)| SchemaCompatibility::can_read(writer, reader)));
+            .any(|(reader, writer)| SchemaCompatibility::can_read(&writer.root(), &reader.root())));
     }
 
     #[test]
     fn test_compatible_reader_writer_pairs() {
         let compatible_schemas = vec![
-            (SchemaType::Null, SchemaType::Null),
-            (SchemaType::Long, SchemaType::Int),
-            (SchemaType::Float, SchemaType::Int),
-            (SchemaType::Float, SchemaType::Long),
-            (SchemaType::Double, SchemaType::Long),
-            (SchemaType::Double, SchemaType::Int),
-            (SchemaType::Double, SchemaType::Float),
-            (SchemaType::String, SchemaType::Bytes),
-            (SchemaType::Bytes, SchemaType::String),
+            (null_schema(), null_schema()),
+            (long_schema(), int_schema()),
+            (float_schema(), int_schema()),
+            (float_schema(), long_schema()),
+            (double_schema(), long_schema()),
+            (double_schema(), int_schema()),
+            (double_schema(), float_schema()),
+            (string_schema(), bytes_schema()),
+            (bytes_schema(), string_schema()),
             (int_array_schema(), int_array_schema()),
             (long_array_schema(), int_array_schema()),
             (int_map_schema(), int_map_schema()),
@@ -527,8 +636,8 @@ mod tests {
             (int_string_union_schema(), string_int_union_schema()),
             (int_union_schema(), empty_union_schema()),
             (long_union_schema(), int_union_schema()),
-            (int_union_schema(), SchemaType::Int),
-            (SchemaType::Int, int_union_schema()),
+            (int_union_schema(), int_schema()),
+            (int_schema(), int_union_schema()),
             (empty_record1_schema(), empty_record1_schema()),
             (empty_record1_schema(), a_int_record1_schema()),
             (a_int_record1_schema(), a_int_record1_schema()),
@@ -550,7 +659,7 @@ mod tests {
 
         assert!(compatible_schemas
             .iter()
-            .all(|(reader, writer)| SchemaCompatibility::can_read(writer, reader)));
+            .all(|(reader, writer)| SchemaCompatibility::can_read(&writer.root(), &reader.root())));
     }
 
     fn writer_schema() -> Schema {
@@ -699,8 +808,12 @@ mod tests {
     #[test]
     fn test_union_reader_writer_subset_incompatibility() {
         // reader union schema must contain all writer union branches
-        let union_writer = union_schema(vec![SchemaType::Int, SchemaType::String]);
-        let union_reader = union_schema(vec![SchemaType::String]);
+        let union_writer = Schema::parse_str(r#"{"type":["null", "int", "string"]"}"#)
+            .expect("failed to create union schema");
+        let union_reader = Schema::parse_str(r#"{"type":["null", "string"]}"#)
+            .expect("failed to create union schema");
+        // let union_writer = union_schema(vec![SchemaType::Int, SchemaType::String]);
+        // let union_reader = union_schema(vec![SchemaType::String]);
 
         assert_eq!(
             SchemaCompatibility::can_read(&union_writer.root(), &union_reader.root()),
@@ -774,6 +887,8 @@ mod tests {
         }
     */
 
+    #[allow(dead_code)]
+    //TODO: remove this function?
     fn point_2d_fullname_schema() -> Schema {
         Schema::parse_str(
             r#"
@@ -786,6 +901,8 @@ mod tests {
         .unwrap()
     }
 
+    #[allow(dead_code)]
+    // TODO: remove this function?
     fn point_3d_no_default_schema() -> Schema {
         Schema::parse_str(
             r#"
@@ -828,15 +945,16 @@ mod tests {
         }
     */
 
-    #[test]
-    fn test_union_resolution_no_structure_match() {
-        // short name match, but no structure match
-        let read_schema = union_schema(vec![SchemaType::Null, point_3d_no_default_schema()]);
-        assert_eq!(
-            SchemaCompatibility::can_read(&point_2d_fullname_schema().root(), &read_schema.root()),
-            false
-        );
-    }
+    //  TODO:
+    // #[test]
+    // fn test_union_resolution_no_structure_match() {
+    //     // short name match, but no structure match
+    //     let read_schema = union_schema(vec![SchemaType::Null, point_3d_no_default_schema()]);
+    //     assert_eq!(
+    //         SchemaCompatibility::can_read(&point_2d_fullname_schema().root(), &read_schema.root()),
+    //         false
+    //     );
+    // }
 
     // TODO(nlopes): the below require named schemas to be fully supported. See:
     // https://github.com/flavray/avro-rs/pull/76
