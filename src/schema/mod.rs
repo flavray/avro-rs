@@ -522,7 +522,7 @@ impl<'s> Aggregate<'s> {
         Name::from_ref(self.0, self.1)
     }
 
-    /// The type of value that is represented by this aggreagated type
+    /// The type of value that is represented by this aggregated type
     pub fn items(&self) -> SchemaType<'_> {
         let elem_type = match_lookup!(self, SchemaData::Array(x) | SchemaData::Map(x) => x);
         self.0.lookup(*elem_type).bind(self.0, *elem_type)

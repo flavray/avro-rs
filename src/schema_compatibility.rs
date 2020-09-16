@@ -808,12 +808,21 @@ mod tests {
     #[test]
     fn test_union_reader_writer_subset_incompatibility() {
         // reader union schema must contain all writer union branches
-        let union_writer = Schema::parse_str(r#"{"type":["null", "int", "string"]"}"#)
-            .expect("failed to create union schema");
-        let union_reader = Schema::parse_str(r#"{"type":["null", "string"]}"#)
-            .expect("failed to create union schema");
-        // let union_writer = union_schema(vec![SchemaType::Int, SchemaType::String]);
-        // let union_reader = union_schema(vec![SchemaType::String]);
+
+        let mut writer_builder = SchemaBuilder::new();
+        let mut writer_union_builder = writer_builder.union();
+        writer_union_builder.variant(writer_builder.null());
+        writer_union_builder.variant(writer_builder.int());
+        writer_union_builder.variant(writer_builder.string());
+        let writer_root = writer_union_builder.build(&mut writer_builder).unwrap();
+        let union_writer = writer_builder.build(writer_root).unwrap();
+
+        let mut reader_builder = SchemaBuilder::new();
+        let mut reader_union_builder = reader_builder.union();
+        reader_union_builder.variant(reader_builder.null());
+        reader_union_builder.variant(reader_builder.string());
+        let reader_root = reader_union_builder.build(&mut reader_builder).unwrap();
+        let union_reader = reader_builder.build(reader_root).unwrap();
 
         assert_eq!(
             SchemaCompatibility::can_read(&union_writer.root(), &union_reader.root()),
