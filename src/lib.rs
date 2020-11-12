@@ -682,10 +682,10 @@ mod duration;
 mod encode;
 mod error;
 mod reader;
-mod ser;
 mod util;
 mod writer;
 
+pub mod ser;
 pub mod rabin;
 pub mod schema;
 pub mod schema_compatibility;
