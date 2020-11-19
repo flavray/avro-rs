@@ -819,11 +819,16 @@ fn parsing_canonical_form(schema: &serde_json::Value) -> String {
         serde_json::Value::String(s) => pcf_string(s),
         serde_json::Value::Array(v) => pcf_array(v),
         serde_json::Value::Number(n) => pcf_number(n),
+        serde_json::Value::Bool(b) => pcf_boolean(b),
         json => panic!(
             "got invalid JSON value for canonical form of schema: {0}",
             json
         ),
     }
+}
+
+fn pcf_boolean(boolean: &bool) -> String {
+    boolean.to_string()
 }
 
 fn pcf_number(number: &serde_json::Number) -> String {
