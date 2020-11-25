@@ -56,7 +56,6 @@ lazy_static! {
 ///
 /// # assert_eq!(result[..], hex!("60335ba6d0415528"));
 /// use byteorder::{ByteOrder, LittleEndian};
-/// use hex_literal::hex;
 ///
 /// let i = LittleEndian::read_i64(&result.to_vec());
 ///
