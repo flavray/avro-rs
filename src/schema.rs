@@ -381,7 +381,7 @@ fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalM
 #[derive(Default)]
 struct Parser {
     input_schemas: HashMap<String, Value>,
-    parsed_schemas: HashMap<String, Schema>
+    parsed_schemas: HashMap<String, Schema>,
 }
 
 impl Schema {
@@ -417,7 +417,7 @@ impl Schema {
 
     /// Create a array of `Schema`'s from a list of JSON Avro schemas. It is allowed that
     /// the schemas have cross-dependencies; these will be resolved during parsing.
-    pub fn parse_list(input: &[&str]) -> Result<Vec<Schema>, Error>{
+    pub fn parse_list(input: &[&str]) -> Result<Vec<Schema>, Error> {
         let mut input_schemas: HashMap<String, Value> = HashMap::with_capacity(input.len());
         for js in input {
             let schema: Value = serde_json::from_str(js).map_err(Error::ParseSchemaJson)?;
@@ -430,7 +430,7 @@ impl Schema {
         }
         let mut parser = Parser {
             input_schemas,
-            parsed_schemas: HashMap::with_capacity(input.len())
+            parsed_schemas: HashMap::with_capacity(input.len()),
         };
         parser.parse_list()
     }
@@ -442,7 +442,6 @@ impl Schema {
 }
 
 impl Parser {
-
     /// Create a `Schema` from a string representing a JSON Avro schema.
     fn parse_str(&mut self, input: &str) -> Result<Schema, Error> {
         // TODO: (#82) this should be a ParseSchemaError wrapping the JSON error
@@ -453,12 +452,15 @@ impl Parser {
     /// Create a array of `Schema`'s from a an iterator of JSON Avro schemas. It is allowed that
     /// the schemas have cross-dependencies; these will be resolved during parsing.
     fn parse_list(&mut self) -> Result<Vec<Schema>, Error> {
-
         while !self.input_schemas.is_empty() {
-            let next_name = self.input_schemas.keys().next()
+            let next_name = self.input_schemas
+                .keys()
+                .next()
                 .expect("Input schemas unexpectedly empty")
                 .to_owned();
-            let (name, value) = self.input_schemas.remove_entry(&next_name)
+            let (name, value) = self
+                .input_schemas
+                .remove_entry(&next_name)
                 .expect("Key unexpectedly missing");
             let parsed = self.parse(&value)?;
             self.parsed_schemas.insert(name, parsed);
@@ -469,7 +471,6 @@ impl Parser {
             parsed_schemas.push(parsed);
         }
         Ok(parsed_schemas)
-
     }
 
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
@@ -504,7 +505,9 @@ impl Parser {
         if let Some(parsed) = self.parsed_schemas.get(name) {
             return Ok(parsed.clone());
         }
-        let value= self.input_schemas.remove(name)
+        let value= self
+            .input_schemas
+            .remove(name)
             .ok_or(Error::ParsePrimitive(name.into()))?;
         let parsed = self.parse(&value)?;
         self.parsed_schemas.insert(name.to_string(), parsed.clone());
@@ -541,7 +544,7 @@ impl Parser {
         fn logical_verify_type(
             complex: &Map<String, Value>,
             kinds: &[SchemaKind],
-            parser: &mut Parser
+            parser: &mut Parser,
         ) -> AvroResult<Schema> {
             match complex.get("type") {
                 Some(value) => {
@@ -564,7 +567,7 @@ impl Parser {
                     let inner = Box::new(logical_verify_type(
                         complex,
                         &[SchemaKind::Fixed, SchemaKind::Bytes],
-                        self
+                        self,
                     )?);
 
                     let (precision, scale) = Self::parse_precision_and_scale(complex)?;
@@ -576,7 +579,7 @@ impl Parser {
                     });
                 }
                 "uuid" => {
-                    logical_verify_type(complex, &[SchemaKind::String],self)?;
+                    logical_verify_type(complex, &[SchemaKind::String], self)?;
                     return Ok(Schema::Uuid);
                 }
                 "date" => {

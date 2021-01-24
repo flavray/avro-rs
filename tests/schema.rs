@@ -691,7 +691,6 @@ fn test_parse_list_with_cross_deps_basic() {
     }
 }
 
-
 #[test]
 /// Test that schema composition resolves namespaces.
 fn test_parse_list_with_cross_deps_and_namespaces() {
@@ -773,7 +772,7 @@ fn permutations<T>(list: &[T]) -> Vec<Vec<&T>> {
 }
 
 /// Return all permutations of the indices of a vector
-fn permutation_indices<'a>(indices: Vec<usize>) -> Vec<Vec<usize>>{
+fn permutation_indices(indices: Vec<usize>) -> Vec<Vec<usize>> {
     let size = indices.len();
     let mut perms: Vec<Vec<usize>> = Vec::new();
     if size == 1 {
@@ -789,8 +788,8 @@ fn permutation_indices<'a>(indices: Vec<usize>) -> Vec<Vec<usize>>{
             sub_index.insert(0, first[0]);
             perms.push(sub_index);
         }
-
     }
+
     return perms
 }
 
@@ -841,12 +840,13 @@ fn test_parse_list_multiple_dependencies() {
             }
         ]
     }"#;
-    let parsed = vec!(
+
+    let parsed = vec![
         Schema::parse_str(schema_str_2).expect("Test failed"),
         Schema::parse_str(schema_str_3).expect("Test failed"),
         Schema::parse_str(schema_composite).expect("Test failed")
-    );
-    let schema_strs = vec!(schema_str_1, schema_str_2, schema_str_3);
+    ];
+    let schema_strs = vec![schema_str_1, schema_str_2, schema_str_3];
     for schema_str_perm in permutations(&schema_strs) {
         let schema_str_perm: Vec<&str> = schema_str_perm.iter().map(|s| **s).collect();
         let schemas = Schema::parse_list(&schema_str_perm).expect("Test failed");
@@ -900,12 +900,13 @@ fn test_parse_list_shared_dependency() {
             ]
         }
     }"#;
-    let parsed = vec!(
+    
+    let parsed = vec![
         Schema::parse_str(schema_str_3).expect("Test failed"),
         Schema::parse_str(schema_composite_1).expect("Test failed"),
         Schema::parse_str(schema_composite_2).expect("Test failed")
-    );
-    let schema_strs = vec!(schema_str_1, schema_str_2, schema_str_3);
+    ];
+    let schema_strs = vec![schema_str_1, schema_str_2, schema_str_3];
     for schema_str_perm in permutations(&schema_strs) {
         let schema_str_perm: Vec<&str> = schema_str_perm.iter().map(|s| **s).collect();
         let schemas = Schema::parse_list(&schema_str_perm).expect("Test failed");
@@ -915,8 +916,6 @@ fn test_parse_list_shared_dependency() {
         }
     }
 }
-
-
 
 // The fullname is determined in one of the following ways:
 //  * A name and namespace are both specified.  For example,
