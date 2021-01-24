@@ -453,7 +453,8 @@ impl Parser {
     /// the schemas have cross-dependencies; these will be resolved during parsing.
     fn parse_list(&mut self) -> Result<Vec<Schema>, Error> {
         while !self.input_schemas.is_empty() {
-            let next_name = self.input_schemas
+            let next_name = self
+                .input_schemas
                 .keys()
                 .next()
                 .expect("Input schemas unexpectedly empty")
@@ -505,7 +506,7 @@ impl Parser {
         if let Some(parsed) = self.parsed_schemas.get(name) {
             return Ok(parsed.clone());
         }
-        let value= self
+        let value = self
             .input_schemas
             .remove(name)
             .ok_or(Error::ParsePrimitive(name.into()))?;

@@ -790,7 +790,7 @@ fn permutation_indices(indices: Vec<usize>) -> Vec<Vec<usize>> {
         }
     }
 
-    return perms
+    perms
 }
 
 #[test]
@@ -900,11 +900,11 @@ fn test_parse_list_shared_dependency() {
             ]
         }
     }"#;
-    
+
     let parsed = vec![
         Schema::parse_str(schema_str_3).expect("Test failed"),
         Schema::parse_str(schema_composite_1).expect("Test failed"),
-        Schema::parse_str(schema_composite_2).expect("Test failed")
+        Schema::parse_str(schema_composite_2).expect("Test failed"),
     ];
     let schema_strs = vec![schema_str_1, schema_str_2, schema_str_3];
     for schema_str_perm in permutations(&schema_strs) {
