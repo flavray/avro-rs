@@ -509,7 +509,7 @@ impl Parser {
         let value = self
             .input_schemas
             .remove(name)
-            .ok_or(Error::ParsePrimitive(name.into()))?;
+            .ok_or_else(|| Error::ParsePrimitive(name.into()))?;
         let parsed = self.parse(&value)?;
         self.parsed_schemas.insert(name.to_string(), parsed.clone());
         Ok(parsed)
