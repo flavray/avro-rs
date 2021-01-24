@@ -844,7 +844,7 @@ fn test_parse_list_multiple_dependencies() {
     let parsed = vec![
         Schema::parse_str(schema_str_2).expect("Test failed"),
         Schema::parse_str(schema_str_3).expect("Test failed"),
-        Schema::parse_str(schema_composite).expect("Test failed")
+        Schema::parse_str(schema_composite).expect("Test failed"),
     ];
     let schema_strs = vec![schema_str_1, schema_str_2, schema_str_3];
     for schema_str_perm in permutations(&schema_strs) {
