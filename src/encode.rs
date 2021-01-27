@@ -70,7 +70,7 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
         Value::Uuid(uuid) => encode_bytes(&uuid.to_string(), buffer),
         Value::Bytes(bytes) => match *schema {
             Schema::Bytes => encode_bytes(bytes, buffer),
-            Schema::Fixed{..} => buffer.extend(bytes),
+            Schema::Fixed { .. } => buffer.extend(bytes),
             _ => (),
         },
         Value::String(s) => match *schema {
