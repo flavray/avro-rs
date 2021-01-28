@@ -381,6 +381,7 @@ fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalM
 #[derive(Default)]
 struct Parser {
     input_schemas: HashMap<String, Value>,
+    input_order: Vec<String>,
     parsed_schemas: HashMap<String, Schema>,
 }
 
@@ -415,21 +416,32 @@ impl Schema {
         parser.parse_str(input)
     }
 
-    /// Create a array of `Schema`'s from a list of JSON Avro schemas. It is allowed that
-    /// the schemas have cross-dependencies; these will be resolved during parsing.
+    /// Create a array of `Schema`'s from a list of named JSON Avro schemas (Record, Enum, and
+    /// Fixed).
+    ///
+    /// It is allowed that the schemas have cross-dependencies; these will be resolved
+    /// during parsing.
+    ///
+    /// If two of the input schemas have the same fullname, an Error will be returned.
     pub fn parse_list(input: &[&str]) -> Result<Vec<Schema>, Error> {
         let mut input_schemas: HashMap<String, Value> = HashMap::with_capacity(input.len());
+        let mut input_order: Vec<String> = Vec::with_capacity(input.len());
         for js in input {
             let schema: Value = serde_json::from_str(js).map_err(Error::ParseSchemaJson)?;
             if let Value::Object(inner) = &schema {
                 let fullname = Name::parse(&inner)?.fullname(None);
-                let _ = input_schemas.insert(fullname, schema);
+                let previous_value = input_schemas.insert(fullname.clone(), schema);
+                if previous_value.is_some() {
+                    return Err(Error::NameCollision(fullname))
+                }
+                let _ = input_order.push(fullname);
             } else {
                 return Err(Error::GetNameField);
             }
         }
         let mut parser = Parser {
             input_schemas,
+            input_order,
             parsed_schemas: HashMap::with_capacity(input.len()),
         };
         parser.parse_list()
@@ -449,7 +461,7 @@ impl Parser {
         self.parse(&value)
     }
 
-    /// Create a array of `Schema`'s from a an iterator of JSON Avro schemas. It is allowed that
+    /// Create an array of `Schema`'s from an iterator of JSON Avro schemas. It is allowed that
     /// the schemas have cross-dependencies; these will be resolved during parsing.
     fn parse_list(&mut self) -> Result<Vec<Schema>, Error> {
         while !self.input_schemas.is_empty() {
@@ -467,8 +479,10 @@ impl Parser {
             self.parsed_schemas.insert(name, parsed);
         }
 
-        let mut parsed_schemas = Vec::new();
-        for (_, parsed) in self.parsed_schemas.drain() {
+        let mut parsed_schemas = Vec::with_capacity(self.parsed_schemas.len());
+        for name in self.input_order.drain(0..) {
+            let parsed = self.parsed_schemas.remove(&name)
+                .expect("One of the input schemas was unexpectedly not parsed");
             parsed_schemas.push(parsed);
         }
         Ok(parsed_schemas)
@@ -502,6 +516,13 @@ impl Parser {
         }
     }
 
+    /// Given a name, tries to retrieve the parsed schema from `parsed_schemas`.
+    /// If a parsed schema is not found, it checks if a json  with that name exists
+    /// in `input_schemas` and then parses it  (removing it from `input_schemas`)
+    /// and adds the parsed schema to `parsed_schemas`
+    ///
+    /// This method allows schemas definitions that depend on other types to
+    /// parse their dependencies (or look them up if already parsed).
     fn fetch_schema(&mut self, name: &str) -> AvroResult<Schema> {
         if let Some(parsed) = self.parsed_schemas.get(name) {
             return Ok(parsed.clone());

@@ -637,8 +637,8 @@ fn test_parse_list_without_cross_deps() {
     }"#;
     let schema_str_2 = r#"{
         "name": "B",
-        "type": "map",
-        "values": "double"
+        "type": "fixed",
+        "size": 16
     }"#;
     let schema_strs = [schema_str_1, schema_str_2];
     let schemas = Schema::parse_list(&schema_strs).expect("Test failed");
@@ -653,6 +653,7 @@ fn test_parse_list_without_cross_deps() {
 /// Test that the parsing of a list of schemas, whose definitions do depend on each other, can
 /// perform the necessary schema composition. This should work regardless of the order in which
 /// the schemas are input.
+/// However, the output order is guaranteed to be the same as the input order.
 fn test_parse_list_with_cross_deps_basic() {
     let schema_str_1 = r#"{
         "name": "A",
@@ -663,32 +664,37 @@ fn test_parse_list_with_cross_deps_basic() {
     }"#;
     let schema_str_2 = r#"{
         "name": "B",
-        "type": "map",
-        "values": "A"
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "A"}
+        ]
     }"#;
     let schema_composite = r#"{
         "name": "B",
-        "type": "map",
-        "values": {
-            "name": "A",
-            "type": "record",
-            "fields": [
-                {"name": "field_one", "type": "float"}
-            ]
-        }
+        "type": "record",
+        "fields": [
+            { "name": "field_one",
+            "type": {
+                "name": "A",
+                "type": "record",
+                "fields": [
+                    {"name": "field_one", "type": "float"}
+                    ]
+                }
+            }
+        ]
+
     }"#;
     let schema_strs_first = [schema_str_1, schema_str_2];
     let schema_strs_second = [schema_str_2, schema_str_1];
     let schemas_first = Schema::parse_list(&schema_strs_first).expect("Test failed");
     let schemas_second = Schema::parse_list(&schema_strs_second).expect("Test failed");
 
-    for schema_str in &[schema_str_1, schema_composite] {
-        let parsed = Schema::parse_str(&schema_str).expect("Test failed");
-        assert!(schemas_first.contains(&parsed));
-        assert!(schemas_second.contains(&parsed));
-        assert_eq!(schemas_first.len(), 2);
-        assert_eq!(schemas_second.len(), 2);
-    }
+
+    let parsed_1 = Schema::parse_str(&schema_str_1).expect("Test failed");
+    let parsed_2 = Schema::parse_str(&schema_composite).expect("Test failed");
+    assert_eq!(schemas_first, vec!(parsed_1.clone(), parsed_2.clone()));
+    assert_eq!(schemas_second, vec!(parsed_2, parsed_1));
 }
 
 #[test]
@@ -704,33 +710,37 @@ fn test_parse_list_with_cross_deps_and_namespaces() {
     }"#;
     let schema_str_2 = r#"{
         "name": "B",
-        "type": "map",
-        "values": "namespace.A"
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "namespace.A"}
+        ]
     }"#;
     let schema_composite = r#"{
         "name": "B",
-        "type": "map",
-        "values": {
-            "name": "A",
-            "type": "record",
-            "namespace": "namespace",
-            "fields": [
-                {"name": "field_one", "type": "float"}
-            ]
-        }
+        "type": "record",
+        "fields": [
+            { "name": "field_one",
+            "type": {
+                "name": "A",
+                "type": "record",
+                "namespace": "namespace",
+                "fields": [
+                    {"name": "field_one", "type": "float"}
+                    ]
+                }
+            }
+        ]
     }"#;
     let schema_strs_first = [schema_str_1, schema_str_2];
     let schema_strs_second = [schema_str_2, schema_str_1];
     let schemas_first = Schema::parse_list(&schema_strs_first).expect("Test failed");
     let schemas_second = Schema::parse_list(&schema_strs_second).expect("Test failed");
 
-    for schema_str in &[schema_str_1, schema_composite] {
-        let parsed = Schema::parse_str(&schema_str).expect("Test failed");
-        assert!(schemas_first.contains(&parsed));
-        assert!(schemas_second.contains(&parsed));
-        assert_eq!(schemas_first.len(), 2);
-        assert_eq!(schemas_second.len(), 2);
-    }
+
+    let parsed_1 = Schema::parse_str(&schema_str_1).expect("Test failed");
+    let parsed_2 = Schema::parse_str(&schema_composite).expect("Test failed");
+    assert_eq!(schemas_first, vec!(parsed_1.clone(), parsed_2.clone()));
+    assert_eq!(schemas_second, vec!(parsed_2, parsed_1));
 }
 
 #[test]
@@ -746,8 +756,10 @@ fn test_parse_list_with_cross_deps_and_namespaces_error() {
     }"#;
     let schema_str_2 = r#"{
         "name": "B",
-        "type": "map",
-        "values": "A"
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "A"}
+        ]
     }"#;
 
     let schema_strs_first = [schema_str_1, schema_str_2];
@@ -806,8 +818,8 @@ fn test_parse_list_multiple_dependencies() {
     }"#;
     let schema_str_2 = r#"{
         "name": "B",
-        "type": "array",
-        "items": "double"
+        "type": "fixed",
+        "size": 16
     }"#;
     let schema_str_3 = r#"{
         "name": "C",
@@ -826,8 +838,8 @@ fn test_parse_list_multiple_dependencies() {
                     "null",
                     {
                         "name": "B",
-                        "type": "array",
-                        "items": "double"
+                        "type": "fixed",
+                        "size": 16
                     },
                     {
                         "name": "C",
@@ -863,13 +875,17 @@ fn test_parse_list_multiple_dependencies() {
 fn test_parse_list_shared_dependency() {
     let schema_str_1 = r#"{
         "name": "A",
-        "type": "map",
-        "values": "C"
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": {"type": "array", "items": "C"}}
+        ]
     }"#;
     let schema_str_2 = r#"{
         "name": "B",
-        "type": "array",
-        "items": "C"
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": {"type": "map", "values": "C"}}
+        ]
     }"#;
     let schema_str_3 = r#"{
         "name": "C",
@@ -880,25 +896,37 @@ fn test_parse_list_shared_dependency() {
     }"#;
     let schema_composite_1 = r#"{
         "name": "A",
-        "type": "map",
-        "values": {
-            "name": "C",
-            "type":  "record",
-            "fields": [
-                {"name": "field_one", "type": "string"}
-            ]
-        }
+        "type": "record",
+        "fields": [
+            { "name": "field_one",
+              "type": {"type": "array",
+                       "items": {
+                            "name": "C",
+                            "type": "record",
+                            "fields": [
+                                {"name": "field_one", "type": "string"}
+                                ]
+                            }
+                      }
+            }
+        ]
     }"#;
     let schema_composite_2 = r#"{
         "name": "B",
-        "type": "array",
-        "items": {
-            "name": "C",
-            "type":  "record",
-            "fields": [
-                {"name": "field_one", "type": "string"}
+        "type": "record",
+        "fields": [
+            { "name": "field_one",
+              "type": {"type": "map",
+                       "values": {
+                            "name": "C",
+                            "type":  "record",
+                            "fields": [
+                                {"name": "field_one", "type": "string"}
+                                ]
+                            }
+                      }
+                 }
             ]
-        }
     }"#;
 
     let parsed = vec![
@@ -915,6 +943,29 @@ fn test_parse_list_shared_dependency() {
             assert!(schemas.contains(parsed_schema));
         }
     }
+}
+
+#[test]
+/// Test that trying to parse two schemas with the same fullname returns an Error
+fn test_name_collision_error() {
+    let schema_str_1 = r#"{
+        "name": "foo.A",
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "double"}
+        ]
+    }"#;
+    let schema_str_2 = r#"{
+        "name": "A",
+        "type": "record",
+        "namespace": "foo",
+        "fields": [
+            {"name": "field_two", "type": "string"}
+        ]
+    }"#;
+
+    let _ = Schema::parse_list(&[schema_str_1, schema_str_2]).expect_err("Test failed");
+
 }
 
 // The fullname is determined in one of the following ways:

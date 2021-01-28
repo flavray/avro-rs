@@ -1,5 +1,6 @@
 use crate::{schema::SchemaKind, types::ValueKind};
 use std::fmt;
+use crate::types::Value;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -17,6 +18,9 @@ pub enum Error {
 
     #[error("Not a string value, required for uuid: {0:?}")]
     GetUuidFromStringValue(ValueKind),
+
+    #[error("Two schemas with the same fullname were given: {0:?}")]
+    NameCollision(String),
 
     #[error("Not a fixed or bytes type, required for decimal schema, got: {0:?}")]
     ResolveDecimalSchema(SchemaKind),
