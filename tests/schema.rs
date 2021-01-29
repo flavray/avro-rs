@@ -697,6 +697,47 @@ fn test_parse_list_with_cross_deps_basic() {
 }
 
 #[test]
+/// Test that if a cycle of dependencies occurs in the input schema jsons, the algorithm terminates
+/// and returns an error. N.B. In the future, when recursive types are supported, this should be
+/// revisited.
+fn test_parse_list_recursive_type_error() {
+    let schema_str_1 = r#"{
+        "name": "A",
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "B"}
+        ]
+    }"#;
+    let schema_str_2 = r#"{
+        "name": "B",
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "A"}
+        ]
+    }"#;
+    let schema_composite = r#"{
+        "name": "B",
+        "type": "record",
+        "fields": [
+            { "name": "field_one",
+            "type": {
+                "name": "A",
+                "type": "record",
+                "fields": [
+                    {"name": "field_one", "type": "float"}
+                    ]
+                }
+            }
+        ]
+
+    }"#;
+    let schema_strs_first = [schema_str_1, schema_str_2];
+    let schema_strs_second = [schema_str_2, schema_str_1];
+    let _ = Schema::parse_list(&schema_strs_first).expect_err("Test failed");
+    let _ = Schema::parse_list(&schema_strs_second).expect_err("Test failed");
+}
+
+#[test]
 /// Test that schema composition resolves namespaces.
 fn test_parse_list_with_cross_deps_and_namespaces() {
     let schema_str_1 = r#"{
