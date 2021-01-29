@@ -434,7 +434,7 @@ impl Schema {
                 if previous_value.is_some() {
                     return Err(Error::NameCollision(fullname));
                 }
-                let _ = input_order.push(fullname);
+                input_order.push(fullname);
             } else {
                 return Err(Error::GetNameField);
             }
