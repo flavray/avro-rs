@@ -432,7 +432,7 @@ impl Schema {
                 let fullname = Name::parse(&inner)?.fullname(None);
                 let previous_value = input_schemas.insert(fullname.clone(), schema);
                 if previous_value.is_some() {
-                    return Err(Error::NameCollision(fullname))
+                    return Err(Error::NameCollision(fullname));
                 }
                 let _ = input_order.push(fullname);
             } else {
@@ -481,7 +481,9 @@ impl Parser {
 
         let mut parsed_schemas = Vec::with_capacity(self.parsed_schemas.len());
         for name in self.input_order.drain(0..) {
-            let parsed = self.parsed_schemas.remove(&name)
+            let parsed = self
+                .parsed_schemas
+                .remove(&name)
                 .expect("One of the input schemas was unexpectedly not parsed");
             parsed_schemas.push(parsed);
         }

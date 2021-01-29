@@ -690,7 +690,6 @@ fn test_parse_list_with_cross_deps_basic() {
     let schemas_first = Schema::parse_list(&schema_strs_first).expect("Test failed");
     let schemas_second = Schema::parse_list(&schema_strs_second).expect("Test failed");
 
-
     let parsed_1 = Schema::parse_str(&schema_str_1).expect("Test failed");
     let parsed_2 = Schema::parse_str(&schema_composite).expect("Test failed");
     assert_eq!(schemas_first, vec!(parsed_1.clone(), parsed_2.clone()));
@@ -735,7 +734,6 @@ fn test_parse_list_with_cross_deps_and_namespaces() {
     let schema_strs_second = [schema_str_2, schema_str_1];
     let schemas_first = Schema::parse_list(&schema_strs_first).expect("Test failed");
     let schemas_second = Schema::parse_list(&schema_strs_second).expect("Test failed");
-
 
     let parsed_1 = Schema::parse_str(&schema_str_1).expect("Test failed");
     let parsed_2 = Schema::parse_str(&schema_composite).expect("Test failed");
