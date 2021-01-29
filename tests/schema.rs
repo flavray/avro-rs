@@ -715,22 +715,6 @@ fn test_parse_list_recursive_type_error() {
             {"name": "field_one", "type": "A"}
         ]
     }"#;
-    let schema_composite = r#"{
-        "name": "B",
-        "type": "record",
-        "fields": [
-            { "name": "field_one",
-            "type": {
-                "name": "A",
-                "type": "record",
-                "fields": [
-                    {"name": "field_one", "type": "float"}
-                    ]
-                }
-            }
-        ]
-
-    }"#;
     let schema_strs_first = [schema_str_1, schema_str_2];
     let schema_strs_second = [schema_str_2, schema_str_1];
     let _ = Schema::parse_list(&schema_strs_first).expect_err("Test failed");
