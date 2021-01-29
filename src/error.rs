@@ -1,6 +1,5 @@
 use crate::{schema::SchemaKind, types::ValueKind};
 use std::fmt;
-use crate::types::Value;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
