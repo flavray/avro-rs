@@ -963,7 +963,31 @@ fn test_name_collision_error() {
     }"#;
 
     let _ = Schema::parse_list(&[schema_str_1, schema_str_2]).expect_err("Test failed");
+}
 
+#[test]
+/// Test that having the same name but different fullnames does not return an error
+fn test_namespace_prevents_collisions() {
+    let schema_str_1 = r#"{
+        "name": "A",
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "double"}
+        ]
+    }"#;
+    let schema_str_2 = r#"{
+        "name": "A",
+        "type": "record",
+        "namespace": "foo",
+        "fields": [
+            {"name": "field_two", "type": "string"}
+        ]
+    }"#;
+
+    let parsed = Schema::parse_list(&[schema_str_1, schema_str_2]).expect("Test failed");
+    let parsed_1 = Schema::parse_str(&schema_str_1).expect("Test failed");
+    let parsed_2 = Schema::parse_str(&schema_str_2).expect("Test failed");
+    assert_eq!(parsed, vec!(parsed_1, parsed_2));
 }
 
 // The fullname is determined in one of the following ways:
