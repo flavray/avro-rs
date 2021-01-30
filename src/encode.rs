@@ -53,9 +53,9 @@ pub fn encode_ref(value: &Value, schema: SchemaType, buffer: &mut Vec<u8>) {
             buffer.extend_from_slice(&slice);
         }
         Value::Uuid(uuid) => encode_bytes(&uuid.to_string(), buffer),
-        Value::Bytes(bytes) => match *schema {
-            Schema::Bytes => encode_bytes(bytes, buffer),
-            Schema::Fixed { .. } => buffer.extend(bytes),
+        Value::Bytes(bytes) => match schema {
+            SchemaType::Bytes => encode_bytes(bytes, buffer),
+            SchemaType::Fixed(_) => buffer.extend(bytes),
             _ => (),
         },
         Value::String(s) => match schema {
