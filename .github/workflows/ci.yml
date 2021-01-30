@@ -3,6 +3,9 @@ on:
     branches: [ "master" ]
   pull_request:
     branches: [ "**" ]
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 name: Continuous Integration
 
@@ -15,7 +18,7 @@ jobs:
           - stable
           - beta
           - nightly
-          - 1.40.0  # MSRV
+          - 1.48.0  # MSRV
 
     steps:
       - name: Checkout
@@ -46,3 +49,10 @@ jobs:
         with:
           command: test
           args: --all-features --all-targets
+
+      # because of https://github.com/rust-lang/cargo/issues/6669
+      - name: Test docs
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --doc

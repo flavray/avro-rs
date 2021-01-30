@@ -278,7 +278,7 @@ mod tests {
     //     use num_bigint::ToBigInt;
     //
     //     let schema = Schema::meta_schema();
-    //     let bigint = -423.to_bigint().unwrap();
+    //     let bigint = (-423).to_bigint().unwrap();
     //     let value = Value::Decimal(Decimal::from(bigint.to_signed_bytes_be()));
     //
     //     let mut buffer = Vec::new();
@@ -296,7 +296,7 @@ mod tests {
     //     use num_bigint::ToBigInt;
     //     let schema = Schema::meta_schema();
     //     let value = Value::Decimal(Decimal::from(
-    //         (-423.to_bigint().unwrap()).to_signed_bytes_be(),
+    //         ((-423).to_bigint().unwrap()).to_signed_bytes_be(),
     //     ));
     //     let mut buffer = Vec::<u8>::new();
     //

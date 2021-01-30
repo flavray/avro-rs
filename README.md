@@ -3,7 +3,7 @@
 [![Latest Version](https://img.shields.io/crates/v/avro-rs.svg)](https://crates.io/crates/avro-rs)
 [![Continuous Integration](https://github.com/flavray/avro-rs/workflows/Continuous%20Integration/badge.svg)](https://github.com/flavray/avro-rs/actions)
 [![Latest Documentation](https://docs.rs/avro-rs/badge.svg)](https://docs.rs/avro-rs)
-[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/flavray/avro-rs/blob/master/LICENSE)
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/flavray/avro-rs/blob/main/LICENSE)
 
 A library for working with [Apache Avro](https://avro.apache.org/) in Rust.
 
@@ -85,6 +85,38 @@ let schema = Schema::parse_str(raw_schema).unwrap();
 // schemas can be printed for debugging
 println!("{:?}", schema);
 ```
+
+Additionally, a list of of definitions (which may depend on each other) can be given and all of
+them will be parsed into the corresponding schemas.
+
+```rust
+use avro_rs::Schema;
+
+let raw_schema_1 = r#"{
+        "name": "A",
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "float"}
+        ]
+    }"#;
+
+// This definition depends on the definition of A above
+let raw_schema_2 = r#"{
+        "name": "B",
+        "type": "record",
+        "fields": [
+            {"name": "field_one", "type": "A"}
+        ]
+    }"#;
+
+// if the schemas are not valid, this function will return an error
+let schemas = Schema::parse_list(&[raw_schema_1, raw_schema_2]).unwrap();
+
+// schemas can be printed for debugging
+println!("{:?}", schemas);
+```
+*N.B.* It is important to note that the composition of schema definitions requires schemas with names.
+For this reason, only schemas of type Record, Enum, and Fixed should be input into this function.
 
 The library provides also a programmatic interface to define schemas without encoding them in
 JSON (for advanced use), but we highly recommend the JSON interface. Please read the API
@@ -563,13 +595,13 @@ assert_eq!(false, SchemaCompatibility::can_read(&writers_schema, &readers_schema
 ```
 
 ## License
-This project is licensed under [MIT License](https://github.com/flavray/avro-rs/blob/master/LICENSE).
+This project is licensed under [MIT License](https://github.com/flavray/avro-rs/blob/main/LICENSE).
 Please note that this is not an official project maintained by [Apache Avro](https://avro.apache.org/).
 
 ## Contributing
 Everyone is encouraged to contribute! You can contribute by forking the GitHub repo and making a pull request or opening an issue.
-All contributions will be licensed under [MIT License](https://github.com/flavray/avro-rs/blob/master/LICENSE).
+All contributions will be licensed under [MIT License](https://github.com/flavray/avro-rs/blob/main/LICENSE).
 
-Please consider adding documentation, tests and a line for your change under the Unreleased section in the [CHANGELOG](https://github.com/flavray/avro-rs/blob/master/CHANGELOG.md).
+Please consider adding documentation, tests and a line for your change under the Unreleased section in the [CHANGELOG](https://github.com/flavray/avro-rs/blob/main/CHANGELOG.md).
 If you introduce a backward-incompatible change, please consider adding instruction to migrate in the [Migration Guide](migration_guide.md)
 If you modify the crate documentation in `lib.rs`, run `make readme` to sync the README file.

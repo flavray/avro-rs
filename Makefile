@@ -39,13 +39,15 @@ clean-lint:
 
 .PHONY: clippy
 clippy: install-hooks
-	cargo clippy --all-targets --all-features -- -Dclippy::all
+	cargo clippy --all-features --all-targets -- -Dclippy::all -Dunused_imports
 
 # TESTING
 
 .PHONY: test
 test: install-hooks
-	cargo test --all-features
+	cargo test --all-features --all-targets
+	# because of https://github.com/rust-lang/cargo/issues/6669
+	cargo test --doc
 	$(VENV)/bin/pre-commit run --all-files
 
 # BENCHMARKING
