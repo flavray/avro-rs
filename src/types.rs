@@ -659,7 +659,7 @@ impl Value {
         };
         // Find the first match in the reader schema.
         let (_, inner) = schema
-            .find_schema(&v)
+            .resolve_union_schema(&v)
             .ok_or_else(|| Error::FindUnionVariant)?;
         Ok(Value::Union(Box::new(v.resolve(inner)?)))
     }

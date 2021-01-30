@@ -70,7 +70,7 @@ pub fn encode_ref(value: &Value, schema: SchemaType, buffer: &mut Vec<u8>) {
                 // Find the schema that is matched here. Due to validation, this should always
                 // return a value.
                 let (idx, inner_schema) = union
-                    .find_schema(item)
+                    .resolve_union_schema(item)
                     .expect("Invalid Union validation occurred");
                 encode_long(idx as i64, buffer);
                 encode_ref(&*item, inner_schema, buffer);

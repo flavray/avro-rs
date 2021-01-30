@@ -563,7 +563,38 @@ impl<'s> UnionSchema<'s> {
         let kind = SchemaKind::from(value);
         self.iter_variants()
             .enumerate()
+            // TODO shouldn't we also check for name and namespace?
             .find(|(_pos, schema_type)| SchemaKind::from(*schema_type) == kind)
+    }
+
+    /// Optionally returns a reference to the schema matched by this value, as well as its position
+    /// within this enum. For `Record` schemas it checks number of fields and their names to make
+    /// sure to return the correct one.
+    pub fn resolve_union_schema(&self, value: &crate::types::Value) -> Option<(usize, SchemaType)> {
+        let mut counter = 0;
+        match value {
+            crate::types::Value::Record(fields) => {
+                self.iter_variants()
+                    .enumerate()
+                    .find(|(_pos, schema_type)| {
+                        if let SchemaType::Record(record_schema) = schema_type {
+                            if record_schema.fields().len() == fields.len() {
+                                for (name, _value) in fields.iter() {
+                                    record_schema
+                                        .iter_fields()
+                                        .find(|field| field.name() == name)
+                                        .and_then(|found| {
+                                            counter += 1;
+                                            Some(found)
+                                        });
+                                }
+                            }
+                        }
+                        counter == fields.len()
+                    })
+            }
+            _ => self.find_schema(value),
+        }
     }
 }
 
