@@ -91,6 +91,9 @@ impl Checker {
                     if let SchemaType::Union(r) = writers_schema {
                         if r.variants().len() == 1 {
                             return self.full_match_schemas(&r.variants()[0], readers_schema);
+                        } else if r.variants().len() == 0 {
+                            // There is a test for this. Does is make sense?
+                            return true;
                         }
                     }
                 }
@@ -392,7 +395,7 @@ mod tests {
     }
 
     fn int_list_record_schema() -> Schema {
-        Schema::parse_str(r#"{"type":"record", "name":"List", "fields": [{"name": "head", "type": "int"},{"name": "tail", "type": "array", "items": "int"}]}"#).unwrap()
+        Schema::parse_str(r#"{"type":"record", "name":"List", "fields": [{"name": "head", "type": "int"},{"name": "tail", "type": { "type":"array", "items": "int"} }]}"#).unwrap()
     }
 
     fn long_list_record_schema() -> Schema {
@@ -401,7 +404,7 @@ mod tests {
       {
         "type":"record", "name":"List", "fields": [
           {"name": "head", "type": "long"},
-          {"name": "tail", "type": "array", "items": "long"}
+          {"name": "tail", "type": {"type": "array", "items": "long"}}
       ]}
 "#,
         )

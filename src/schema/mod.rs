@@ -58,12 +58,28 @@ pub struct Schema {
 impl Schema {
     /// Parse the schema from a serde json value
     pub fn parse(value: &Value) -> Result<Schema, Error> {
-        SchemaParser::parse(value).map_err(|e| e.into())
+        SchemaParser::new().parse(value).map_err(|e| e.into())
     }
 
     /// Parse the schema from a string
     pub fn parse_str(raw: &str) -> Result<Schema, Error> {
         Self::parse_slice(raw.as_bytes())
+    }
+
+    /// Parse the schema from a string
+    pub fn parse_list<'a>(raws: &'a [&str]) -> Result<Vec<Schema>, Error> {
+        let values = raws
+            .into_iter()
+            .map(|raw| {
+                let bytes = raw.as_bytes();
+
+                serde_json::from_slice::<Value>(bytes).map_err(|e| Error::ParseSchemaJson(e))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        SchemaParser::new()
+            .parse_list(values.as_slice())
+            .map_err(|e| e.into())
     }
 
     /// Parse the schema from a slice
@@ -428,6 +444,10 @@ pub struct DecimalSchema<'s>(&'s Schema, NameRef);
 impl<'s> DecimalSchema<'s> {
     pub fn name(&self) -> Name<'_> {
         Name(self.0, self.1)
+    }
+
+    pub fn schema(&self) -> SchemaType<'_> {
+        self.0.root()
     }
 
     pub fn precision(&self) -> usize {
@@ -804,7 +824,9 @@ impl<'s> Name<'s> {
 
 impl PartialEq<Name<'_>> for Name<'_> {
     fn eq(&self, other: &Name) -> bool {
-        self.canonical_name().1 == other.canonical_name().1
+        let cn1 = self.canonical_name();
+        let cn2 = other.canonical_name();
+        cn1.name() == cn2.name() && cn1.namespace() == cn2.namespace()
     }
 }
 

@@ -69,7 +69,6 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
         }
         SchemaType::Decimal(d) => {
             let mut builder = Schema::builder();
-            // TODO: name implementation
             let root = builder
                 .decimal("name")
                 .decimal(d.precision(), d.scale(), &mut builder)

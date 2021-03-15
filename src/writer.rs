@@ -427,7 +427,7 @@ mod tests {
         logical_type_test(
             r#"{"type": "int", "logicalType": "date"}"#,
             &SchemaType::Date,
-            Value::Int(1_i32),
+            Value::Date(1_i32),
             &schema, //&SchemaType::Int,
             1_i32,
         )

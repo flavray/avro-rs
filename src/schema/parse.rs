@@ -11,16 +11,28 @@ pub(super) struct SchemaParser<'s> {
 }
 
 impl<'s> SchemaParser<'s> {
-    pub(super) fn parse(value: &Value) -> Result<Schema, Error> {
-        let mut parser = SchemaParser {
+    pub(super) fn new() -> Self {
+        SchemaParser {
             current_ns: None,
             builder: SchemaBuilder::new(),
-        };
-        let root = parser.parse_schema(value)?;
-        parser
-            .builder
+        }
+    }
+
+    pub(super) fn parse(&mut self, value: &'s Value) -> Result<Schema, Error> {
+        let root = self.parse_schema(value)?;
+        self.builder
             .build(root)
             .map_err(|e| Error::SchemaResolution(e.to_string()))
+    }
+
+    /// Parse the schema from a string
+    pub fn parse_list(&mut self, raws: &'s [Value]) -> Result<Vec<Schema>, Error> {
+        let schemas: Result<Vec<_>, _> = raws
+            .into_iter()
+            .map(|value| self.parse(&value).map_err(|e| e.into()))
+            .collect();
+
+        schemas
     }
 
     /// Create a `AvroSchema` from a `serde_json::Value` representing a JSON Avro schema.
@@ -80,27 +92,34 @@ impl<'s> SchemaParser<'s> {
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
     fn parse_complex(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
-        match complex.get("type") {
-            Some(&Value::String(ref t)) => match t.as_str() {
-                "record" => self.parse_record(complex),
-                "enum" => self.parse_enum(complex),
-                "array" => self.parse_array(complex),
-                "map" => self.parse_map(complex),
-                "fixed" => self.parse_fixed(complex),
-                other => self.parse_typeref(other),
-            },
-            Some(&Value::Object(ref data)) => match data.get("type") {
-                Some(ref value) => self.parse_schema(value),
-                None => Err(
-                    // Error::new(format!("Unknown complex type: {:?}", complex)).into(),
-                    Error::GetComplexTypeField,
-                ),
-            },
-            _ => Err(
-                //ParseSchemaError::new("No `type` in complex type").into()),
-                Error::GetComplexTypeField,
-            ),
-        }
+        complex
+            .get("logicalType")
+            .and_then(|logical_type| match logical_type {
+                &Value::String(ref logical_type) => {
+                    self.builder.logical_type(&logical_type).map(|lt| Ok(lt))
+                }
+                _ => None,
+            })
+            .unwrap_or(match complex.get("type") {
+                Some(&Value::String(ref t)) => match t.as_str() {
+                    "record" => self.parse_record(complex),
+                    "enum" => self.parse_enum(complex),
+                    "array" => self.parse_array(complex),
+                    "map" => self.parse_map(complex),
+                    "fixed" => self.parse_fixed(complex),
+                    other => self.parse_typeref(other),
+                },
+                Some(&Value::Object(ref data)) => match data.get("type") {
+                    Some(ref value) => self.parse_schema(value),
+                    None => Err(Error::GetComplexTypeField),
+                },
+                _ => {
+                    Err(
+                        //ParseSchemaError::new("No `type` in complex type").into()),
+                        Error::GetComplexTypeField,
+                    )
+                }
+            })
     }
 
     /// Parse a `serde_json::Value` representing a Avro record type into a `Schema`.

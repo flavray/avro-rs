@@ -330,20 +330,20 @@ impl Value {
             (&Value::TimeMicros(_), SchemaType::TimeMicros) => true,
             (&Value::TimeMillis(_), SchemaType::TimeMillis) => true,
             (&Value::Date(_), SchemaType::Date) => true,
-            // (&Value::Decimal(_), &SchemaType::Decimal { .. }) => true,
+            //(&Value::Decimal(_), SchemaType::Decimal(_)) => true,
             (&Value::Duration(_), SchemaType::Duration) => true,
             (&Value::Uuid(_), SchemaType::Uuid) => true,
             (&Value::Float(_), SchemaType::Float) => true,
             (&Value::Double(_), SchemaType::Double) => true,
             (&Value::Bytes(_), SchemaType::Bytes) => true,
-            // (&Value::Bytes(_), &SchemaType::Decimal { .. }) => true,
+            //(&Value::Bytes(_), SchemaType::Decimal(_)) => true,
             (&Value::String(_), SchemaType::String) => true,
             (&Value::String(_), SchemaType::Uuid) => true,
             //TODO: do we need to use name here for the fixed?
             (&Value::Fixed(n, _), SchemaType::Fixed(fixed)) => n == fixed.size(),
             (&Value::Fixed(n, _), SchemaType::Duration) => n == 12,
             // TODO: check precision against n
-            // (&Value::Fixed(_n, _), &Schema::Decimal { .. }) => true,
+            //(&Value::Fixed(_n, _), SchemaType::Decimal(_)) => true,
             (&Value::String(ref s), SchemaType::Enum(enum_)) => {
                 enum_.symbols().contains(&s.as_ref())
             }

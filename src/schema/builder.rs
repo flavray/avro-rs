@@ -7,6 +7,7 @@ use std::collections::HashSet;
 pub struct SchemaBuilder {
     anon_type_ctr: usize,
     primitive_types: HashMap<&'static str, NameRef, WyHashBuilder>,
+    logical_types: HashMap<&'static str, NameRef, WyHashBuilder>,
 
     namespace_names: DefaultStringInterner,
     type_names: DefaultStringInterner,
@@ -292,30 +293,44 @@ impl SchemaBuilder {
     pub fn new() -> SchemaBuilder {
         let mut builder = SchemaBuilder::default();
 
-        // Pre-register all the primitive types upfront
-        let mut add_type = |name, kind| {
-            let name_ref = builder.name_ref(name, None).unwrap();
-            builder.primitive_types.insert(name, name_ref);
-            builder.types.insert(name_ref, kind);
-        };
-
-        add_type("null", SchemaData::Null);
-        add_type("boolean", SchemaData::Boolean);
-        add_type("int", SchemaData::Int);
-        add_type("long", SchemaData::Long);
-        add_type("double", SchemaData::Double);
-        add_type("float", SchemaData::Float);
-        add_type("bytes", SchemaData::Bytes);
-        add_type("string", SchemaData::String);
-        add_type("uuid", SchemaData::Uuid);
-        add_type("date", SchemaData::Date);
-        add_type("time_millis", SchemaData::TimeMillis);
-        add_type("time_micros", SchemaData::TimeMicros);
-        add_type("timestamp_millis", SchemaData::TimestampMillis);
-        add_type("timestamp_micros", SchemaData::TimestampMicros);
-        add_type("duration", SchemaData::Duration);
+        Self::add_primitive_type(&mut builder, "null", SchemaData::Null);
+        Self::add_primitive_type(&mut builder, "boolean", SchemaData::Boolean);
+        Self::add_primitive_type(&mut builder, "int", SchemaData::Int);
+        Self::add_primitive_type(&mut builder, "long", SchemaData::Long);
+        Self::add_primitive_type(&mut builder, "double", SchemaData::Double);
+        Self::add_primitive_type(&mut builder, "float", SchemaData::Float);
+        Self::add_primitive_type(&mut builder, "bytes", SchemaData::Bytes);
+        Self::add_primitive_type(&mut builder, "string", SchemaData::String);
+        Self::add_logical_type(&mut builder, "uuid", SchemaData::Uuid);
+        Self::add_logical_type(&mut builder, "date", SchemaData::Date);
+        Self::add_logical_type(&mut builder, "time-millis", SchemaData::TimeMillis);
+        Self::add_logical_type(&mut builder, "time-micros", SchemaData::TimeMicros);
+        Self::add_logical_type(
+            &mut builder,
+            "timestamp-millis",
+            SchemaData::TimestampMillis,
+        );
+        Self::add_logical_type(
+            &mut builder,
+            "timestamp-micros",
+            SchemaData::TimestampMicros,
+        );
+        Self::add_logical_type(&mut builder, "duration", SchemaData::Duration);
 
         builder
+    }
+
+    // Pre-register all the primitive types upfront
+    fn add_primitive_type(builder: &mut SchemaBuilder, name: &'static str, kind: SchemaData) {
+        let name_ref = builder.name_ref(name, None).unwrap();
+        builder.primitive_types.insert(name, name_ref);
+        builder.types.insert(name_ref, kind);
+    }
+
+    fn add_logical_type(builder: &mut SchemaBuilder, name: &'static str, kind: SchemaData) {
+        let name_ref = builder.name_ref(name, None).unwrap();
+        builder.logical_types.insert(name, name_ref);
+        builder.types.insert(name_ref, kind);
     }
 
     primitive_type_lookup!(null);
@@ -337,6 +352,10 @@ impl SchemaBuilder {
             .get(name)
             .map(|name_ref| Ok(*name_ref))
             .unwrap_or_else(|| self.name_ref(name, namespace))
+    }
+
+    pub fn logical_type(&self, name: &str) -> Option<NameRef> {
+        self.logical_types.get(name).map(|name_ref| *name_ref)
     }
 
     pub fn record<'s>(&self, name: &'s str) -> RecordBuilder<'s> {
@@ -375,14 +394,14 @@ impl SchemaBuilder {
         MapBuilder::name(name)
     }
 
-    pub fn build(self, root: NameRef) -> Result<Schema, Error> {
+    pub fn build(&self, root: NameRef) -> Result<Schema, Error> {
         self.validate(&root)?;
         Ok(Schema {
-            namespace_names: self.namespace_names,
-            type_names: self.type_names,
-            aliases: self.aliases,
-            reverse_aliases: self.reverse_aliases,
-            types: self.types,
+            namespace_names: self.namespace_names.clone(),
+            type_names: self.type_names.clone(),
+            aliases: self.aliases.clone(),
+            reverse_aliases: self.reverse_aliases.clone(),
+            types: self.types.clone(),
             root,
         })
     }
