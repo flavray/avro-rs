@@ -332,7 +332,7 @@ pub fn to_avro_datum<T: Into<Value>>(schema: &Schema, value: T) -> AvroResult<Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{decimal::Decimal, types::Record, util::zig_i64};
+    use crate::{duration::*, decimal::Decimal, types::Record, util::zig_i64};
     use serde::{Deserialize, Serialize};
 
     const AVRO_OBJECT_HEADER_LEN: usize = AVRO_OBJECT_HEADER.len();
@@ -498,12 +498,15 @@ mod tests {
         let size = 30;
 
         let mut builder = Schema::builder();
-        let root = builder.decimal("decimal").decimal(20, 5, &mut builder)?;
+        let mut decimal = builder.named_decimal("decimal");
+        decimal.scale(5);
+        decimal.size(size as u64);
+        let root = decimal.precision(20, &mut builder)?;
         let expected = builder.build(root)?;
 
         let value = vec![0u8; size];
         logical_type_test(
-            r#"{"type": {"type": "fixed", "size": 30, "name": "decimal"}, "logicalType": "decimal", "precision": 20, "scale": 5}"#,
+            r#"{"type": "fixed", "size": 30, "name": "decimal", "logicalType": "decimal", "precision": 20, "scale": 5}"#,
             &expected.root(),
             Value::Decimal(Decimal::from(value.clone())),
             &expected,
@@ -511,41 +514,39 @@ mod tests {
         )
     }
 
-    // TODO:
-    // #[test]
-    // fn decimal_bytes() -> TestResult<()> {
-    //     let inner = SchemaType::Bytes;
-    //     let value = vec![0u8; 10];
-    //     logical_type_test(
-    //         r#"{"type": "bytes", "logicalType": "decimal", "precision": 4, "scale": 3}"#,
-    //         &Schema::Decimal {
-    //             precision: 4,
-    //             scale: 3,
-    //             inner: Box::new(inner.clone()),
-    //         },
-    //         Value::Decimal(Decimal::from(value.clone())),
-    //         &inner,
-    //         value,
-    //     )
-    // }
+    #[test]
+    fn decimal_bytes() -> TestResult<()> {
+        let mut builder = Schema::builder();
+        let mut decimal = builder.decimal();
+        decimal.scale(3);
+        let root = decimal.precision(4, &mut builder)?;
+        let expected = builder.build(root)?;
 
-    // TODO:
+        let value = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        logical_type_test(
+            r#"{"type": "bytes", "logicalType": "decimal", "precision": 4, "scale": 3}"#,
+            &expected.root(),
+            Value::Decimal(Decimal::from(value.clone())),
+            &expected,
+            Value::Bytes(value),
+        )
+    }
+
     // #[test]
     // fn duration() -> TestResult<()> {
-    //     let inner = SchemaType::Fixed {
-    //         name: Name::new("duration"),
-    //         size: 12,
-    //     };
+    //     let builder = Schema::builder();
+    //     let expected = builder.build(builder.duration())?;
     //     let value = Value::Duration(Duration::new(
     //         Months::new(256),
     //         Days::new(512),
     //         Millis::new(1024),
     //     ));
+    //
     //     logical_type_test(
     //         r#"{"type": {"type": "fixed", "name": "duration", "size": 12}, "logicalType": "duration"}"#,
-    //         &Schema::Duration,
+    //         &expected.root(),
     //         value,
-    //         &inner,
+    //         &expected,
     //         Value::Fixed(12, vec![0, 1, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0]),
     //     )
     // }

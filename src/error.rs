@@ -25,6 +25,9 @@ pub enum Error {
     #[error("Not a fixed or bytes type, required for decimal schema, got: {0:?}")]
     ResolveDecimalSchema(SchemaKind),
 
+    #[error("Not a fixed or bytes type, required for decimal schema, got: {0}")]
+    ParseDecimalSchema(String),
+
     #[error("Invalid utf-8 string")]
     ConvertToUtf8(#[source] std::string::FromUtf8Error),
 
@@ -76,12 +79,12 @@ pub enum Error {
     GetEnumSymbol,
 
     #[error("Scale {scale} is greater than precision {precision}")]
-    GetScaleAndPrecision { scale: usize, precision: usize },
+    GetScaleAndPrecision { scale: u64, precision: u64 },
 
     #[error(
         "Fixed type number of bytes {size} is not large enough to hold decimal values of precision {precision}"
     )]
-    GetScaleWithFixedSize { size: usize, precision: usize },
+    GetScaleWithFixedSize { size: u64, precision: u64 },
 
     #[error("expected UUID, got: {0:?}")]
     GetUuid(ValueKind),
@@ -101,8 +104,8 @@ pub enum Error {
     #[error("Unable to convert to u8, got {0:?}")]
     GetU8(ValueKind),
 
-    #[error("Precision {precision} too small to hold decimal values with {num_bytes} bytes")]
-    ComparePrecisionAndSize { precision: usize, num_bytes: usize },
+    #[error("Precision {precision} too small to hold decimal values with {num_bytes} bytes. Should be at least {max_precision_for_num_bytes}")]
+    ComparePrecisionAndSize { precision: u64, max_precision_for_num_bytes: u64, num_bytes: u64 },
 
     #[error("Cannot convert length to i32: {1}")]
     ConvertLengthToI32(#[source] std::num::TryFromIntError, usize),
@@ -203,7 +206,7 @@ pub enum Error {
     #[error("SchemaBuilderInvalidSchema error")]
     SchemaBuilderInvalidSchema(String),
 
-    #[error("SchemaBuilderValidationFail error")]
+    #[error("SchemaBuilderValidationFail error: [{0:?}]")]
     SchemaBuilderValidationFail(Vec<Error>),
 
     #[error("SchemaResolution")]
@@ -226,6 +229,9 @@ pub enum Error {
 
     #[error("Cannot convert i32 to usize: {1}")]
     ConvertI32ToUsize(#[source] std::num::TryFromIntError, i32),
+
+    #[error("Cannot convert usize to u64: {1}")]
+    ConvertUsizeToU64(#[source] std::num::TryFromIntError, usize),
 
     #[error("Invalid JSON value for decimal precision/scale integer: {0}")]
     GetPrecisionOrScaleFromJson(serde_json::Number),

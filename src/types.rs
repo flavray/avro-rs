@@ -3,15 +3,13 @@
 use crate::{
     decimal::Decimal,
     duration::Duration,
-    schema::{
-        Aggregate, Precision, RecordSchema, Scale, Schema, SchemaKind, SchemaType, UnionSchema,
-    },
+    schema::{Aggregate, RecordSchema, Schema, SchemaKind, SchemaType, UnionSchema},
     AvroResult, Error,
 };
 use serde_json::{Number, Value as JsonValue};
 use std::{
     collections::HashMap,
-    convert::{From, TryFrom},
+    convert::{From, TryFrom, TryInto},
     hash::BuildHasher,
     str::FromStr,
     u8,
@@ -19,9 +17,9 @@ use std::{
 use uuid::Uuid;
 
 /// Compute the maximum decimal value precision of a byte array of length `len` could hold.
-fn max_prec_for_len(len: usize) -> Result<usize, Error> {
-    let len = i32::try_from(len).map_err(|e| Error::ConvertLengthToI32(e, len))?;
-    Ok((2.0_f64.powi(8 * len - 1) - 1.0 as f64).log10().floor() as usize)
+fn max_prec_for_len(len: u64) -> Result<u64, Error> {
+    let len = i32::try_from(len).map_err(|e| Error::ConvertLengthToI32(e, len as usize))?;
+    Ok((2.0_f64.powi(8 * len - 1) - 1.0 as f64).log10().floor() as u64)
 }
 
 /// A valid Avro value.
@@ -330,20 +328,18 @@ impl Value {
             (&Value::TimeMicros(_), SchemaType::TimeMicros) => true,
             (&Value::TimeMillis(_), SchemaType::TimeMillis) => true,
             (&Value::Date(_), SchemaType::Date) => true,
-            //(&Value::Decimal(_), SchemaType::Decimal(_)) => true,
             (&Value::Duration(_), SchemaType::Duration) => true,
             (&Value::Uuid(_), SchemaType::Uuid) => true,
             (&Value::Float(_), SchemaType::Float) => true,
             (&Value::Double(_), SchemaType::Double) => true,
             (&Value::Bytes(_), SchemaType::Bytes) => true,
-            //(&Value::Bytes(_), SchemaType::Decimal(_)) => true,
+            (&Value::Bytes(_), SchemaType::Decimal(dec)) => true,
             (&Value::String(_), SchemaType::String) => true,
             (&Value::String(_), SchemaType::Uuid) => true,
             //TODO: do we need to use name here for the fixed?
             (&Value::Fixed(n, _), SchemaType::Fixed(fixed)) => n == fixed.size(),
             (&Value::Fixed(n, _), SchemaType::Duration) => n == 12,
-            // TODO: check precision against n
-            //(&Value::Fixed(_n, _), SchemaType::Decimal(_)) => true,
+            (&Value::Fixed(_, _), SchemaType::Decimal(_)) => true,
             (&Value::String(ref s), SchemaType::Enum(enum_)) => {
                 enum_.symbols().contains(&s.as_ref())
             }
@@ -370,6 +366,8 @@ impl Value {
                         },
                     )
             }
+            // TODO: check precision against n
+            (&Value::Decimal(_), SchemaType::Decimal(_)) => true,
             _ => false,
         }
     }
@@ -408,7 +406,7 @@ impl Value {
             SchemaType::Map(map) => self.resolve_map(&map),
             SchemaType::Record(record) => self.resolve_record(&record),
             SchemaType::Decimal(decimal) => {
-                self.resolve_decimal(decimal.precision(), decimal.scale(), &SchemaType::Bytes)
+                self.resolve_decimal(decimal.precision(), decimal.scale(), decimal.size())
             }
             SchemaType::Date => self.resolve_date(),
             SchemaType::TimeMillis => self.resolve_time_millis(),
@@ -446,53 +444,46 @@ impl Value {
         })
     }
 
-    fn resolve_decimal(
-        self,
-        precision: Precision,
-        scale: Scale,
-        inner: &SchemaType,
-    ) -> Result<Self, Error> {
+    fn resolve_decimal(self, precision: u64, scale: u64, size: Option<u64>) -> Result<Self, Error> {
         if scale > precision {
             return Err(Error::GetScaleAndPrecision { scale, precision });
         }
-        match inner {
-            SchemaType::Fixed(fixed) => {
-                if max_prec_for_len(fixed.size())? < precision {
-                    return Err(Error::GetScaleWithFixedSize {
-                        size: fixed.size(),
-                        precision,
-                    });
-                }
-            }
-            SchemaType::Bytes => (),
-            _ => return Err(Error::ResolveDecimalSchema(SchemaKind::from(inner))),
+
+        let num = match self {
+            Value::Decimal(num) => num,
+            Value::Fixed(_, bytes) | Value::Bytes(bytes) => Decimal::from(bytes),
+            other => return Err(Error::ResolveDecimal(other.into())),
         };
-        match self {
-            Value::Decimal(num) => {
-                let num_bytes = num.len();
-                if max_prec_for_len(num_bytes)? > precision {
-                    Err(Error::ComparePrecisionAndSize {
-                        precision,
-                        num_bytes,
-                    })
-                } else {
-                    Ok(Value::Decimal(num))
-                }
-                // check num.bits() here
+
+        // As per spec
+        // > If the underlying type is a fixed, then the precision is limited by its size.
+        // > An array of length n can store at most floor(log_10(28 × n - 1 - 1)) base-10 digits of
+        // > precision.
+        if let Some(size) = size {
+            if max_prec_for_len(size)? < precision {
+                return Err(Error::GetScaleWithFixedSize { size, precision });
             }
-            Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
-                if max_prec_for_len(bytes.len())? > precision {
-                    Err(Error::ComparePrecisionAndSize {
-                        precision,
-                        num_bytes: bytes.len(),
-                    })
-                } else {
-                    // precision and scale match, can we assume the underlying type can hold the data?
-                    Ok(Value::Decimal(Decimal::from(bytes)))
-                }
+        } else {
+            let num_bytes = num
+                .len()
+                .try_into()
+                .map_err(|e| Error::ConvertUsizeToU64(e, num.len()))?;
+
+            let max_precision_for_num_bytes = max_prec_for_len(num_bytes)?;
+            dbg!(max_precision_for_num_bytes);
+
+            if max_precision_for_num_bytes > precision {
+                return Err(Error::ComparePrecisionAndSize {
+                    precision,
+                    num_bytes,
+                    max_precision_for_num_bytes,
+                })
             }
-            other => Err(Error::ResolveDecimal(other.into())),
         }
+
+        // precision and scale match, can we assume the underlying type can hold the data?
+        // check num.bits() here
+        Ok(Value::Decimal(num))
     }
 
     fn resolve_date(self) -> Result<Self, Error> {
@@ -659,7 +650,7 @@ impl Value {
         };
         // Find the first match in the reader schema.
         let (_, inner) = schema
-            .resolve_union_schema(&v)
+            .resolve_union_schema(&v)
             .ok_or_else(|| Error::FindUnionVariant)?;
         Ok(Value::Union(Box::new(v.resolve(inner)?)))
     }
@@ -973,24 +964,31 @@ mod tests {
     fn resolve_decimal_bytes() {
         let value = Value::Decimal(Decimal::from(vec![1, 2]));
         let mut builder = Schema::builder();
-        let root = builder.decimal("test").decimal(2, 3, &mut builder).unwrap();
+        let mut decimal = builder.named_decimal("test");
+        decimal.scale(2);
+        let root = decimal.precision(4, &mut builder).unwrap();
         let expected = builder.build(root).unwrap();
         value.clone().resolve(expected.root()).unwrap();
         assert!(value.resolve(SchemaType::String).is_err());
     }
 
     #[test]
-    //TODO: What scale value would be considered invalid?
     fn resolve_decimal_invalid_scale() {
         let mut builder = Schema::builder();
-        assert!(builder.decimal("test").decimal(3, 2, &mut builder).is_err())
+        let mut decimal = builder.named_decimal("test");
+        decimal.scale(3);
+        let root = decimal.precision(2, &mut builder);
+        assert!(root.is_err())
     }
 
     #[test]
     fn resolve_decimal_invalid_precision_for_length() {
         let value = Value::Decimal(Decimal::from((1u8..=8u8).rev().collect::<Vec<_>>()));
         let mut builder = Schema::builder();
-        let root = builder.decimal("test").decimal(1, 0, &mut builder).unwrap();
+        let root = builder
+            .named_decimal("test")
+            .precision(1, &mut builder)
+            .unwrap();
         let expected = builder.build(root).unwrap();
         assert!(value.resolve(expected.root()).is_err());
     }
@@ -999,10 +997,10 @@ mod tests {
     fn resolve_decimal_fixed() {
         let value = Value::Decimal(Decimal::from(vec![1, 2]));
         let mut builder = Schema::builder();
-        let root = builder
-            .decimal("test")
-            .decimal(10, 1, &mut builder)
-            .unwrap();
+        let mut decimal = builder.decimal();
+        decimal.size(10);
+        decimal.scale(1);
+        let root = decimal.precision(2, &mut builder).unwrap();
         let expected = builder.build(root).unwrap();
         assert!(value.clone().resolve(expected.root()).is_ok());
         assert!(value.resolve(SchemaType::String).is_err());

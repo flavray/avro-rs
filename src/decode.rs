@@ -1,7 +1,7 @@
 use crate::{
     decimal::Decimal,
     duration::Duration,
-    schema::{Schema, SchemaType},
+    schema::{FixedSchema, Schema, SchemaType},
     types::Value,
     util::{safe_len, zag_i32, zag_i64},
     AvroResult, Error,
@@ -69,25 +69,38 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
         }
         SchemaType::Decimal(d) => {
             let mut builder = Schema::builder();
-            let root = builder
-                .decimal("name")
-                .decimal(d.precision(), d.scale(), &mut builder)
-                .unwrap();
-            let expected = builder.build(root).unwrap();
-
-            match expected.root() {
-                SchemaType::Fixed { .. } => match decode(expected.root(), reader)? {
-                    Value::Fixed(_, bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-                    value => Err(Error::FixedValue(value.into())),
-                },
-                SchemaType::Bytes => match decode(expected.root(), reader)? {
-                    Value::Bytes(bytes) => Ok(Value::Decimal(Decimal::from(bytes))),
-                    value => Err(Error::BytesValue(value.into())),
-                },
-                _schema => Err(Error::ResolveDecimalSchema(
-                    crate::schema::SchemaKind::Decimal,
-                )),
+            let mut decimal_builder = builder.decimal();
+            if let Some(size) = d.size() {
+                decimal_builder.size(size);
             }
+
+            decimal_builder.scale(d.scale());
+            let root = decimal_builder.precision(d.precision(), &mut builder)?;
+
+            let expected = builder.build(root)?;
+
+            let raw = match expected.root() {
+                SchemaType::Decimal(dec) => match dec.size() {
+                    None => {
+                        let len = decode_len(reader)?;
+                        let mut buf = vec![0u8; len];
+                        reader.read_exact(&mut buf).map_err(Error::ReadBytes)?;
+                        buf
+                    }
+                    Some(size) => {
+                        let mut buf = vec![0u8; size as usize];
+                        reader.read_exact(&mut buf).map_err(Error::ReadBytes)?;
+                        buf
+                    }
+                },
+                _schema => {
+                    return Err(Error::ResolveDecimalSchema(
+                        crate::schema::SchemaKind::Decimal,
+                    ))
+                }
+            };
+
+            Ok(Value::Decimal(Decimal::from(raw)))
         }
         SchemaType::Uuid => Ok(Value::Uuid(
             Uuid::from_str(match decode(SchemaType::String, reader)? {
@@ -126,7 +139,6 @@ pub fn decode<R: Read>(schema: SchemaType, reader: &mut R) -> AvroResult<Value> 
                 String::from_utf8(buf).map_err(Error::ConvertToUtf8)?,
             ))
         }
-        //TODO: what about name?
         SchemaType::Fixed(fixed) => {
             let mut buf = vec![0u8; fixed.size() as usize];
             reader.read_exact(&mut buf).map_err(Error::ReadBytes)?;

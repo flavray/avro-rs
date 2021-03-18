@@ -275,7 +275,7 @@ pub enum SchemaType<'schema> {
     // Fixed { name: Name<'schema>, size: usize },
     Fixed(FixedSchema<'schema>),
     /// Logical type which represents `Decimal` values. The underlying type is serialized and
-    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
+    /// deserialized as `Schema::Bytes`.
     ///
     /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
     /// integer greater than 0.
@@ -314,30 +314,6 @@ impl fmt::Display for SchemaType<'_> {
         let repr = serde_json::to_string_pretty(&cell).map_err(|_e| std::fmt::Error)?;
         f.write_str(&repr)
     }
-}
-
-type DecimalMetadata = usize;
-pub(crate) type Precision = DecimalMetadata;
-pub(crate) type Scale = DecimalMetadata;
-
-// TODO: Remove this function?
-#[allow(dead_code)]
-fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalMetadata, Error> {
-    Ok(if value.is_u64() {
-        let num = value
-            .as_u64()
-            .ok_or_else(|| Error::GetU64FromJson(value.clone()))?;
-        num.try_into()
-            .map_err(|e| Error::ConvertU64ToUsize(e, num))?
-    } else if value.is_i64() {
-        let num = value
-            .as_i64()
-            .ok_or_else(|| Error::GetI64FromJson(value.clone()))?;
-        num.try_into()
-            .map_err(|e| Error::ConvertI64ToUsize(e, num))?
-    } else {
-        return Err(Error::GetPrecisionOrScaleFromJson(value.clone()));
-    })
 }
 
 // replaced with derive
@@ -385,6 +361,14 @@ impl fmt::Debug for SchemaType<'_> {
                 .finish(),
             SchemaType::Decimal(decimal) => f
                 .debug_struct("Decimal")
+                .field(
+                    "type",
+                    if decimal.size().is_some() {
+                        &"fixed"
+                    } else {
+                        &"bytes"
+                    },
+                )
                 .field("name", &decimal.name())
                 .field("precision", &decimal.precision())
                 .field("scale", &decimal.scale())
@@ -450,12 +434,20 @@ impl<'s> DecimalSchema<'s> {
         self.0.root()
     }
 
-    pub fn precision(&self) -> usize {
-        match_lookup!(self, SchemaData::Decimal(p, _s) => *p)
+    pub fn is_fixed(&self) -> bool {
+        self.size().is_some()
     }
 
-    pub fn scale(&self) -> usize {
-        match_lookup!(self, SchemaData::Decimal(_p, s) => *s)
+    pub fn size(&self) -> Option<u64> {
+        match_lookup!(self, SchemaData::Decimal{ size, .. } => *size)
+    }
+
+    pub fn precision(&self) -> u64 {
+        match_lookup!(self, SchemaData::Decimal{ precision, .. } => *precision)
+    }
+
+    pub fn scale(&self) -> u64 {
+        match_lookup!(self, SchemaData::Decimal{ scale, .. } => *scale).unwrap_or(0)
     }
 }
 

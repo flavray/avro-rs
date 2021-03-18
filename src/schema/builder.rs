@@ -70,6 +70,36 @@ macro_rules! impl_namebuilder {
     };
 }
 
+/// Similar macro for things that can sometimes have no name
+macro_rules! impl_opt_named_builder {
+    ($name: ident) => {
+        impl<'s> NamedBuilder<'s> for $name<'s> {
+            fn name(name: &'s str) -> Self {
+                Self {
+                    name: Some(Naming::new(name)),
+                    ..Default::default()
+                }
+            }
+
+            fn namespace(&mut self, namespace: Option<&'s str>) -> &mut Self {
+                if let Some(ref mut name) = self.name {
+                    name.namespace = namespace;
+                }
+
+                self
+            }
+
+            fn alias(&mut self, alias: &'s str) -> &mut Self {
+                if let Some(ref mut name) = self.name {
+                    name.aliases.push(alias);
+                }
+
+                self
+            }
+        }
+    };
+}
+
 impl<'s> RecordBuilder<'s> {
     fn named(name: Naming<'s>) -> Self {
         RecordBuilder {
@@ -160,27 +190,54 @@ impl<'s> FixedBuilder<'s> {
 }
 
 /// Builder that creates a decimal buffer in a schema
+#[derive(Default)]
 pub struct DecimalBuilder<'s> {
-    name: Naming<'s>,
+    name: Option<Naming<'s>>,
+    size: Option<u64>,
+    scale: Option<u64>,
 }
-
-impl_namebuilder!(DecimalBuilder, DecimalBuilder::named);
 
 impl<'s> DecimalBuilder<'s> {
-    fn named(name: Naming<'s>) -> Self {
-        DecimalBuilder { name }
+    pub fn new() -> Self {
+        DecimalBuilder {
+            name: None,
+            ..Default::default()
+        }
     }
 
-    pub fn decimal(
-        self,
-        precision: usize,
-        scale: usize,
-        builder: &mut SchemaBuilder,
-    ) -> AvroResult<NameRef> {
-        let name_ref = self.name.into_ref(builder)?;
-        builder.add_type(name_ref, SchemaData::Decimal(precision, scale))
+    pub fn scale(&mut self, scale: u64) {
+        self.scale.replace(scale);
+    }
+
+    pub fn size(&mut self, size: u64) {
+        self.size.replace(size);
+    }
+
+    pub fn precision(self, precision: u64, builder: &mut SchemaBuilder) -> AvroResult<NameRef> {
+        if self.scale.unwrap_or(0) > precision {
+            return Err(Error::GetScaleAndPrecision {
+                scale: self.scale.unwrap_or(0),
+                precision,
+            });
+        }
+
+        let schema_datum = SchemaData::Decimal {
+            precision,
+            scale: self.scale,
+            size: self.size,
+        };
+
+        match self.name {
+            Some(name) => {
+                let name_ref = name.into_ref(builder)?;
+                builder.add_type(name_ref, schema_datum)
+            }
+            None => builder.add_anon_type(schema_datum),
+        }
     }
 }
+
+impl_opt_named_builder!(DecimalBuilder);
 
 pub struct EnumBuilder<'s> {
     name: Naming<'s>,
@@ -212,6 +269,7 @@ impl<'s> EnumBuilder<'s> {
 
 macro_rules! impl_aggregated_builder {
     ($name: ident, $setter: ident, $data: expr) => {
+        #[derive(Default)]
         pub struct $name<'s> {
             name: Option<Naming<'s>>,
         }
@@ -236,29 +294,7 @@ macro_rules! impl_aggregated_builder {
             }
         }
 
-        impl<'s> NamedBuilder<'s> for $name<'s> {
-            fn name(name: &'s str) -> Self {
-                Self {
-                    name: Some(Naming::new(name)),
-                }
-            }
-
-            fn namespace(&mut self, namespace: Option<&'s str>) -> &mut Self {
-                if let Some(ref mut name) = self.name {
-                    name.namespace = namespace;
-                }
-
-                self
-            }
-
-            fn alias(&mut self, alias: &'s str) -> &mut Self {
-                if let Some(ref mut name) = self.name {
-                    name.aliases.push(alias);
-                }
-
-                self
-            }
-        }
+        impl_opt_named_builder!($name);
     };
 }
 
@@ -289,6 +325,14 @@ macro_rules! primitive_type_lookup {
     };
 }
 
+macro_rules! logical_type_lookup {
+    ($name: ident) => {
+        pub fn $name(&self) -> NameRef {
+            *self.logical_types.get(stringify!($name)).unwrap()
+        }
+    };
+}
+
 impl SchemaBuilder {
     pub fn new() -> SchemaBuilder {
         let mut builder = SchemaBuilder::default();
@@ -303,16 +347,16 @@ impl SchemaBuilder {
         Self::add_primitive_type(&mut builder, "string", SchemaData::String);
         Self::add_logical_type(&mut builder, "uuid", SchemaData::Uuid);
         Self::add_logical_type(&mut builder, "date", SchemaData::Date);
-        Self::add_logical_type(&mut builder, "time-millis", SchemaData::TimeMillis);
-        Self::add_logical_type(&mut builder, "time-micros", SchemaData::TimeMicros);
+        Self::add_logical_type(&mut builder, "time_millis", SchemaData::TimeMillis);
+        Self::add_logical_type(&mut builder, "time_micros", SchemaData::TimeMicros);
         Self::add_logical_type(
             &mut builder,
-            "timestamp-millis",
+            "timestamp_millis",
             SchemaData::TimestampMillis,
         );
         Self::add_logical_type(
             &mut builder,
-            "timestamp-micros",
+            "timestamp_micros",
             SchemaData::TimestampMicros,
         );
         Self::add_logical_type(&mut builder, "duration", SchemaData::Duration);
@@ -354,10 +398,6 @@ impl SchemaBuilder {
             .unwrap_or_else(|| self.name_ref(name, namespace))
     }
 
-    pub fn logical_type(&self, name: &str) -> Option<NameRef> {
-        self.logical_types.get(name).map(|name_ref| *name_ref)
-    }
-
     pub fn record<'s>(&self, name: &'s str) -> RecordBuilder<'s> {
         RecordBuilder::name(name)
     }
@@ -366,7 +406,19 @@ impl SchemaBuilder {
         FixedBuilder::name(name)
     }
 
-    pub fn decimal<'s>(&self, name: &'s str) -> DecimalBuilder<'s> {
+    logical_type_lookup!(uuid);
+    logical_type_lookup!(date);
+    logical_type_lookup!(time_millis);
+    logical_type_lookup!(time_micros);
+    logical_type_lookup!(timestamp_millis);
+    logical_type_lookup!(timestamp_micros);
+    logical_type_lookup!(duration);
+
+    pub fn decimal<'s>(&self) -> DecimalBuilder<'s> {
+        DecimalBuilder::new()
+    }
+
+    pub fn named_decimal<'s>(&self, name: &'s str) -> DecimalBuilder<'s> {
         DecimalBuilder::name(name)
     }
 

@@ -1,7 +1,7 @@
 use super::*;
 use crate::schema::builder::{
-    ArrayBuilder, EnumBuilder, FixedBuilder, MapBuilder, NamedBuilder, RecordBuilder,
-    SchemaBuilder, UnionBuilder,
+    ArrayBuilder, DecimalBuilder, EnumBuilder, FixedBuilder, MapBuilder, NamedBuilder,
+    RecordBuilder, SchemaBuilder, UnionBuilder,
 };
 use crate::{error::Error, AvroResult};
 
@@ -92,34 +92,36 @@ impl<'s> SchemaParser<'s> {
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
     fn parse_complex(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
-        complex
-            .get("logicalType")
-            .and_then(|logical_type| match logical_type {
-                &Value::String(ref logical_type) => {
-                    self.builder.logical_type(&logical_type).map(|lt| Ok(lt))
-                }
-                _ => None,
-            })
-            .unwrap_or(match complex.get("type") {
-                Some(&Value::String(ref t)) => match t.as_str() {
-                    "record" => self.parse_record(complex),
-                    "enum" => self.parse_enum(complex),
-                    "array" => self.parse_array(complex),
-                    "map" => self.parse_map(complex),
-                    "fixed" => self.parse_fixed(complex),
-                    other => self.parse_typeref(other),
-                },
-                Some(&Value::Object(ref data)) => match data.get("type") {
-                    Some(ref value) => self.parse_schema(value),
-                    None => Err(Error::GetComplexTypeField),
-                },
-                _ => {
-                    Err(
-                        //ParseSchemaError::new("No `type` in complex type").into()),
-                        Error::GetComplexTypeField,
-                    )
-                }
-            })
+        if let Some(logical_type) = complex.get("logicalType").and_then(|v| v.as_str()) {
+            match logical_type {
+                "uuid" => return Ok(self.builder.uuid()),
+                "date" => return Ok(self.builder.date()),
+                "time-millis" => return Ok(self.builder.time_millis()),
+                "time-micros" => return Ok(self.builder.time_micros()),
+                //"timestamp" => return Ok(self.builder.timestamp()),
+                "timestamp-millis" => return Ok(self.builder.timestamp_millis()),
+                "timestamp-micros" => return Ok(self.builder.timestamp_micros()),
+                "decimal" => return self.parse_decimal(complex),
+                // As per spec, let it pass as a type since we dont understand the given logical
+                _ => (),
+            };
+        }
+
+        match complex.get("type") {
+            Some(&Value::String(ref t)) => match t.as_str() {
+                "record" => self.parse_record(complex),
+                "enum" => self.parse_enum(complex),
+                "array" => self.parse_array(complex),
+                "map" => self.parse_map(complex),
+                "fixed" => self.parse_fixed(complex),
+                other => self.parse_typeref(other),
+            },
+            Some(&Value::Object(ref data)) => match data.get("type") {
+                Some(ref value) => self.parse_schema(value),
+                None => Err(Error::GetComplexTypeField),
+            },
+            _ => Err(Error::GetComplexTypeField),
+        }
     }
 
     /// Parse a `serde_json::Value` representing a Avro record type into a `Schema`.
@@ -224,5 +226,39 @@ impl<'s> SchemaParser<'s> {
             .ok_or_else(|| Error::GetFixedSizeField)?;
 
         fixed_builder.size(size, &mut self.builder)
+    }
+
+    /// Parse a `serde_json::Value` representing a Avro logical decimal type into a `Schema`.
+    fn parse_decimal(&mut self, complex: &'s JsonMap) -> AvroResult<NameRef> {
+        let mut builder = self
+            .parse_name::<DecimalBuilder>(complex)
+            .unwrap_or_else(|_| DecimalBuilder::new());
+
+        // Match to the kind to reduce matching noise
+        let is_fixed = match complex.get("type").and_then(|x| x.as_str()) {
+            Some("bytes") => false,
+            Some("fixed") => true,
+            Some(x) => return Err(Error::ParseDecimalSchema(x.to_string())),
+            None => return Err(Error::ParseDecimalSchema("".to_string())),
+        };
+
+        if is_fixed {
+            let size = complex
+                .get("size")
+                .and_then(|v| v.as_u64())
+                .ok_or(Error::GetDecimalMetadataFromJson("Missing `size` for `fixed` double"))?;
+            builder.size(size);
+        }
+
+        if let Some(scale) = complex.get("scale").and_then(|v| v.as_u64()) {
+            builder.scale(scale);
+        }
+
+        let precision = complex
+            .get("precision")
+            .and_then(|v| v.as_u64())
+            .ok_or(Error::GetDecimalMetadataFromJson("Missing `precision` for double"))?;
+
+        builder.precision(precision, &mut self.builder)
     }
 }

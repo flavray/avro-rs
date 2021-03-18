@@ -22,7 +22,11 @@ pub(super) enum SchemaData {
     Record(Documentation, Vec<RecordFieldData>),
     Enum(Documentation, Vec<String>),
     Fixed(usize),
-    Decimal(usize, usize),
+    Decimal {
+        precision: u64,
+        scale: Option<u64>,
+        size: Option<u64>
+    },
     Uuid,
     Date,
     TimeMillis,
@@ -52,10 +56,11 @@ impl fmt::Debug for SchemaData {
                 f.debug_set().entries(syms).finish()
             }
             SchemaData::Fixed(size) => f.debug_tuple("fixed").field(size).finish(),
-            SchemaData::Decimal(precision, scale) => f
+            SchemaData::Decimal { precision, scale, size } => f
                 .debug_tuple("decimal")
                 .field(precision)
-                .field(scale)
+                .field(&scale.unwrap_or(0))
+                .field(&size)
                 .finish(),
             SchemaData::Uuid => f.write_str("uuid"),
             SchemaData::Date => f.write_str("date"),
@@ -85,7 +90,7 @@ impl SchemaData {
             SchemaData::Record(_, _) => SchemaType::Record(RecordSchema(schema, name)),
             SchemaData::Enum(_, _) => SchemaType::Enum(EnumSchema(schema, name)),
             SchemaData::Fixed(_) => SchemaType::Fixed(FixedSchema(schema, name)),
-            SchemaData::Decimal(_, _) => SchemaType::Decimal(DecimalSchema(schema, name)),
+            SchemaData::Decimal{..} => SchemaType::Decimal(DecimalSchema(schema, name)),
             SchemaData::Uuid => SchemaType::Uuid,
             SchemaData::Date => SchemaType::Date,
             SchemaData::TimeMillis => SchemaType::TimeMillis,
