@@ -82,6 +82,9 @@ pub fn encode_ref(value: &Value, schema: &Schema, buffer: &mut Vec<u8>) {
                     encode_int(index as i32, buffer);
                 }
             }
+            Schema::Uuid => {
+                encode_bytes(s, buffer);
+            }
             _ => (),
         },
         Value::Fixed(_, bytes) => buffer.extend(bytes),
