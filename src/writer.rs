@@ -1,4 +1,6 @@
-//! Logic handling writing in Avro format at user level.
+/*!
+Logic handling writing in Avro format at user level.
+*/
 use crate::{
     encode::{encode, encode_ref, encode_to_vec},
     schema::{Schema, SchemaType},
@@ -294,9 +296,10 @@ impl<'a, W: Write> Writer<'a, W> {
 /// Encode a compatible value (implementing the `ToAvro` trait) into Avro format, also performing
 /// schema validation.
 ///
-/// This is an internal function which gets the bytes buffer where to write as parameter instead of
-/// creating a new one like `to_avro_datum`.
-fn write_avro_datum<T: Into<Value>>(
+/// **NOTE** This function has a quite small niche of usage and does NOT generate headers and sync
+/// markers; use [`Writer`](struct.Writer.html) to be fully Avro-compatible if you don't know what
+/// you are doing, instead.
+pub fn write_avro_datum<T: Into<Value>>(
     schema: &Schema,
     value: T,
     buffer: &mut Vec<u8>,

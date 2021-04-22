@@ -21,9 +21,9 @@ use serde_json::{self, Map, Value};
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::{HashMap, HashSet},
-    convert::TryInto,
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
+    iter::FromIterator,
     rc::Rc,
 };
 use string_interner::{DefaultStringInterner, Sym as RawNameSym};
@@ -136,6 +136,80 @@ impl Schema {
             .clone()
     }
 
+    /// Return named schema nodes topologically sorted
+    pub fn iter_topologically(&self) -> SchemaTopologicalIter<'_> {
+        // special case where the root is not composite (we just pretend to do the right thing)
+        if !self.root().is_composite() {
+            return SchemaTopologicalIter::new(&self, VecDeque::from_iter(vec![self.root]));
+        }
+
+        let named_types = self.types.keys().cloned().filter_map(|id| {
+            let val = self.lookup(id).bind(self, id);
+            val.name_ref().map(|_| (id, val))
+        });
+
+        let mut incoming_edges: HashMap<NameRef, usize> = HashMap::new();
+        let mut outgoing_edges: HashMap<NameRef, Vec<NameRef>> = HashMap::new();
+
+        // Extract edge lists (incoming, outgoing) for the latent type graph
+        for (id, named_type) in named_types {
+            incoming_edges.entry(id).or_insert(0);
+            match named_type {
+                SchemaType::Record(rec) => rec
+                    .iter_fields()
+                    .filter_map(|f| f.schema().name_ref())
+                    .for_each(|edge| {
+                        outgoing_edges.entry(id).or_default().push(edge);
+                        (*incoming_edges.entry(edge).or_default()) += 1;
+                    }),
+                SchemaType::Union(union) => union
+                    .iter_variants()
+                    .filter_map(|v| v.name_ref())
+                    .for_each(|edge| {
+                        outgoing_edges.entry(id).or_default().push(edge);
+                        (*incoming_edges.entry(edge).or_default()) += 1;
+                    }),
+                SchemaType::Array(x) | SchemaType::Map(x) => {
+                    if let Some(name) = x.items().name_ref() {
+                        outgoing_edges.entry(id).or_default().push(name);
+                        (*incoming_edges.entry(name).or_default()) += 1;
+                    }
+                }
+                e => assert!(!e.is_composite()),
+            }
+        }
+
+        let mut queue = incoming_edges
+            .iter()
+            .filter_map(|(id, degree)| (*degree == 0).then(|| *id))
+            .collect::<VecDeque<_>>();
+
+        let mut sorted = VecDeque::with_capacity(incoming_edges.len());
+        let mut iteration = 0usize;
+
+        while let Some(vertex) = queue.pop_front() {
+            if !self.is_anonymous(vertex) {
+                sorted.push_back(vertex);
+            }
+            iteration += 1;
+
+            if let Some(outgoing_edges) = outgoing_edges.get(&vertex) {
+                for out_edge in outgoing_edges {
+                    if let Some(degree) = incoming_edges.get_mut(&out_edge) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push_back(*out_edge);
+                        }
+                    }
+                }
+            }
+        }
+
+        // TODO - Check iteration and fail if cycle? or fixup?
+
+        SchemaTopologicalIter::new(&self, sorted)
+    }
+
     #[inline]
     fn lookup(&self, name: NameRef) -> &SchemaData {
         let name = self.resolve_nameref(name);
@@ -205,10 +279,19 @@ impl fmt::Debug for Schema {
 }
 
 /// A token referencing a type in an avro schema, this type is opaque
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct NameRef {
     name: RawNameSym,
     namespace: Option<RawNameSym>,
+}
+
+impl fmt::Debug for NameRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.namespace {
+            Some(ns) => f.write_fmt(format_args!("{:?}::{:?}", ns, self.name)),
+            None => f.write_fmt(format_args!("{:?}", self.name)),
+        }
+    }
 }
 
 /// Represents an Avro schema fingerprint
@@ -297,6 +380,44 @@ pub enum SchemaType<'schema> {
     TimestampMicros,
     // An amount of time defined by a number of months, days and milliseconds.
     Duration,
+}
+
+impl<'schema> SchemaType<'schema> {
+    /// If the schema element has a name return it
+    pub fn name(&self) -> Option<Name> {
+        match self {
+            Self::Array(x) | Self::Map(x) => x.name(),
+            Self::Record(x) => Some(x.name()),
+            Self::Enum(x) => Some(x.name()),
+            Self::Fixed(x) => Some(x.name()),
+            Self::Decimal(x) => Some(x.name()),
+            _ => None,
+        }
+    }
+}
+
+/// Internal implementations of schema behaviours, not for public usage!
+impl<'schema> SchemaType<'schema> {
+    /// Get the nameref of this schema
+    fn name_ref(&self) -> Option<NameRef> {
+        match self {
+            Self::Array(x) | Self::Map(x) => Some(x.1),
+            Self::Union(x) => Some(x.1),
+            Self::Record(x) => Some(x.1),
+            Self::Enum(x) => Some(x.1),
+            Self::Fixed(x) => Some(x.1),
+            Self::Decimal(x) => Some(x.1),
+            _ => None,
+        }
+    }
+
+    /// True if the given type can contain other arbitrary types
+    fn is_composite(&self) -> bool {
+        match self {
+            Self::Array(_) | Self::Map(_) | Self::Union(_) | Self::Record(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<'schema> PartialEq<SchemaType<'_>> for SchemaType<'schema> {
@@ -495,7 +616,10 @@ impl<'s> RecordSchema<'s> {
     }
 
     /// The fields of this record as an iterator
-    pub fn iter_fields(&'s self) -> impl Iterator<Item = RecordField<'s>> + 's {
+    //pub fn iter_fields(&'s self) -> impl Iterator<Item = RecordField<'s>> + 's {
+    pub fn iter_fields(
+        &'s self,
+    ) -> impl std::iter::DoubleEndedIterator<Item = RecordField<'s>> + 's {
         match_lookup!(self, SchemaData::Record(_, flds) => {
             let schema = &*self.0;
             flds.iter().map(move |x| RecordField(schema, x))
@@ -522,7 +646,7 @@ impl<'s> RecordSchema<'s> {
 
 /// Represents `array` and `map` types in Avro schemas.
 ///
-/// More information about `vixed` can be found in the
+/// More information about `fixed` can be found in the
 /// [Avro specification (arrays)](https://avro.apache.org/docs/current/spec.html#schema_arrays)
 /// [Avro specification (maps)](https://avro.apache.org/docs/current/spec.html#schema_maps)
 #[derive(Copy, Clone, Debug)]
@@ -549,24 +673,81 @@ impl<'s> Aggregate<'s> {
 pub struct UnionSchema<'s>(&'s Schema, NameRef);
 
 impl<'s> UnionSchema<'s> {
-    /// Returns a slice to all variants of this schema.
-    pub fn iter_variants(&self) -> impl Iterator<Item = SchemaType<'_>> {
+    /// Returns an iterator to all variants of this schema.
+    //pub fn iter_variants(&self) -> impl Iterator<Item = SchemaType<'_>> {
+    pub fn iter_variants(&self) -> impl std::iter::DoubleEndedIterator<Item = SchemaType<'_>> {
         match_lookup!(self, SchemaData::Union(variants) => {
             let schema = &*self.0;
             variants.iter().map(move |name| schema.lookup(*name).bind(schema, *name))
         })
     }
 
+    /// Returns the number of variants in this schema
+    pub fn num_variants(&self) -> usize {
+        match_lookup!(self, SchemaData::Union(variants) => variants.len())
+    }
+
+    /// Returns if the union is nullable of a single type
+    pub fn is_optional_of_single_type(&self) -> Option<SchemaType> {
+        if self.num_variants() == 2 && self.is_nullable() {
+            self.iter_variants()
+                .filter(|x| *x != SchemaType::Null)
+                .next()
+        } else {
+            None
+        }
+    }
+
+    /// Returns all variants of this schema
     pub fn variants(&self) -> Vec<SchemaType> {
         self.iter_variants().collect()
     }
 
-    /// Returns true if the first variant of this `UnionSchema` is `Null`.
+    /// Returns true if any variant of this `UnionSchema` is `Null`.
+    ///
+    /// *NOTE* Care need to be taken in avro schemas regarding `Null` and defaults.
+    ///
+    /// *TL;DR* - You should prefer `["null", "…"]` if you want the avro equivilent of `Option<…>`.
+    ///
+    /// As per the spec the rule is the first value will be the default:
+    /// > when a default value is specified for a record field whose type is a union, the type of
+    /// > the default value must match the first element of the union. Thus, for unions containing
+    /// > "null", the "null" is usually listed first, since the default value of such unions is
+    /// > typically null.
+    ///
+    /// For example the following both define nullable fields in certain contexts:
+    ///
+    /// The following defines a nullable field as a union type that _defaults_ to `null` in other
+    /// implementations and parsers.
+    ///
+    /// ```json
+    /// ["null", "String"]
+    /// ```
+    ///
+    /// The following defines a nullable field as a union that will break some implementations and
+    /// parsers.
+    ///
+    /// ```json
+    /// ["string", "null"]
+    /// ```
+    ///
+    /// … with the second form, there is a vaugness in the spec that leads to bugs such as:
+    /// * https://issues.apache.org/jira/browse/AVRO-1376
+    /// * https://issues.apache.org/jira/browse/AVRO-1803
+    ///
+    /// There is somewhat varying support between parsers as to how this is handled. For the second
+    /// case it is wise to either avoid its construction or use a default value if possible, e.g.
+    /// for using a union inside a record one would do
+    ///
+    /// ```json
+    /// {
+    ///   "type": "record", fields: [
+    ///     {"name": "test", "type": ["string", "null"], "default": "I want this as the default!"}
+    ///   ]
+    /// }
+    /// ```
     pub fn is_nullable(&self) -> bool {
-        self.iter_variants()
-            .next()
-            .map(|x| x == SchemaType::Null)
-            .unwrap_or(true)
+        self.iter_variants().any(|x| x == SchemaType::Null)
     }
 
     /// Optionally returns a reference to the schema matched by this value, as well as its position
@@ -826,9 +1007,7 @@ impl<'s> fmt::Debug for Name<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("name")
             .field("name", &self.name())
-            .field("name_sym", &self.1.name)
             .field("namespace", &self.namespace())
-            .field("namespace_sym", &self.1.namespace)
             .finish()
     }
 }
@@ -939,6 +1118,41 @@ impl<T: Copy> OnceSchemaCell<T> {
         }
     }
 }
+
+pub struct SchemaTopologicalIter<'a> {
+    schema: &'a Schema,
+    nodes: VecDeque<NameRef>,
+}
+
+impl<'a> SchemaTopologicalIter<'a> {
+    fn new(schema: &'a Schema, nodes: VecDeque<NameRef>) -> Self {
+        SchemaTopologicalIter { schema, nodes }
+    }
+}
+
+impl<'a> Iterator for SchemaTopologicalIter<'a> {
+    type Item = SchemaType<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.nodes
+            .pop_back()
+            .map(|x| self.schema.lookup(x).bind(self.schema, x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.nodes.len(), Some(self.nodes.len()))
+    }
+}
+
+impl<'a> DoubleEndedIterator for SchemaTopologicalIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.nodes
+            .pop_front()
+            .map(|x| self.schema.lookup(x).bind(self.schema, x))
+    }
+}
+
+impl<'a> ExactSizeIterator for SchemaTopologicalIter<'a> {}
 
 #[cfg(test)]
 mod tests {

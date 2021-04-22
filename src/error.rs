@@ -365,6 +365,9 @@ pub enum Error {
 
     #[error("SchemaResolutionError error")]
     SchemaResolutionError,
+
+    #[error("Cycle in schema")]
+    Cycle,
 }
 
 impl From<serde_json::error::Error> for Error {
