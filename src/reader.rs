@@ -6,6 +6,54 @@ use std::{
     str::FromStr,
 };
 
+/// Reads the schema from `reader`, returning the file's [`Schema`] and [`Codec`].
+/// # Error
+/// This function errors iff the header is not a valid avro file header.
+pub fn read_schema<R: Read>(reader: &mut R) -> AvroResult<(Schema, Codec)> {
+    let meta_schema = Schema::Map(Box::new(Schema::Bytes));
+
+    let mut buf = [0u8; 4];
+    reader.read_exact(&mut buf).map_err(Error::ReadHeader)?;
+
+    if buf != [b'O', b'b', b'j', 1u8] {
+        return Err(Error::HeaderMagic);
+    }
+
+    if let Value::Map(meta) = decode(&meta_schema, reader)? {
+        // TODO: surface original parse schema errors instead of coalescing them here
+        let json = meta
+            .get("avro.schema")
+            .and_then(|bytes| {
+                if let Value::Bytes(ref bytes) = *bytes {
+                    from_slice(bytes.as_ref()).ok()
+                } else {
+                    None
+                }
+            })
+            .ok_or(Error::GetAvroSchemaFromMap)?;
+        let schema = Schema::parse(&json)?;
+
+        let codec = if let Some(codec) = meta
+            .get("avro.codec")
+            .and_then(|codec| {
+                if let Value::Bytes(ref bytes) = *codec {
+                    std::str::from_utf8(bytes.as_ref()).ok()
+                } else {
+                    None
+                }
+            })
+            .and_then(|codec| Codec::from_str(codec).ok())
+        {
+            codec
+        } else {
+            Codec::Null
+        };
+        Ok((schema, codec))
+    } else {
+        Err(Error::GetHeaderMetadata)
+    }
+}
+
 // Internal Block reader.
 #[derive(Debug, Clone)]
 struct Block<R> {
@@ -39,47 +87,9 @@ impl<R: Read> Block<R> {
     /// Try to read the header and to set the writer `Schema`, the `Codec` and the marker based on
     /// its content.
     fn read_header(&mut self) -> AvroResult<()> {
-        let meta_schema = Schema::Map(Box::new(Schema::Bytes));
-
-        let mut buf = [0u8; 4];
-        self.reader
-            .read_exact(&mut buf)
-            .map_err(Error::ReadHeader)?;
-
-        if buf != [b'O', b'b', b'j', 1u8] {
-            return Err(Error::HeaderMagic);
-        }
-
-        if let Value::Map(meta) = decode(&meta_schema, &mut self.reader)? {
-            // TODO: surface original parse schema errors instead of coalescing them here
-            let json = meta
-                .get("avro.schema")
-                .and_then(|bytes| {
-                    if let Value::Bytes(ref bytes) = *bytes {
-                        from_slice(bytes.as_ref()).ok()
-                    } else {
-                        None
-                    }
-                })
-                .ok_or(Error::GetAvroSchemaFromMap)?;
-            self.writer_schema = Schema::parse(&json)?;
-
-            if let Some(codec) = meta
-                .get("avro.codec")
-                .and_then(|codec| {
-                    if let Value::Bytes(ref bytes) = *codec {
-                        std::str::from_utf8(bytes.as_ref()).ok()
-                    } else {
-                        None
-                    }
-                })
-                .and_then(|codec| Codec::from_str(codec).ok())
-            {
-                self.codec = codec;
-            }
-        } else {
-            return Err(Error::GetHeaderMetadata);
-        }
+        let (schema, codec) = read_schema(&mut self.reader)?;
+        self.writer_schema = schema;
+        self.codec = codec;
 
         self.reader
             .read_exact(&mut self.marker)
