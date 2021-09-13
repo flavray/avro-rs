@@ -358,7 +358,7 @@ impl<'a> ser::SerializeTupleVariant for SeqVariantSerializer<'a> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(ser::SerializeSeq::end(self)?)
+        ser::SerializeSeq::end(self)
     }
 }
 
@@ -775,7 +775,7 @@ mod tests {
             a: SingleValueInternalEnum::Double(64.0),
         };
 
-        assert_eq!(to_value(test).is_err(), true);
+        assert!(to_value(test).is_err());
 
         let test = TestSingleValueAdjacentEnum {
             a: SingleValueAdjacentEnum::Double(64.0),
