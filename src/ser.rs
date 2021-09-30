@@ -358,7 +358,7 @@ impl<'a> ser::SerializeTupleVariant for SeqVariantSerializer<'a> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(ser::SerializeSeq::end(self)?)
+        ser::SerializeSeq::end(self)
     }
 }
 

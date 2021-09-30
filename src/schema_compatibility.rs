@@ -79,7 +79,7 @@ impl Checker {
                         symbols: r_symbols, ..
                     } = readers_schema
                     {
-                        return w_symbols.iter().find(|e| !r_symbols.contains(e)).is_none();
+                        return !w_symbols.iter().any(|e| !r_symbols.contains(e));
                     }
                 }
                 false
