@@ -237,13 +237,22 @@ impl<'a, 'de> de::Deserializer<'de> for &'a Deserializer<'de> {
                 Value::Null => visitor.visit_unit(),
                 Value::Boolean(b) => visitor.visit_bool(b),
                 Value::Int(i) => visitor.visit_i32(i),
-                Value::Long(i) => visitor.visit_i64(i),
+                Value::Long(i)
+                | Value::TimeMicros(i)
+                | Value::TimestampMillis(i)
+                | Value::TimestampMicros(i) => visitor.visit_i64(i),
                 Value::Float(f) => visitor.visit_f32(f),
                 Value::Double(d) => visitor.visit_f64(d),
+                Value::Record(ref fields) => visitor.visit_map(StructDeserializer::new(fields)),
+                Value::Array(ref fields) => visitor.visit_seq(SeqDeserializer::new(fields)),
+                Value::String(ref s) => visitor.visit_str(s),
+                Value::Map(ref items) => visitor.visit_map(MapDeserializer::new(items)),
                 _ => Err(de::Error::custom("Unsupported union")),
             },
             Value::Record(ref fields) => visitor.visit_map(StructDeserializer::new(fields)),
             Value::Array(ref fields) => visitor.visit_seq(SeqDeserializer::new(fields)),
+            Value::String(ref s) => visitor.visit_str(s),
+            Value::Map(ref items) => visitor.visit_map(MapDeserializer::new(items)),
             value => Err(de::Error::custom(format!(
                 "incorrect value of type: {:?}",
                 crate::schema::SchemaKind::from(value)
