@@ -5,6 +5,8 @@
 [![Latest Documentation](https://docs.rs/avro-rs/badge.svg)](https://docs.rs/avro-rs)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/flavray/avro-rs/blob/main/LICENSE)
 
+# ⚠️ avro-rs is no longer maintained here. Please refer to the [apache/avro/rust](https://github.com/apache/avro/tree/master/lang/rust) repository instead. Make sure you read the Apache Avro guidelines [here](https://cwiki.apache.org/confluence/display/AVRO/How+To+Contribute). ⚠️
+
 A library for working with [Apache Avro](https://avro.apache.org/) in Rust.
 
 Please check our [documentation](https://docs.rs/avro-rs) for examples, tutorials and API reference.
