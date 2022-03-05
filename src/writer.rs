@@ -32,6 +32,8 @@ pub struct Writer<'a, W> {
     marker: Vec<u8>,
     #[builder(default = false, setter(skip))]
     has_header: bool,
+    #[builder(default = false, setter(into))]
+    dedup_defs: bool,
 }
 
 impl<'a, W: Write> Writer<'a, W> {
@@ -271,7 +273,13 @@ impl<'a, W: Write> Writer<'a, W> {
 
     /// Create an Avro header based on schema, codec and sync marker.
     fn header(&self) -> Result<Vec<u8>, Error> {
-        let schema_bytes = serde_json::to_string(self.schema)
+        let schema_string = if self.dedup_defs {
+            serde_json::to_string(&self.schema.dedup_defs())
+        } else {
+            serde_json::to_string(self.schema)
+        };
+
+        let schema_bytes = schema_string
             .map_err(Error::ConvertJsonToString)?
             .into_bytes();
 

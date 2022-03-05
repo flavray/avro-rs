@@ -469,6 +469,54 @@ impl Schema {
         let mut parser = Parser::default();
         parser.parse(value)
     }
+
+    pub fn dedup_defs(&self) -> Value {
+        let mut seen_fullnames = HashSet::new();
+        let mut json = serde_json::to_value(self)
+            .unwrap_or_else(|e| panic!("cannot serialize Schema: {0}", e));
+
+        Self::dedup_defs_in_value(&mut json, &mut seen_fullnames);
+
+        json
+    }
+
+    fn dedup_defs_in_value(value: &mut Value, seen_fullnames: &mut HashSet<String>) {
+        if value.is_object() {
+            if value.get("type").and_then(|type_value| type_value.as_str()) == Some("record") {
+                let name = value
+                    .get("name")
+                    .and_then(|name_value| name_value.as_str())
+                    .unwrap_or_else(|| panic!("Missing name in schema"));
+                let namespace = value
+                    .get("namespace")
+                    .and_then(|namespace_value| namespace_value.as_str());
+                let mut fullname = String::new();
+
+                if let Some(namespace) = namespace {
+                    fullname.push_str(namespace);
+                    fullname.push('.');
+                }
+
+                fullname.push_str(name);
+
+                if seen_fullnames.contains(&fullname) {
+                    *value = Value::String(fullname);
+                } else {
+                    seen_fullnames.insert(fullname);
+                }
+            }
+        }
+
+        if let Some(map) = value.as_object_mut() {
+            for value in map.values_mut() {
+                Self::dedup_defs_in_value(value, seen_fullnames);
+            }
+        } else if let Some(values) = value.as_array_mut() {
+            for value in values {
+                Self::dedup_defs_in_value(value, seen_fullnames);
+            }
+        }
+    }
 }
 
 impl Parser {
